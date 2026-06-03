@@ -260,6 +260,136 @@ input {
   border-bottom: 1px solid var(--border-soft);
 }
 
+.activity-section {
+  padding: 44px 0 18px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.activity-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 120px;
+  gap: 24px;
+  align-items: start;
+}
+
+.activity-heading {
+  display: flex;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.activity-heading h2 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.activity-card {
+  border: 1px solid #374151;
+  border-radius: 7px;
+  padding: 20px 18px 18px;
+  overflow-x: auto;
+}
+
+.activity-months {
+  display: grid;
+  grid-template-columns: repeat(53, 12px);
+  gap: 4px;
+  margin-left: 38px;
+  min-width: 844px;
+  color: var(--text);
+}
+
+.activity-month {
+  font-size: 14px;
+  line-height: 1.1;
+}
+
+.activity-grid-wrap {
+  display: flex;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.activity-days {
+  display: grid;
+  grid-template-rows: repeat(7, 12px);
+  gap: 4px;
+  min-width: 28px;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 12px;
+  text-align: right;
+}
+
+.activity-grid {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, 12px);
+  gap: 4px;
+  min-width: 844px;
+}
+
+.activity-cell {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  display: inline-block;
+  background: #161b22;
+}
+
+.activity-cell--1 {
+  background: #0e4429;
+}
+
+.activity-cell--2 {
+  background: #006d32;
+}
+
+.activity-cell--3 {
+  background: #26a641;
+}
+
+.activity-cell--4 {
+  background: #39d353;
+}
+
+.activity-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 882px;
+  margin: 16px 0 0 38px;
+  color: var(--faint);
+}
+
+.activity-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.activity-years {
+  display: grid;
+  gap: 10px;
+}
+
+.activity-year {
+  height: 44px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #bfdbfe;
+  text-align: left;
+  padding: 0 20px;
+  cursor: pointer;
+}
+
+.activity-year--active {
+  background: #1f6feb;
+  color: #fff;
+}
+
 .section--tall {
   padding: 72px 0;
 }
@@ -703,8 +833,17 @@ code {
   .grid--3,
   .grid--2,
   .footer__grid,
+  .activity-layout,
   .article-layout {
     grid-template-columns: 1fr;
+  }
+
+  .activity-years {
+    display: flex;
+  }
+
+  .activity-year {
+    min-width: 92px;
   }
 
   .article-layout {
