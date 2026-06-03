@@ -73,3 +73,11 @@ export function getCategoryDefinition(name) {
     icon: BookOpen
   };
 }
+
+export function getCategoryBySlug(slug) {
+  return categoryDefinitions.find((category) => category.slug === slug);
+}
+
+export function getCategorySlugs() {
+  return categoryDefinitions.map((category) => category.slug);
+}

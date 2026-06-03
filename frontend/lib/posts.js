@@ -68,6 +68,10 @@ export function getPostSlugs() {
   return getAllPosts().map((post) => post.slug);
 }
 
+export function getPostsByCategorySlug(slug) {
+  return getAllPosts().filter((post) => post.category.slug === slug);
+}
+
 export function getCategoriesWithCounts() {
   const posts = getAllPosts();
 
