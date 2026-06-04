@@ -710,6 +710,14 @@ input {
   margin: 0 auto;
 }
 
+.about-content {
+  max-width: 760px;
+}
+
+.about-focus {
+  max-width: 860px;
+}
+
 .prose {
   color: #f0ece4;
   font-family: Georgia, "Times New Roman", serif;

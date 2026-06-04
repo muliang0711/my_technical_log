@@ -1,4 +1,3 @@
-import { timeline } from "../../data/content";
 import { focusAreas } from "../../lib/categories";
 import CategoryGrid from "../category/CategoryGrid";
 import Hero from "../ui/Hero";
@@ -14,7 +13,7 @@ export default function AboutPage() {
         </p>
       </Hero>
       <Section>
-        <div className="content-narrow prose">
+        <div className="about-content prose">
           <h2>Purpose</h2>
           <p>
             This blog serves as a living repository of everything I learn
@@ -35,25 +34,12 @@ export default function AboutPage() {
         </div>
       </Section>
       <Section title="Areas of Focus">
-        <div className="content-narrow">
+        <div className="about-content about-focus">
           <CategoryGrid categories={focusAreas} focus />
         </div>
       </Section>
-      <Section title="Learning Journey Timeline">
-        <div className="content-narrow timeline">
-          {timeline.map(([year, title, copy]) => (
-            <div className="timeline-item" key={title}>
-              <span className="timeline-year">{year}</span>
-              <div>
-                <h3>{title}</h3>
-                <p>{copy}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </Section>
       <Section>
-        <div className="content-narrow prose">
+        <div className="about-content prose">
           <h2>Approach to Learning</h2>
           <p>
             My learning philosophy centers on active engagement rather than
