@@ -1,12 +1,97 @@
 # Knowledge Log MDX Writing Rules
 
-Use this file as the prompt context when asking an AI to generate a new blog post for this project.
+Use this file as prompt context when asking an AI to create a new log for this project.
 
-## Output Format
+The goal is not to write a generic blog post. The goal is to produce a practical, readable knowledge log that can be saved directly as an `.mdx` file in `frontend/content/`.
 
-Generate exactly one `.mdx` blog post.
+## AI Task
 
-The file must start with YAML frontmatter:
+When asked to create a log, generate exactly one complete MDX article.
+
+The answer should include:
+
+- A suggested filename in lowercase kebab-case.
+- The full `.mdx` content.
+- No extra commentary inside the MDX file.
+
+The MDX must be ready to paste into `frontend/content/<filename>.mdx`.
+
+## Bilingual Requirement
+
+Every new log must include two body versions:
+
+- English: `<Lang lang="en">`
+- Chinese: `<Lang lang="zh">`
+
+The frontmatter is written once at the top. Do not duplicate frontmatter for each language.
+
+Use this exact body structure after the closing frontmatter `---`:
+
+````mdx
+<Lang lang="en">
+
+English opening paragraph.
+
+## Short Answer
+
+English section content.
+
+## The Main Principle
+
+English takeaway.
+
+</Lang>
+
+<Lang lang="zh">
+
+中文开头段落。
+
+## 简短答案
+
+中文章节内容。
+
+## 核心原则
+
+中文总结。
+
+</Lang>
+````
+
+Bilingual rules:
+
+- Do not put `<Lang>` inside frontmatter.
+- Do not write English and Chinese paragraphs mixed together in the same section.
+- The English version must be complete.
+- The Chinese version must be complete.
+- The Chinese version should be a natural Chinese explanation, not a word-by-word translation.
+- Both versions must have a similar section structure.
+- Both versions must include at least four `##` headings.
+- The website automatically shows a language switcher when both versions exist.
+- The Contents sidebar is generated from the selected language's `##` headings.
+- Do not add a manual `## Contents` or `## Table of Contents` section.
+
+## File Naming
+
+Use lowercase kebab-case filenames:
+
+```text
+server-performance-analysis.mdx
+long-polling-vs-short-polling.mdx
+sql-vs-nosql.mdx
+```
+
+Rules:
+
+- Use `.mdx`, not `.md`.
+- The filename becomes the URL slug.
+- Keep filenames short but clear.
+- Do not include dates in filenames unless the date is part of the topic.
+
+## Required Frontmatter
+
+Every log must start at line 1 with YAML frontmatter.
+
+Use this exact shape:
 
 ```mdx
 ---
@@ -14,77 +99,98 @@ title: "Clear Article Title"
 category: "Software Development"
 createdAt: "2026-06-03"
 summary: "One concise sentence explaining what the article teaches."
-readTime: "10 min read"
+readTime: "8 min read"
 tags:
   - "Tag One"
   - "Tag Two"
   - "Tag Three"
 featured: false
-series:
-  title: "Series Name"
-  slug: "series-name"
-  order: 1
 ---
+```
 
-Opening paragraph goes here.
+For technical backend logs, copy this exact tag block format:
+
+```yaml
+tags:
+  - "Backend"
+  - "HTTP"
+  - "Node.js"
+  - "System Design"
+featured: false
+---
+```
+
+Critical YAML rule:
+
+Inside frontmatter, lists must use YAML hyphens, not Markdown asterisks.
+
+Correct:
+
+```yaml
+tags:
+  - "Backend"
+  - "HTTP"
+  - "Node.js"
+  - "System Design"
+featured: false
+```
+
+Wrong:
+
+```yaml
+tags:
+* "Backend"
+* "HTTP"
+* "Node.js"
+* "System Design"
+  featured: false
 ```
 
 Rules:
 
 - The first line must be `---`.
 - There must be exactly one opening `---` and one closing `---` for frontmatter.
-- Do not add blank frontmatter blocks.
+- Do not add a blank frontmatter block.
+- Do not add a blank line after `tags:`.
 - Do not put `featured` inside `tags`.
-- Use `.mdx` as the file extension.
-- Use lowercase kebab-case filenames, for example `server-performance-analysis.mdx`.
-- The filename becomes the URL slug.
-- Do not include an H1 (`# Title`) in the body. The app already renders the title from frontmatter.
-- Start the body with a strong introductory paragraph.
-- Use `##` headings for main sections. These headings become the Table of Contents.
-- Use `###` headings only for subsections.
-- Use fenced code blocks with language labels where useful.
-- Keep all text as normal Markdown/MDX. Do not wrap the article in a React component.
-- Use custom MDX components only where they improve scanning: Markdown tables for comparisons, `<CardGrid>` and `<InfoCard>` for compact strategy summaries.
+- `tags` must be a YAML list.
+- Every tag item must start with two spaces, then `-`, for example `  - "Backend"`.
+- Follow this exact tag indentation: `tags:` on one line, then `  - "Tag"` on the next lines.
+- Never use Markdown bullets such as `* "Backend"` inside frontmatter.
+- `featured: false` must be aligned with `tags:`, not indented under `tags`.
+- `featured` is usually `false`.
+- `createdAt` must use `YYYY-MM-DD`.
+- `readTime` must look like `"6 min read"`.
+- Do not include an H1 in the body. The app renders the title from frontmatter.
 
-## Allowed Categories
+## Optional Series Frontmatter
 
-Use one of these exact category names:
-
-- `Software Development`
-- `Fitness & Health`
-- `Finance`
-- `Travel`
-- `Life Reflections`
-- `Learning`
-
-For technical backend, infrastructure, database, Linux, performance, or programming posts, use:
+Use `series` only when the log belongs to an ordered learning sequence.
 
 ```yaml
-category: "Software Development"
+series:
+  title: "Server Performance"
+  slug: "server-performance"
+  order: 1
 ```
 
-## Frontmatter Requirements
+Series rules:
 
-Required fields:
+- Use the same `series.title` and `series.slug` for every log in the same sequence.
+- Use `series.order` to control previous and next navigation.
+- Start `series.order` at `1`.
+- Increase the order by one for each next log.
+- Omit the entire `series` block for standalone logs.
 
-- `title`: Clear, specific, title case.
-- `category`: One exact category from the allowed list.
-- `createdAt`: Date in `YYYY-MM-DD` format.
-- `summary`: One sentence, useful for card previews.
-- `readTime`: Estimate such as `"8 min read"`.
-- `tags`: Three to five short tags.
-- `featured`: Usually `false`.
-- `series`: Optional. Use only when the article is part of an ordered learning sequence.
+Full frontmatter example with series:
 
-Good example:
-
-```yaml
+```mdx
 ---
 title: "How to Diagnose Server Performance: CPU vs I/O Overhead"
 category: "Software Development"
 createdAt: "2026-06-03"
-summary: "A practical Linux workflow for deciding whether a slow server is limited by CPU processing, disk I/O, or something else."
-readTime: "10 min read"
+summary: "A practical Linux workflow for identifying whether server slowness comes from CPU execution or storage I/O waits."
+readTime: "6 min read"
 tags:
   - "Linux"
   - "Performance"
@@ -97,68 +203,63 @@ series:
 ---
 ```
 
-Optional series example:
+## Allowed Categories
 
-```yaml
-series:
-  title: "Server Performance"
-  slug: "server-performance"
-  order: 2
-```
+Use one exact category name:
 
-Series rules:
+- `Software Development`
+- `Fitness & Health`
+- `Finance`
+- `Travel`
+- `Life Reflections`
+- `Learning`
 
-- Use the same `series.title` and `series.slug` for every article in the same sequence.
-- Use `series.order` to control previous and next navigation.
-- Start `series.order` at `1`.
-- Do not skip numbers unless a future post is intentionally reserved.
-- Omit the whole `series` block when the article is standalone.
+Category guidance:
 
-Bad examples:
+- Backend, frontend, infrastructure, database, Linux, performance, programming, architecture: `Software Development`
+- Exercise, nutrition, sleep, habits, wellness: `Fitness & Health`
+- Investing, budgeting, income, financial planning: `Finance`
+- Destinations, culture, travel planning, trip reflections: `Travel`
+- Personal growth, philosophy, productivity, reflection: `Life Reflections`
+- Study systems, books, courses, note-taking, learning methods: `Learning`
 
-```yaml
----
+## Writing Voice
 
----
-title: "Bad Extra Frontmatter Block"
-```
-
-```yaml
-tags:
-  - "Linux"
-  featured: false
-```
-
-```mdx
-title: "Missing Opening Delimiter"
----
-```
-
-## Writing Style
-
-Write in a practical engineering knowledge-log style.
+Write like a practical engineering notebook.
 
 Tone:
 
-- Direct, calm, and technical.
+- Direct, calm, and specific.
 - Explain the operating principle before giving fixes.
 - Prefer concrete diagnostics over vague advice.
-- Avoid hype, marketing language, and motivational filler.
-- Avoid jokes and casual fluff.
+- Avoid hype, motivational filler, jokes, and marketing language.
+- Avoid overpromising. Say what a command or signal suggests, not what it proves.
 
-Structure:
+Reader experience:
 
-1. Start with a concise definition of the concept.
-2. Explain how the issue appears in production.
-3. Show how to confirm the diagnosis with commands, metrics, or examples.
-4. Break solutions into numbered or named strategies.
-5. Include practical command examples where relevant.
-6. Include interpretation notes after command output.
-7. End with a clear main principle or workflow.
+- Make the article easy to scan.
+- Keep paragraphs short.
+- Use sections, tables, cards, and examples to reduce dense text.
+- Teach the reader how to think, not only what command to run.
 
-Preferred section patterns:
+## Article Structure
+
+Most technical logs should follow this order:
+
+1. Define the concept or problem.
+2. Explain how it appears in real systems.
+3. Show how to confirm or inspect it.
+4. Explain the important signals.
+5. Present practical strategies or fixes.
+6. End with the main principle or workflow.
+
+Recommended section patterns:
 
 ```mdx
+## What the Problem Means
+
+## How It Appears in Production
+
 ## Confirm the Bottleneck
 
 ## Step 1: Identify the Expensive Process
@@ -174,59 +275,89 @@ Preferred section patterns:
 ## The Main Principle
 ```
 
-## Technical Content Rules
+Rules:
 
-When writing technical posts:
+- Use `##` for main sections.
+- Use `###` only for subsections.
+- The app builds the table of contents from `##` headings.
+- Do not add a manual `## Contents` or `## Table of Contents` section inside the MDX.
+- The frontend automatically renders the right-side Contents panel from the article's `##` headings.
+- Every article must include at least four `##` headings.
+- Practical technical articles should usually include five to eight `##` headings.
+- Do not write more than three paragraphs in a row without a `##` or `###` heading.
+- Do not hide important ideas inside one long paragraph. Turn them into named sections.
+- Do not start the body with `# Title`.
+- Start the body with a strong opening paragraph.
+- End with a practical takeaway, not a vague conclusion.
 
-- Use real command names and realistic example output.
-- Put shell commands in fenced `bash` blocks.
-- Put SQL in fenced `sql` blocks.
-- Put JavaScript in fenced `javascript` blocks.
-- Put logs or terminal output in fenced `text` blocks.
-- Before every command block, write a context line that tells the reader where and why to run it.
-- After every example output, explain what signals matter.
-- Prefer bullet lists for symptoms, causes, and fixes.
-- Use tables for comparisons.
-- Use cards for strategy lists when five or more strategies would otherwise create too much vertical text.
-- Do not claim a tool or command proves more than it actually proves.
-- Make diagnosis come before solution.
+Bad structure:
 
-Example:
+```mdx
+Opening paragraph...
 
-````mdx
-## Check CPU Utilization
+Long paragraph...
 
-Run this on the affected Linux server to sample CPU usage across all cores:
+Another long paragraph...
 
-```bash
-mpstat -P ALL 1 5
+More explanation...
 ```
 
-Example output:
+Good structure:
 
-```text
-CPU   %usr  %sys  %iowait  %idle
-all   84.1  10.4      0.3    4.5
+```mdx
+Opening paragraph...
+
+## What Polling Means
+
+Explain the concept.
+
+## Why Short Polling Creates Waste
+
+Explain the problem.
+
+## How Long Polling Changes the Flow
+
+Explain the alternative.
+
+## When to Use Each Approach
+
+Give a decision rule.
 ```
 
-This suggests CPU pressure because `%usr` is high, `%idle` is low, and `%iowait` is not the dominant value.
-````
+## Technical Command Rules
 
-## Command Prompt Style
+Every command block must have a context sentence immediately before it.
 
-Every command must be introduced with a context sentence. Readers should understand:
+The context sentence must explain:
 
-- Where to run it.
-- Why they are running it.
-- What the command is expected to reveal.
+- Where to run the command.
+- Why to run it.
+- What it should reveal.
 
-Use this pattern:
+Good pattern:
 
 ````mdx
 Run this on the affected Linux server to check whether processes are waiting on disk I/O:
 
 ```bash
 iostat -xz 1 5
+```
+````
+
+Bad patterns:
+
+- `Run:`
+- `Use this command:`
+- `Check this:`
+- A command block with no explanation before it.
+
+For project commands:
+
+````mdx
+Run this from the `frontend` directory to build the static site and catch MDX compile errors:
+
+```bash
+npm run build
 ```
 ````
 
@@ -246,31 +377,45 @@ LIMIT 5;
 ```
 ````
 
-For project commands:
+After example output, explain the signal:
 
 ````mdx
-Run this from the `frontend` directory to build the static site:
+Example output:
 
-```bash
-npm run build
+```text
+CPU   %usr  %sys  %iowait  %idle
+all   84.1  10.4      0.3    4.5
 ```
+
+This suggests CPU pressure because `%usr` is high, `%idle` is low, and `%iowait` is not the dominant value.
 ````
 
-Avoid vague command introductions:
+## Code Fence Rules
 
-- Bad: `Run:`
-- Bad: `Use this command:`
-- Bad: `Check this:`
-- Good: `Run this on the database server to identify the process producing the most disk reads:`
-- Good: `Run this from the project root to list changed files before committing:`
+Use language labels:
+
+- Shell commands: `bash`
+- SQL: `sql`
+- JavaScript: `javascript`
+- TypeScript: `typescript`
+- JSON: `json`
+- Logs or terminal output: `text`
+- Config snippets: use the closest matching language, or `text`
+
+Rules:
+
+- Close every code fence.
+- Do not put very large code blocks in the article.
+- Prefer short examples that teach the point.
+- Do not put command output in a `bash` block; use `text`.
 
 ## Table Style
 
-Use normal Markdown tables. The frontend automatically renders them with the project table style.
+Use normal Markdown tables. The frontend renders them with a styled table component automatically.
 
 Use tables for:
 
-- CPU vs I/O comparisons.
+- Comparisons.
 - Symptom-to-cause mappings.
 - Command output interpretation.
 - Trade-off summaries.
@@ -283,26 +428,29 @@ Example:
 | --- | --- | --- |
 | High `%usr`, low `%idle` | CPU-bound work | Profile the application process |
 | High `%iowait`, high disk latency | I/O-bound work | Inspect database queries and storage |
-| Low CPU, slow requests | External wait or locks | Check downstream calls and lock waits |
+| Low CPU, slow requests | External waits or locks | Check downstream calls and lock waits |
 ```
 
-Rules:
+Table rules:
 
-- Keep table cells short.
+- Keep cells short.
 - Do not put long paragraphs inside table cells.
-- Use a paragraph after the table to explain the important interpretation.
+- Explain the important interpretation after the table.
+- Use tables to compress repeated patterns, not to decorate the article.
 
 ## Card Style
 
-Use cards when a section has several related strategies, principles, or checks and the reader should scan them quickly.
+Use cards when a section has several strategies, checks, principles, or trade-offs that should be scanned quickly.
 
-Available components:
+Available MDX components:
 
+- `<Lang lang="en">...</Lang>`
+- `<Lang lang="zh">...</Lang>`
 - `<CardGrid columns={2}>`
 - `<CardGrid columns={3}>`
 - `<InfoCard title="...">...</InfoCard>`
 
-Preferred pattern for strategy summaries:
+Preferred strategy pattern:
 
 ````mdx
 <CardGrid columns={2}>
@@ -324,14 +472,113 @@ Preferred pattern for strategy summaries:
 </CardGrid>
 ````
 
-Rules:
+Card rules:
 
-- Use two columns for most technical articles.
+- Use two columns for most articles.
 - Use three columns only when card text is very short.
-- Each card should have a clear title.
-- Keep each card body to one to three sentences.
+- Give every card a clear title.
+- Keep card bodies to one to three sentences.
 - Do not put large code blocks inside cards.
-- Use cards to summarize; put detailed explanation in normal sections before or after the card grid.
+- Use cards for summaries; put deep explanation in normal sections.
+
+## Readability Rules
+
+Use these rules to make the log readable:
+
+- Prefer one to three sentences per paragraph.
+- Use bullet lists for symptoms, causes, checks, and fixes.
+- Use tables when multiple rows share the same shape.
+- Use cards when five or more strategies would create too much vertical text.
+- Avoid giant sections. Split them with `##` or `###`.
+- Avoid repeating the same sentence pattern too many times.
+- Do not overuse bold text.
+- Keep the opening paragraph concise and useful.
+
+## Common Article Templates
+
+### Diagnostic Technical Log
+
+Use this when the article teaches how to identify a system problem:
+
+```mdx
+Opening definition and why the issue matters.
+
+## How the Problem Appears
+
+Symptoms and common false assumptions.
+
+## Confirm the Diagnosis
+
+Commands, metrics, or checks.
+
+## Interpret the Signals
+
+Table or bullets explaining what each signal means.
+
+## Fix the Highest-Impact Cause
+
+Strategies ordered from safest to most invasive.
+
+## The Main Principle
+
+One practical takeaway.
+```
+
+### Concept Comparison Log
+
+Use this when comparing two or more ideas:
+
+```mdx
+Opening paragraph explaining why the comparison matters.
+
+## Short Answer
+
+Direct practical summary.
+
+## Core Difference
+
+Table comparing the concepts.
+
+## When to Use Each
+
+Bullets or cards.
+
+## Common Mistakes
+
+Warnings and edge cases.
+
+## Decision Rule
+
+Simple selection framework.
+```
+
+### Strategy Log
+
+Use this when explaining multiple ways to improve something:
+
+```mdx
+Opening paragraph defining the goal.
+
+## What Good Looks Like
+
+Describe the target state.
+
+## Constraints
+
+Explain cost, risk, trade-offs, or prerequisites.
+
+## Strategies
+
+Use cards for quick scanning.
+
+## Implementation Order
+
+Recommended sequence.
+
+## The Main Principle
+
+Final takeaway.
+```
 
 ## Article Length
 
@@ -341,19 +588,83 @@ Recommended length:
 - Practical engineering guide: 1,500-2,500 words.
 - Deep diagnostic article: 2,500-4,000 words.
 
-Keep paragraphs short. Most paragraphs should be one to three sentences.
+If the user asks for a short log, prioritize clarity over completeness.
 
-## Final Checklist
+## Bad Frontmatter Examples
 
-Before returning the MDX file, verify:
+Do not produce these:
 
-- Frontmatter starts at line 1.
-- Frontmatter closes before the article body.
+```yaml
+---
+
+---
+title: "Bad Extra Frontmatter Block"
+```
+
+```yaml
+tags:
+  - "Linux"
+  featured: false
+```
+
+```yaml
+tags:
+* "Backend"
+* "HTTP"
+* "Node.js"
+* "System Design"
+  featured: false
+```
+
+Why this is wrong:
+
+- `*` is not valid YAML list syntax here. YAML treats it as an alias marker.
+- `featured: false` is incorrectly nested under `tags`.
+- There is no two-space indentation before each tag item.
+- The correct YAML list marker is `-`, not `*`.
+
+Correct version:
+
+```yaml
+tags:
+  - "Backend"
+  - "HTTP"
+  - "Node.js"
+  - "System Design"
+featured: false
+---
+```
+
+```mdx
+title: "Missing Opening Delimiter"
+---
+```
+
+## Final Validation Checklist
+
+Before returning the MDX, verify:
+
+- The first line is `---`.
+- Frontmatter has exactly one opening and one closing `---`.
 - `title`, `category`, `createdAt`, `summary`, `readTime`, `tags`, and `featured` exist.
-- `category` exactly matches an allowed category.
-- `tags` is a YAML list.
-- If `series` exists, `title`, `slug`, and `order` are present.
-- The body does not repeat the title as an H1.
-- All main sections use `##`.
-- Code fences are closed.
+- `category` exactly matches one allowed category.
+- `tags` is a YAML list with three to five tags.
+- There is no blank line between `tags:` and the first tag.
+- Every tag line starts with exactly two spaces and a hyphen: `  - "Tag"`.
+- `featured` is not inside `tags`.
+- `featured: false` is aligned with `tags:`.
+- If `series` exists, it has `title`, `slug`, and `order`.
+- The body does not include an H1.
+- The body has one `<Lang lang="en">` block and one `<Lang lang="zh">` block.
+- Each language block is complete and has at least four `##` headings.
+- Main sections use `##`.
+- Commands have context sentences before them.
+- Code fences have language labels and are closed.
+- Tables are short and readable.
+- Cards use only `CardGrid` and `InfoCard`.
 - The article ends with a practical takeaway.
+
+## Raw MDX Output Preservation Rule
+
+- When generating a complete .mdx article for the user to copy into frontend/content/, the MDX source must be returned inside a single outer fenced code block labelled mdx.
+- Do not place the complete MDX article inside a rendered document block, rich-text block, canvas-style block, or any format that may interpret or transform YAML, Markdown, JSX, indentation, or code fences.
