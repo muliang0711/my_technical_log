@@ -729,11 +729,13 @@ input {
 .prose h2 {
   margin: 42px 0 18px;
   font-size: 20px;
+  scroll-margin-top: 118px;
 }
 
 .prose h3 {
   margin: 28px 0 12px;
   font-size: 17px;
+  scroll-margin-top: 118px;
 }
 
 .mdx-table-wrap {
