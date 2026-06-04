@@ -87,6 +87,8 @@ input {
   align-items: center;
   gap: 12px;
   font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .logo {
@@ -106,6 +108,7 @@ input {
   gap: 28px;
   color: var(--faint);
   font-weight: 700;
+  line-height: 1;
 }
 
 .nav a.active,
@@ -405,6 +408,120 @@ input {
 
 .related-posts .grid {
   grid-template-columns: 1fr;
+}
+
+.series-navigation-section {
+  border-top: 1px solid var(--border-soft);
+}
+
+.series-navigation {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-card);
+  padding: 26px;
+}
+
+.series-navigation-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.series-navigation-header span {
+  color: var(--faint);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.series-navigation h2 {
+  margin: 6px 0 0;
+  font-size: 20px;
+}
+
+.series-navigation p {
+  margin: 14px 0 22px;
+  color: var(--muted);
+}
+
+.series-nav-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.series-nav-card {
+  min-height: 118px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #211d1a;
+  padding: 18px;
+  transition: border-color 160ms ease, transform 160ms ease, background 160ms ease;
+}
+
+.series-nav-card:hover {
+  border-color: #5b554d;
+  background: #2b2724;
+  transform: translateY(-1px);
+}
+
+.series-nav-card span,
+.series-nav-card small {
+  display: block;
+  color: var(--faint);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.series-nav-card strong {
+  display: block;
+  margin: 8px 0 14px;
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1.35;
+}
+
+.series-nav-card--empty {
+  border-style: dashed;
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.series-card {
+  min-height: 148px;
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr);
+  gap: 18px;
+  padding: 24px 28px;
+}
+
+.series-card__icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(139, 92, 246, 0.16);
+  color: #c4b5fd;
+}
+
+.series-card h3 {
+  margin: 0 0 6px;
+  font-size: 17px;
+}
+
+.series-card p {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.series-card span {
+  display: block;
+  color: var(--faint);
+  font-size: 14px;
+  font-weight: 700;
 }
 
 .empty-state {
@@ -761,13 +878,33 @@ input {
   background: linear-gradient(180deg, #171410 0%, #211d1a 100%);
 }
 
+.article-header-content {
+  max-width: var(--max);
+}
+
 .article-title {
   margin: 34px 0 22px;
+  max-width: 760px;
   font-size: 26px;
 }
 
 .article-category {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-top: 24px;
+}
+
+.series-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  border-radius: 3px;
+  background: rgba(139, 92, 246, 0.16);
+  color: #c4b5fd;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 4px 9px;
 }
 
 .article-tags {
@@ -776,16 +913,19 @@ input {
 
 .article-layout {
   display: grid;
-  grid-template-columns: minmax(0, 620px) 260px;
-  gap: 70px;
+  grid-template-columns: minmax(0, 760px) minmax(150px, 190px);
+  gap: 44px;
   align-items: start;
 }
 
 .toc {
   position: sticky;
   top: 105px;
+  border-left: 1px solid var(--border-soft);
+  padding-left: 16px;
   color: var(--muted);
   font-weight: 700;
+  font-size: 13px;
 }
 
 .toc h3 {
@@ -796,8 +936,13 @@ input {
 
 .toc a {
   display: block;
-  margin: 0 0 9px;
+  margin: 0 0 8px;
   color: var(--muted);
+  line-height: 1.35;
+}
+
+.toc a:hover {
+  color: var(--text);
 }
 
 .lead-copy {
@@ -874,6 +1019,7 @@ code {
   .mdx-card-grid--3,
   .footer__grid,
   .activity-layout,
+  .series-nav-grid,
   .article-layout {
     grid-template-columns: 1fr;
   }
@@ -890,11 +1036,25 @@ code {
     gap: 38px;
   }
 
+  .series-navigation-header {
+    display: block;
+  }
+
+  .series-navigation-header .view-link {
+    display: inline-block;
+    margin-top: 12px;
+  }
+
   .toc {
     position: static;
   }
 
   .category-card {
+    grid-template-columns: 42px 1fr;
+    padding: 22px;
+  }
+
+  .series-card {
     grid-template-columns: 42px 1fr;
     padding: 22px;
   }
@@ -923,6 +1083,7 @@ code {
 
   .post-card,
   .category-card,
+  .series-card,
   .focus-card {
     padding: 20px;
   }

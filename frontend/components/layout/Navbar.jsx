@@ -6,7 +6,7 @@ import { Search, Sun } from "lucide-react";
 
 function NavLink({ href, children }) {
   const pathname = usePathname();
-  const active = pathname === href;
+  const active = href === "/" ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
 
   return (
     <Link className={active ? "active" : undefined} href={href}>
@@ -27,6 +27,7 @@ export default function Navbar() {
           <nav className="nav" aria-label="Primary navigation">
             <NavLink href="/">Home</NavLink>
             <NavLink href="/categories">Categories</NavLink>
+            <NavLink href="/series">Series</NavLink>
             <NavLink href="/about">About</NavLink>
           </nav>
         </div>

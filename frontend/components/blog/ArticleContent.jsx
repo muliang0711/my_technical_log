@@ -6,7 +6,7 @@ export default function ArticleContent({ Content, headings }) {
           <Content />
         </article>
         <aside className="toc">
-          <h3>Table of Contents</h3>
+          <h3>Contents</h3>
           {headings.map((heading) => (
             <a href={`#${heading.id}`} key={heading.id}>{heading.text}</a>
           ))}

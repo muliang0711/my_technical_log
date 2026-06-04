@@ -1,5 +1,6 @@
 import Link from "next/link";
 import CategoryBadge from "../category/CategoryBadge";
+import SeriesBadge from "../series/SeriesBadge";
 import PostMeta from "./PostMeta";
 
 export default function PostCard({ post, wide = false }) {
@@ -7,6 +8,7 @@ export default function PostCard({ post, wide = false }) {
     <Link className={`card post-card ${wide ? "post-card--wide" : ""}`} href={`/posts/${post.slug}`}>
       <div className="meta-line">
         <CategoryBadge category={post.category} />
+        <SeriesBadge series={post.series} />
         <PostMeta post={post} />
       </div>
       <h3>{post.title}</h3>
