@@ -49,24 +49,60 @@ function normalizeSeries(series) {
   };
 }
 
+function extractHeadings(content) {
+  const slugger = new GithubSlugger();
+  const headings = {
+    en: [],
+    zh: []
+  };
+  let activeLanguage = "en";
+  let hasLanguageBlocks = false;
+
+  content.split("\n").forEach((line) => {
+    const trimmed = line.trim();
+    const languageMatch = trimmed.match(/^<Lang\s+lang=["'](en|zh)["']\s*>$/);
+
+    if (languageMatch) {
+      activeLanguage = languageMatch[1];
+      hasLanguageBlocks = true;
+      return;
+    }
+
+    if (trimmed === "</Lang>") {
+      activeLanguage = "en";
+      return;
+    }
+
+    const headingMatch = line.trimEnd().match(/^##\s+(.+)$/);
+
+    if (!headingMatch) {
+      return;
+    }
+
+    const text = headingMatch[1].replace(/[*_`]/g, "").trim();
+    const heading = {
+      id: slugger.slug(text),
+      text
+    };
+
+    headings[activeLanguage].push(heading);
+  });
+
+  return {
+    en: headings.en,
+    zh: headings.zh,
+    defaultLanguage: hasLanguageBlocks ? "en" : "en",
+    hasLanguageBlocks
+  };
+}
+
 function normalizePost(filename) {
   const slug = filename.replace(/\.mdx$/, "");
   const fullPath = path.join(contentDirectory, filename);
   const source = fs.readFileSync(fullPath, "utf8");
   const { data, content } = matter(source);
   const category = getCategoryDefinition(data.category);
-  const slugger = new GithubSlugger();
-  const headings = content
-    .split("\n")
-    .map((line) => line.match(/^##\s+(.+)$/))
-    .filter(Boolean)
-    .map((match) => {
-      const text = match[1].replace(/[*_`]/g, "").trim();
-      return {
-        id: slugger.slug(text),
-        text
-      };
-    });
+  const headings = extractHeadings(content);
 
   return {
     slug,
