@@ -1,7 +1,7 @@
 const dayLabels = ["", "Mon", "", "Wed", "", "Fri", ""];
 
 export default function ContributionGraph({ activity }) {
-  const contributionLabel = activity.total === 1 ? "contribution" : "contributions";
+  const contributionLabel = activity.total === 1 ? "log" : "logs";
 
   return (
     <section className="activity-section">
@@ -34,7 +34,7 @@ export default function ContributionGraph({ activity }) {
                     <span
                       className={`activity-cell activity-cell--${cell.level}`}
                       key={cell.key}
-                      title={`${cell.date}: ${cell.count} ${cell.count === 1 ? "contribution" : "contributions"}`}
+                      title={`${cell.date}: ${cell.count} ${cell.count === 1 ? "log" : "logs"}`}
                     />
                   ))}
                 </div>

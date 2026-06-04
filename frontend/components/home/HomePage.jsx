@@ -9,6 +9,7 @@ import Section from "../ui/Section";
 
 export default function HomePage() {
   const posts = getAllPosts();
+  const recentPosts = posts.slice(0, 4);
   const activity = getContributionActivity();
 
   return (
@@ -33,9 +34,9 @@ export default function HomePage() {
       <ContributionGraph activity={activity} />
       <Section
         title="Recent Posts"
-        action={<Link className="view-link" href="/">View all -&gt;</Link>}
+        action={<Link className="view-link" href="/logs">View all logs -&gt;</Link>}
       >
-        <PostList posts={posts} columns={2} />
+        <PostList posts={recentPosts} columns={2} />
       </Section>
     </main>
   );

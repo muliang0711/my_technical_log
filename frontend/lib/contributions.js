@@ -1,4 +1,3 @@
-import { execSync } from "node:child_process";
 import { getAllPosts } from "./posts";
 
 const dayMs = 24 * 60 * 60 * 1000;
@@ -20,26 +19,6 @@ function startOfUtcDay(date) {
 function startOfWeek(date) {
   const utc = startOfUtcDay(date);
   return addDays(utc, -utc.getUTCDay());
-}
-
-function getCommitDateCounts() {
-  try {
-    const output = execSync("git log --date=short --pretty=format:%ad", {
-      cwd: process.cwd(),
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"]
-    });
-
-    return output
-      .split(/\r?\n/)
-      .filter(Boolean)
-      .reduce((counts, date) => {
-        counts.set(date, (counts.get(date) ?? 0) + 1);
-        return counts;
-      }, new Map());
-  } catch {
-    return new Map();
-  }
 }
 
 function getPostDateCounts() {
@@ -77,8 +56,7 @@ function getMonthLabels(startDate) {
 }
 
 export function getContributionActivity() {
-  const gitCounts = getCommitDateCounts();
-  const counts = gitCounts.size > 0 ? gitCounts : getPostDateCounts();
+  const counts = getPostDateCounts();
   const yearStart = new Date(Date.UTC(activeYear, 0, 1));
   const startDate = startOfWeek(yearStart);
   const maxCount = Math.max(0, ...counts.values());
