@@ -979,10 +979,22 @@ input {
   margin: 0 0 8px;
   color: var(--muted);
   line-height: 1.35;
+  transition: color 160ms ease, border-color 160ms ease, transform 160ms ease;
 }
 
-.toc a:hover {
+.toc a:hover,
+.toc__link--active {
   color: var(--text);
+}
+
+.toc__link {
+  border-left: 2px solid transparent;
+  padding-left: 10px;
+  transform: translateX(-12px);
+}
+
+.toc__link--active {
+  border-left-color: #f4f0e8;
 }
 
 .lead-copy {

@@ -2,8 +2,8 @@
 title: "Short Polling vs Long Polling: Choosing a Status Update Strategy"
 category: "Software Development"
 createdAt: "2026-06-04"
-summary: "Learn how short polling and long polling retrieve changing server state, their trade-offs, and when each strategy is appropriate."
-readTime: "8 min read"
+summary: "Understand how short polling and long polling retrieve changing server state, how their code differs, and when each strategy is appropriate."
+readTime: "9 min read"
 tags:
   - "Backend"
   - "HTTP"
@@ -12,124 +12,129 @@ tags:
 featured: false
 ---
 
-When a client needs updated server state, it needs a strategy for asking: has anything changed yet? A delivery tracker, payment-status page, background export job, or notification panel may all need repeated updates without requiring the user to refresh the page.
+<Lang lang="en">
 
-Short polling and long polling both use ordinary HTTP requests. The difference is not mainly the endpoint shape; it is how long the server waits before responding and when the client sends the next request.
+When a client needs changing server state, such as delivery location, payment confirmation, file-processing progress, or notification updates, it must repeatedly learn whether something new has happened. Short polling and long polling are two HTTP-based strategies for solving this problem.
+
+The main difference is not that one uses HTTP and the other does not. Both use normal HTTP requests. The difference is **when the client sends requests** and **when the server decides to respond**.
 
 ## Short Answer
 
-**Short polling** means the client sends requests repeatedly on a fixed interval, whether or not anything has changed.
+**Short polling** means the client asks the server for the current status at a fixed interval.
 
-**Long polling** means the client sends a request and the server holds that request open until new data is available or a timeout is reached. After receiving a response, the client immediately opens another request.
+**Long polling** means the client sends a request, and the server holds that request until the status changes or a timeout is reached. Once the response returns, the client immediately sends another waiting request if more updates are still needed.
 
-| Strategy | Request Behaviour | Best Fit |
-| --- | --- | --- |
-| Short polling | Client asks every few seconds | Simple systems where delay and extra requests are acceptable |
-| Long polling | Server waits before responding | Status changes that are irregular but should appear quickly |
-| WebSocket or Server-Sent Events | Persistent server-to-client communication | High-frequency or real-time updates |
+| Strategy | Client Behaviour | Server Behaviour | Suitable Situation |
+| --- | --- | --- | --- |
+| Short polling | Sends a request every few seconds | Responds immediately | Simple status checking with acceptable delay |
+| Long polling | Keeps one waiting request active | Responds when data changes or timeout occurs | Irregular updates that should appear quickly |
+| Server-Sent Events | Opens a one-way event stream | Pushes multiple updates continuously | Frequent server-to-browser updates |
+| WebSockets | Keeps a two-way connection | Sends and receives messages continuously | Chat, games, live collaboration |
 
-The key decision is whether the system benefits from immediate updates enough to justify keeping requests waiting on the server.
+Short polling is easier to implement. Long polling can reduce repeated empty responses and deliver updates faster, but the server must manage waiting connections correctly.
 
 ## The Core Difference
 
-Assume a delivery order changes status once after two minutes.
+Assume a delivery order remains unchanged for two minutes and then changes from `preparing` to `delivered`.
 
-With short polling every five seconds, the browser may send about 24 requests before receiving the meaningful update. Most responses simply say that nothing has changed.
-
-```text
-Client                  Server
-  | --- status? -------> |
-  | <--- no change ----- |
-  | --- status? -------> |
-  | <--- no change ----- |
-  | --- status? -------> |
-  | <--- delivered ----- |
-```
-
-With long polling, the browser sends one request and the server waits. When the order becomes delivered, the server responds immediately.
+With short polling every five seconds, the browser may make about 24 requests before receiving the useful result:
 
 ```text
-Client                  Server
-  | --- wait status ---> |
-  |                      |  Request remains open
-  |                      |  Status changes
-  | <--- delivered ----- |
-  | --- wait status ---> |
+Client                         Server
+  | --- status? -------------> |
+  | <--- preparing ----------- |
+  |                            |
+  | --- status? -------------> |
+  | <--- preparing ----------- |
+  |                            |
+  | --- status? -------------> |
+  | <--- preparing ----------- |
+  |                            |
+  |        repeated many times |
+  |                            |
+  | --- status? -------------> |
+  | <--- delivered ----------- |
 ```
 
-Both strategies still use HTTP requests and responses. Long polling does not mean the connection stays open forever. Each request normally has a timeout, returns when an event occurs, and is then replaced by a new request.
+With long polling, the browser makes a request and waits. The server returns only when the status changes or when the request timeout expires:
+
+```text
+Client                         Server
+  | --- wait for update -----> |
+  |                            |  request remains open
+  |                            |  status changes
+  | <--- delivered ----------- |
+  | --- wait for update -----> |  only if more updates are needed
+```
+
+Long polling is not one permanent request. It is a sequence of longer HTTP requests. Each response ends the current request, and the client creates a new one when it still needs future updates.
 
 ## How Short Polling Works
 
-In short polling, the frontend starts a timer and repeatedly calls an API endpoint.
+In short polling, the frontend schedules repeated API calls. The server does not wait for a change; it simply returns the current value whenever it is asked.
 
-For example, a client may request an export job status every five seconds:
+A client should avoid starting a new request while the previous request is still running. This example waits for each response before scheduling the next check:
 
 ```typescript
-const jobId = "job_123";
+type JobStatus = "processing" | "completed" | "failed";
 
-const intervalId = setInterval(async () => {
+async function pollJobStatus(jobId: string): Promise<void> {
   const response = await fetch(`/api/jobs/${jobId}/status`);
-  const result = await response.json();
+  const result: { status: JobStatus } = await response.json();
 
   console.log(result.status);
 
   if (result.status === "completed" || result.status === "failed") {
-    clearInterval(intervalId);
+    return;
   }
-}, 5000);
+
+  setTimeout(() => {
+    void pollJobStatus(jobId);
+  }, 5000);
+}
+
+void pollJobStatus("job_123");
 ```
 
-The backend endpoint can return the current status immediately:
+The backend endpoint is simple because it responds immediately:
 
 ```typescript
 import { Request, Response } from "express";
 
+const jobStatus = new Map<string, string>([
+  ["job_123", "processing"]
+]);
+
 export function getJobStatus(req: Request, res: Response): void {
-  const jobId = req.params.jobId;
+  const status = jobStatus.get(req.params.jobId);
 
-  const job = {
-    id: jobId,
-    status: "processing"
-  };
+  if (!status) {
+    res.status(404).json({ error: "Job not found" });
+    return;
+  }
 
-  res.json(job);
+  res.json({ status });
 }
 ```
 
-This design is easy to understand because every request is independent. The server receives a request, reads the current state, returns it, and releases the connection.
+This approach is practical when a user checks one short-running job or when updates do not need to appear instantly.
 
-### Why It Becomes Wasteful
+The inefficiency appears when many clients ask frequently but the state rarely changes. For example, 10,000 clients polling every five seconds create around 2,000 requests per second, even if no job status has changed.
 
-The problem appears when updates are uncommon but clients keep asking frequently.
+## How Long Polling Works
 
-| Situation | Result |
-| --- | --- |
-| Status changes once every few minutes | Many responses contain identical data |
-| Thousands of active clients poll every few seconds | Request volume grows quickly |
-| Poll interval is increased | Server load decreases, but updates appear later |
-| Poll interval is decreased | Updates appear faster, but waste increases |
-
-If 10,000 connected clients poll once every five seconds, the server receives approximately 2,000 status requests every second, even when no status has changed.
-
-Short polling therefore creates a trade-off between **update delay** and **unnecessary request volume**.
-
-## How Long Polling Changes the Flow
-
-In long polling, the client still sends a normal HTTP request. The difference is that the server does not respond immediately when no new result exists.
-
-Instead, the server waits for one of two conditions:
-
-1. New data or a status change becomes available.
-2. A timeout is reached, so the request returns safely and the client reconnects.
-
-The client logic becomes a repeated request loop rather than a fixed interval:
+In long polling, the client sends the request immediately after the previous request completes. It does not sleep for a fixed interval because the waiting period happens inside the request itself.
 
 ```typescript
-async function listenForJobStatus(jobId: string): Promise<void> {
+type JobStatus = "processing" | "completed" | "failed";
+
+async function waitForJobStatus(jobId: string): Promise<void> {
   while (true) {
     const response = await fetch(`/api/jobs/${jobId}/status/wait`);
-    const result = await response.json();
+    const result: {
+      status: JobStatus;
+      timedOut: boolean;
+    } = await response.json();
 
     console.log(result.status);
 
@@ -139,203 +144,510 @@ async function listenForJobStatus(jobId: string): Promise<void> {
   }
 }
 
-listenForJobStatus("job_123");
+void waitForJobStatus("job_123");
 ```
 
-A simplified Express endpoint can hold the response until the job completes or the timeout expires:
+The backend first checks the current status. If the job is already finished, it answers immediately. Otherwise, it waits for either an update event or a timeout:
 
 ```typescript
+import { EventEmitter } from "node:events";
 import { Request, Response } from "express";
 
-const waitingResponses = new Map<string, Response[]>();
+const jobEvents = new EventEmitter();
+const jobStatus = new Map<string, string>([
+  ["job_123", "processing"]
+]);
 
 export function waitForJobStatus(req: Request, res: Response): void {
   const jobId = req.params.jobId;
+  const currentStatus = jobStatus.get(jobId);
 
-  const timeoutId = setTimeout(() => {
-    removeWaitingResponse(jobId, res);
-
-    res.json({
-      status: "processing",
-      timedOut: true
-    });
-  }, 30000);
-
-  const responses = waitingResponses.get(jobId) ?? [];
-  responses.push(res);
-  waitingResponses.set(jobId, responses);
-
-  req.on("close", () => {
-    clearTimeout(timeoutId);
-    removeWaitingResponse(jobId, res);
-  });
-}
-
-function removeWaitingResponse(jobId: string, res: Response): void {
-  const responses = waitingResponses.get(jobId) ?? [];
-  const remaining = responses.filter((currentResponse) => currentResponse !== res);
-
-  if (remaining.length === 0) {
-    waitingResponses.delete(jobId);
+  if (!currentStatus) {
+    res.status(404).json({ error: "Job not found" });
     return;
   }
 
-  waitingResponses.set(jobId, remaining);
-}
-```
-
-When the background job changes status, the server can respond to every waiting client for that job:
-
-```typescript
-import { Response } from "express";
-
-const waitingResponses = new Map<string, Response[]>();
-
-export function publishJobCompletion(jobId: string): void {
-  const responses = waitingResponses.get(jobId) ?? [];
-
-  for (const res of responses) {
-    res.json({
-      status: "completed",
-      timedOut: false
-    });
+  if (currentStatus !== "processing") {
+    res.json({ status: currentStatus, timedOut: false });
+    return;
   }
 
-  waitingResponses.delete(jobId);
+  const eventName = `job:${jobId}:updated`;
+
+  const onUpdated = (status: string): void => {
+    cleanup();
+    res.json({ status, timedOut: false });
+  };
+
+  const timeoutId = setTimeout(() => {
+    cleanup();
+    res.json({ status: "processing", timedOut: true });
+  }, 30000);
+
+  const cleanup = (): void => {
+    clearTimeout(timeoutId);
+    jobEvents.off(eventName, onUpdated);
+  };
+
+  jobEvents.once(eventName, onUpdated);
+
+  req.on("close", () => {
+    cleanup();
+  });
 }
 ```
 
-This example teaches the operating principle, but a production system needs stronger connection cleanup, shared state, authentication, timeout control, and multi-server coordination.
+When the worker completes the job, it updates the stored state and publishes an event so waiting requests can respond:
 
-## The Important Client-Side Difference
+```typescript
+export function completeJob(jobId: string): void {
+  jobStatus.set(jobId, "completed");
+  jobEvents.emit(`job:${jobId}:updated`, "completed");
+}
+```
 
-It is easy to assume that long polling only changes server code because both approaches call an endpoint. In practice, the frontend behaviour also changes.
+In Node.js, this waiting does not mean the JavaScript process is continuously executing work for each request. The event loop can wait for an event or timeout without blocking one thread per client. However, the application still holds sockets, response objects, timeout handlers, and memory while those requests remain open.
 
-| Concern | Short Polling Client | Long Polling Client |
+## Client and Server Responsibilities
+
+The frontend changes in long polling as well as the backend. It is incorrect to think that only the server implementation is different.
+
+| Responsibility | Short Polling | Long Polling |
 | --- | --- | --- |
-| Request timing | Sends requests on a timer | Sends the next request after the previous one finishes |
-| Waiting behaviour | Waits between requests | Request itself waits on the server |
-| Retry handling | Timer naturally triggers the next call | Must reconnect after timeout or failure |
-| Duplicate requests | Possible if requests take longer than the interval | Easier to avoid with one active request loop |
-| Stopping condition | Clears interval | Exits request loop |
+| When to send the next request | After a fixed delay | Immediately after the previous response |
+| What happens when nothing changes | Server returns unchanged status | Server keeps waiting until timeout |
+| Request overlap risk | Possible if using careless intervals | Normally one active request per resource |
+| Timeout handling | Optional but still useful | Required for stable reconnect behaviour |
+| Server resource management | Short-lived requests | Open connections and cleanup required |
 
-A common short-polling mistake is sending a new request every five seconds even when an earlier request has not returned. This can create overlapping requests under slow network or server conditions.
+For short polling, a common mistake is using `setInterval()` without considering request duration. If an API call takes longer than the interval, multiple status requests may overlap.
 
-A long-polling client should normally maintain one outstanding request per watched resource. When it receives a timeout response, it opens a new request. When it receives the final status, it stops.
+For long polling, the important rule is that one browser tab should normally keep only one pending request for a watched resource. Once it receives a response, it decides whether to stop or open the next request.
 
-## Practical Trade-Offs
+## Production Trade-Offs
 
 <CardGrid columns={2}>
-  <InfoCard title="Short Polling: Simple">
-    The frontend and backend are straightforward. It is often sufficient for low-traffic pages or status checks where a few seconds of delay is acceptable.
+  <InfoCard title="Short Polling: Minimal Complexity">
+    The API returns immediately and is easy to operate. It is often the correct starting point for small features or low traffic.
   </InfoCard>
 
-  <InfoCard title="Short Polling: Wasteful at Scale">
-    Frequent polling can produce large numbers of requests that return unchanged data, especially when updates are rare.
+  <InfoCard title="Short Polling: Repeated Waste">
+    When data changes rarely, most requests return exactly the same status while still consuming network and backend capacity.
   </InfoCard>
 
-  <InfoCard title="Long Polling: Faster Updates">
-    The server can return almost immediately after a status change instead of waiting for the next polling interval.
+  <InfoCard title="Long Polling: Better Responsiveness">
+    A client can receive an update shortly after it happens instead of waiting for the next polling interval.
   </InfoCard>
 
-  <InfoCard title="Long Polling: More Server Responsibility">
-    The backend must manage waiting requests, timeouts, client disconnects, deployment topology, and resource limits.
+  <InfoCard title="Long Polling: More Infrastructure Work">
+    The server must handle open requests, timeouts, disconnected clients, scaling across instances, and connection limits.
   </InfoCard>
 </CardGrid>
 
-Long polling usually reduces repeated empty responses, but it does not make connections free. A waiting request still consumes some server and infrastructure capacity.
+A local long-polling prototype may use an in-memory `EventEmitter`, but this does not work reliably after the application is deployed across several backend instances.
 
-For Node.js, waiting on network or event completion is generally compatible with its event-driven model because the process does not need to block a thread while waiting. However, application memory, open sockets, load balancer timeouts, reverse proxy configuration, and database usage still matter.
-
-## Real Production Concerns
-
-A basic long-polling example can work locally and still fail after deployment. The design must account for the surrounding infrastructure.
-
-| Concern | Why It Matters | Practical Handling |
-| --- | --- | --- |
-| Request timeout | Proxies may close idle requests | Return before infrastructure timeout and reconnect |
-| Client disconnect | Closed browser tabs leave waiting work behind | Remove response listeners on connection close |
-| Multiple backend instances | Waiting request may be on one server while update occurs on another | Publish events through Redis Pub/Sub, a queue, or shared event system |
-| Authentication | A client must not observe another user's job | Authorize every wait request |
-| Too many open requests | Memory and socket usage can increase | Limit connections and monitor active waits |
-| Failure and retries | Networks disconnect normally | Use bounded retry with delay or backoff |
-
-Suppose the application has two backend instances:
+Consider this deployment:
 
 ```text
-Client waits on Server A
-Background worker updates status through Server B
+Client waiting request  ---> Server A
+Background job update   ---> Server B
 ```
 
-If Server B only stores the event in its own application memory, Server A does not know that it should answer the waiting client. In a scaled deployment, long polling often needs a shared event mechanism rather than an in-memory map alone.
+If Server B only emits an in-memory event, Server A never receives it. The client's waiting request remains open until timeout even though the job already completed.
+
+In a multi-instance deployment, the update should normally be distributed using shared infrastructure such as Redis Pub/Sub, a message broker, or a durable job-status store combined with notification events.
+
+| Production Concern | Problem | Practical Response |
+| --- | --- | --- |
+| Reverse proxy timeout | Proxy closes a long request before the application responds | Use an application timeout shorter than the proxy limit |
+| Client closes the tab | Server may continue tracking a useless wait | Remove listeners on connection close |
+| Multiple server instances | Update and waiting request reach different processes | Use shared event delivery |
+| Too many waiting clients | Socket and memory consumption rises | Measure active requests and enforce limits |
+| Authorization | A user may query another user's job | Authorize every polling request |
+| Retry storms | Many clients reconnect at the same moment | Add bounded retry delay or jitter |
 
 ## When to Use Each Strategy
 
 Use **short polling** when:
 
-- The feature is simple and traffic is low.
-- Updates do not need to appear instantly.
-- The status is checked only for a short period, such as waiting for one payment confirmation.
-- Operational simplicity matters more than request efficiency.
+- The page has low traffic.
+- The state only needs to refresh every several seconds.
+- The operation is temporary, such as waiting for a single file upload or payment status.
+- You want the simplest reliable implementation first.
 
 Use **long polling** when:
 
-- Updates happen unpredictably.
-- The user should see changes quickly.
-- Repeated unchanged responses would create significant waste.
-- WebSockets or Server-Sent Events are not suitable for the environment.
+- Status changes are unpredictable.
+- The UI should update quickly after the server state changes.
+- Frequent unchanged short-polling responses have become measurable waste.
+- A normal HTTP request model is still preferred over a streaming or socket-based connection.
 
-Consider **Server-Sent Events** when the server frequently pushes one-way updates to the browser, such as notifications or streaming job progress.
+Use **Server-Sent Events** when the server continuously sends one-way updates to the browser, such as live progress, notifications, or monitoring data.
 
-Consider **WebSockets** when both client and server need frequent, low-latency messages, such as chat, live collaboration, or multiplayer interaction.
+Use **WebSockets** when both the client and server need frequent low-latency messages, such as chat, multiplayer activity, or collaborative editing.
 
-| Requirement | Suitable Starting Choice |
+| Requirement | Reasonable Starting Choice |
 | --- | --- |
-| Refresh status every 30 seconds on a small admin page | Short polling |
-| Wait for an asynchronous report to finish | Short polling or long polling |
-| Show delivery-status changes quickly to many users | Long polling or Server-Sent Events |
-| Stream continuous server updates to the browser | Server-Sent Events |
-| Two-way real-time communication | WebSockets |
+| Refresh an admin dashboard every 30 seconds | Short polling |
+| Check whether a generated report has completed | Short polling first; long polling if needed |
+| Display delivery-status changes with low delay | Long polling or Server-Sent Events |
+| Stream recurring server updates | Server-Sent Events |
+| Support two-way real-time interaction | WebSockets |
 
-Do not choose long polling only because it sounds more advanced. It is valuable when the request reduction or responsiveness improvement is meaningful.
+The correct choice is not determined by which technique is more advanced. It is determined by update frequency, acceptable delay, expected traffic, and operational complexity.
 
 ## Common Mistakes
 
-### Mistake 1: Thinking Long Polling Uses Only One Request
+### Assuming Long Polling Creates One Permanent Connection
 
-Long polling still creates repeated HTTP requests. The difference is that each request waits longer and is more likely to return useful information.
+Long polling still uses repeated HTTP request-response cycles. Each request waits longer, but it eventually returns or times out.
 
-### Mistake 2: Holding Database Connections Open
+### Holding a Database Connection While Waiting
 
-A waiting HTTP request should not normally keep a database transaction or database connection occupied for the entire wait period. Read the initial status, wait for an application event, and query again only when necessary.
+A waiting HTTP response should not keep a database transaction or dedicated database connection open for thirty seconds. Read current state, wait on an application-level event, then read again only when necessary.
 
-### Mistake 3: Ignoring Timeouts
+### Forgetting Timeout and Disconnect Cleanup
 
-A server should not keep a request open indefinitely. Timeouts allow the client to reconnect, allow infrastructure to behave predictably, and prevent abandoned waits from accumulating.
+Without timeout and disconnect handling, abandoned waiting requests can remain registered in server memory and increase resource usage.
 
-### Mistake 4: Forgetting Cleanup
+### Using In-Memory Events in a Scaled Backend
 
-When the user closes the tab, navigates away, or loses network access, the server must remove that waiting response from its internal tracking.
-
-### Mistake 5: Using In-Memory Events After Scaling Horizontally
-
-An in-memory listener can work with one Node.js process. Once requests and updates can reach different instances, the event must be distributed through shared infrastructure.
+An in-memory listener is sufficient only when the relevant request and update occur in the same Node.js process. Horizontal scaling usually requires a shared event channel.
 
 ## A Practical Implementation Order
 
-Build the feature in stages instead of immediately introducing a complex real-time architecture.
-
-1. Begin with short polling using a reasonable interval, such as five or ten seconds.
-2. Measure how often clients poll, how often responses actually change, and how much delay users experience.
-3. Move to long polling when unchanged responses are frequent or users need faster updates.
-4. Add request timeouts, disconnect cleanup, authorization, and monitoring.
-5. Introduce shared event delivery when the backend runs across multiple instances.
-6. Move to Server-Sent Events or WebSockets only when the communication pattern requires them.
-
-This order keeps the design proportional to the actual problem. A simple status page does not automatically require a persistent real-time channel.
+1. Start with short polling and a reasonable interval, such as five or ten seconds.
+2. Measure request count, response duplication, user-visible update delay, and backend cost.
+3. Change to long polling only when request waste or response delay becomes meaningful.
+4. Add timeout handling, disconnect cleanup, authorization, and monitoring.
+5. Introduce a shared event mechanism when deploying multiple backend instances.
+6. Choose Server-Sent Events or WebSockets only when the communication pattern actually requires persistent streaming or two-way interaction.
 
 ## The Main Principle
 
-Short polling asks repeatedly whether something has changed. Long polling waits until something changes before answering.
+Short polling repeatedly asks, “Has anything changed yet?” Long polling asks once and lets the server wait before answering.
 
-The better strategy depends on request volume, acceptable update delay, deployment complexity, and whether the system can safely manage waiting connections. Start with the simplest design that meets the user experience requirement, then change the transport only when measurement shows that the current approach is producing unnecessary work or unacceptable delay.
+Start with the simpler approach that satisfies the user experience. Move to long polling when measurement shows that repeated unchanged requests create unnecessary work or that waiting for the next interval creates unacceptable delay.
+
+</Lang>
+
+<Lang lang="zh">
+
+当客户端需要持续获得服务器上的最新状态时，例如外卖配送位置、付款是否成功、文件处理进度，或者新的通知，它就需要一种机制来反复确认：服务器的数据有没有发生变化。
+
+短轮询（Short Polling）与长轮询（Long Polling）都是基于普通 HTTP 请求的方案。它们真正的差别不在于 API 长什么样，而在于：**客户端什么时候发下一次请求，以及服务器什么时候返回响应。**
+
+## 简短答案
+
+**短轮询**是客户端每隔固定时间请求一次服务器，无论数据有没有变化，服务器都会马上返回当前状态。
+
+**长轮询**是客户端发送请求后，服务器先不立即返回，而是等到数据真的改变，或者等待超时后才响应。客户端收到响应后，如果还需要继续监听，就立刻发送下一次长轮询请求。
+
+| 策略 | 客户端行为 | 服务器行为 | 适合场景 |
+| --- | --- | --- | --- |
+| 短轮询 | 每隔几秒请求一次 | 马上返回当前状态 | 简单状态查询，可接受一定延迟 |
+| 长轮询 | 保持一个等待中的请求 | 状态改变或超时后返回 | 更新不固定，但希望尽快显示 |
+| Server-Sent Events | 打开单向事件流 | 连续推送更新 | 服务器频繁推送给浏览器 |
+| WebSockets | 保持双向连接 | 双方都可持续发消息 | 聊天、实时协作、多人游戏 |
+
+短轮询更容易实现。长轮询可以减少大量“状态完全没变”的重复响应，并让更新更快出现在前端，但服务器要承担更多连接管理责任。
+
+## 核心差异
+
+假设一个配送订单在两分钟内一直维持 `preparing` 状态，最后才变成 `delivered`。
+
+如果前端每五秒进行一次短轮询，那么在真正拿到有意义的更新前，浏览器可能已经请求了大约 24 次：
+
+```text
+客户端                         服务器
+  | --- 查询状态？-----------> |
+  | <--- preparing ---------- |
+  |                            |
+  | --- 查询状态？-----------> |
+  | <--- preparing ---------- |
+  |                            |
+  | --- 查询状态？-----------> |
+  | <--- preparing ---------- |
+  |                            |
+  |        重复很多次          |
+  |                            |
+  | --- 查询状态？-----------> |
+  | <--- delivered ---------- |
+```
+
+如果使用长轮询，浏览器先发出一次请求，然后等待服务器返回。当订单状态真的改变时，服务器才立即把新状态返回：
+
+```text
+客户端                         服务器
+  | --- 等待状态更新 --------> |
+  |                            |  请求保持等待
+  |                            |  状态发生变化
+  | <--- delivered ---------- |
+  | --- 等待下一次更新 ------> |  仅在仍需要监听时继续
+```
+
+长轮询并不是只发送一次永远不结束的请求。它仍然是一个接一个的 HTTP 请求，只是每次请求可以等待比较久，而且更有机会返回真正改变过的数据。
+
+## 短轮询如何实现
+
+在短轮询中，前端负责按照间隔反复调用 API。服务器不需要等待事件发生；每一次被询问时，它只要读取当前状态并直接返回。
+
+前端实现时，不应该在上一次请求还没有结束前，又机械式地发送下一次请求。下面的写法会等到响应完成后，才安排下一次查询：
+
+```typescript
+type JobStatus = "processing" | "completed" | "failed";
+
+async function pollJobStatus(jobId: string): Promise<void> {
+  const response = await fetch(`/api/jobs/${jobId}/status`);
+  const result: { status: JobStatus } = await response.json();
+
+  console.log(result.status);
+
+  if (result.status === "completed" || result.status === "failed") {
+    return;
+  }
+
+  setTimeout(() => {
+    void pollJobStatus(jobId);
+  }, 5000);
+}
+
+void pollJobStatus("job_123");
+```
+
+后端接口很简单，因为它不需要把请求挂住等待：
+
+```typescript
+import { Request, Response } from "express";
+
+const jobStatus = new Map<string, string>([
+  ["job_123", "processing"]
+]);
+
+export function getJobStatus(req: Request, res: Response): void {
+  const status = jobStatus.get(req.params.jobId);
+
+  if (!status) {
+    res.status(404).json({ error: "Job not found" });
+    return;
+  }
+
+  res.json({ status });
+}
+```
+
+这种方式适合流量不高、状态更新不要求即时出现的场景。例如用户提交一份报表后，页面每五秒确认一次是否完成，通常已经足够。
+
+问题在于，当大量用户都频繁查询，而数据其实很少变化时，系统会处理很多没有新信息的请求。例如，10,000 个客户端每五秒请求一次，即使所有任务状态都没有改变，服务器仍然会接收到大约每秒 2,000 次查询。
+
+## 长轮询如何实现
+
+长轮询中，客户端不再固定等待五秒后才询问服务器。它发送请求后，就让这个请求在服务器端等待；一旦收到响应，若仍需要后续更新，便立刻打开下一次等待请求。
+
+```typescript
+type JobStatus = "processing" | "completed" | "failed";
+
+async function waitForJobStatus(jobId: string): Promise<void> {
+  while (true) {
+    const response = await fetch(`/api/jobs/${jobId}/status/wait`);
+    const result: {
+      status: JobStatus;
+      timedOut: boolean;
+    } = await response.json();
+
+    console.log(result.status);
+
+    if (result.status === "completed" || result.status === "failed") {
+      return;
+    }
+  }
+}
+
+void waitForJobStatus("job_123");
+```
+
+后端收到请求时，先检查任务是否已经结束。如果任务已经完成，服务器可以立即返回；如果仍在处理中，服务器就等待状态更新事件，或者等待超时后返回：
+
+```typescript
+import { EventEmitter } from "node:events";
+import { Request, Response } from "express";
+
+const jobEvents = new EventEmitter();
+const jobStatus = new Map<string, string>([
+  ["job_123", "processing"]
+]);
+
+export function waitForJobStatus(req: Request, res: Response): void {
+  const jobId = req.params.jobId;
+  const currentStatus = jobStatus.get(jobId);
+
+  if (!currentStatus) {
+    res.status(404).json({ error: "Job not found" });
+    return;
+  }
+
+  if (currentStatus !== "processing") {
+    res.json({ status: currentStatus, timedOut: false });
+    return;
+  }
+
+  const eventName = `job:${jobId}:updated`;
+
+  const onUpdated = (status: string): void => {
+    cleanup();
+    res.json({ status, timedOut: false });
+  };
+
+  const timeoutId = setTimeout(() => {
+    cleanup();
+    res.json({ status: "processing", timedOut: true });
+  }, 30000);
+
+  const cleanup = (): void => {
+    clearTimeout(timeoutId);
+    jobEvents.off(eventName, onUpdated);
+  };
+
+  jobEvents.once(eventName, onUpdated);
+
+  req.on("close", () => {
+    cleanup();
+  });
+}
+```
+
+当后台任务完成时，它更新任务状态，并发出事件通知所有正在等待的请求：
+
+```typescript
+export function completeJob(jobId: string): void {
+  jobStatus.set(jobId, "completed");
+  jobEvents.emit(`job:${jobId}:updated`, "completed");
+}
+```
+
+在 Node.js 中，请求处于等待状态，不代表程序必须为每一个等待中的客户端持续执行一段循环。Node.js 可以通过事件循环等待事件或 timeout，而不是为每一个连接阻塞一条线程。
+
+但是，长轮询并不是没有成本。只要请求还没有结束，服务器仍然需要保留 socket、response 对象、timeout 处理器以及相关内存。
+
+## 前端与后端分别改变了什么
+
+长轮询并不是只改后端，前端请求逻辑也会发生变化。
+
+| 责任 | 短轮询 | 长轮询 |
+| --- | --- | --- |
+| 下一次请求何时发送 | 等固定间隔后发送 | 上一次响应结束后立即发送 |
+| 没有新数据时怎么办 | 服务器仍返回相同状态 | 服务器继续等待，直到超时 |
+| 是否容易产生重叠请求 | 使用错误的定时器写法时容易发生 | 通常维持一个等待中的请求 |
+| timeout 是否重要 | 有用，但不是核心机制 | 必须处理 |
+| 后端主要负担 | 大量短请求 | 持续中的连接与清理工作 |
+
+短轮询中，一个常见错误是直接使用 `setInterval()`，而没有考虑 API 响应可能比间隔更慢。如果五秒发送一次请求，但某次服务器八秒才返回，那么页面上可能同时存在多个重复的状态查询。
+
+长轮询中，正确思路通常是：一个页面对于一个资源，只维护一个正在等待的请求。收到回应后，再决定终止监听还是继续发送下一次等待请求。
+
+## 生产环境的取舍
+
+<CardGrid columns={2}>
+  <InfoCard title="短轮询：实现简单">
+    API 每次都立即返回，前后端逻辑容易理解，也比较容易部署与排查。小型功能通常应该先从这里开始。
+  </InfoCard>
+
+  <InfoCard title="短轮询：容易产生浪费">
+    当状态很少改变时，大量请求只是反复获得同一个结果，却仍然消耗网络与服务器资源。
+  </InfoCard>
+
+  <InfoCard title="长轮询：更新更及时">
+    状态改变后，服务器可以很快返回结果，不需要让用户等到下一次固定查询时间。
+  </InfoCard>
+
+  <InfoCard title="长轮询：运维复杂度更高">
+    后端必须处理等待中的连接、超时、断线清理、多实例部署，以及连接数量限制。
+  </InfoCard>
+</CardGrid>
+
+在本机开发时，你可能会用 Node.js 内存中的 `EventEmitter` 完成长轮询。但是当系统部署成多个后端实例时，这种实现就不可靠了。
+
+例如：
+
+```text
+客户端等待请求  ---> Server A
+后台任务更新    ---> Server B
+```
+
+如果 Server B 只是发出自己进程内的事件，Server A 根本不会知道状态已经改变。结果就是：任务实际上完成了，但客户端等待的请求仍然只能等到 timeout 才返回。
+
+因此，在多实例部署中，状态更新通常需要通过共享机制通知其他服务器，例如 Redis Pub/Sub、消息队列，或者一个共享状态储存层配合事件通知。
+
+| 生产问题 | 可能造成的影响 | 实际处理方式 |
+| --- | --- | --- |
+| 反向代理 timeout | 长请求被代理层提前关闭 | 应用 timeout 设得比代理限制更短 |
+| 用户关闭页面 | 服务器继续追踪无效等待请求 | 监听连接关闭并清理 listener |
+| 多个后端实例 | 更新与等待请求落在不同进程 | 使用共享事件机制 |
+| 等待连接太多 | socket 与内存使用量上升 | 监控活动连接并设置限制 |
+| 缺少权限检查 | 用户可能读取别人的任务状态 | 每次请求都验证权限 |
+| 大量客户端同时重连 | 瞬间产生请求高峰 | 增加有限延迟或随机抖动 |
+
+## 什么时候选择哪一种
+
+适合使用**短轮询**的情况：
+
+- 页面流量不高。
+- 状态晚几秒出现也不会影响用户体验。
+- 用户只是在短时间内等待一个任务完成，例如付款确认或档案生成。
+- 当前阶段更重视简单、稳定、容易维护的实现。
+
+适合使用**长轮询**的情况：
+
+- 状态改变的时间无法预测。
+- 状态一旦改变，界面应该尽快更新。
+- 大量短轮询请求都返回未变化的数据，已经形成明显浪费。
+- 系统仍希望使用一般 HTTP 请求，而暂时不引入事件流或 socket 连接。
+
+适合使用 **Server-Sent Events** 的情况，是服务器需要持续、单向地向浏览器发送更新，例如通知列表、处理进度或监控数据。
+
+适合使用 **WebSockets** 的情况，是客户端和服务器双方都需要频繁、低延迟地互相传递信息，例如聊天室、多人协作编辑或即时游戏。
+
+| 需求 | 合理的初始选择 |
+| --- | --- |
+| 管理后台每 30 秒刷新一次状态 | 短轮询 |
+| 等待一份生成中的报表完成 | 先用短轮询，需要时改成长轮询 |
+| 尽快显示配送状态变化 | 长轮询或 Server-Sent Events |
+| 服务器持续推送更新 | Server-Sent Events |
+| 双向实时互动 | WebSockets |
+
+不要因为长轮询听起来更进阶，就直接使用长轮询。正确选择取决于数据变化频率、用户可以接受的延迟、预计流量，以及你是否愿意承担额外的部署复杂度。
+
+## 常见误区
+
+### 误区一：以为长轮询只发送一次请求
+
+长轮询依然会重复发送 HTTP 请求。只是每次请求会等待更久，而且更可能在返回时带有真正的新数据。
+
+### 误区二：等待期间持续占用数据库连接
+
+一个等待中的 HTTP 请求，不应该长时间持有数据库 transaction 或专用数据库连接。正确方式通常是先读取当前状态，再等待应用事件，必要时才重新查询数据库。
+
+### 误区三：没有处理超时与断线
+
+用户关闭页面、网络中断，或代理层主动断开连接时，服务器必须清除对应的监听器与等待数据，否则无效请求会慢慢累积。
+
+### 误区四：部署多台服务器后仍只使用内存事件
+
+内存中的事件只能通知同一个 Node.js 进程。只要系统开始水平扩展，就通常需要一个共享的事件传递机制。
+
+## 实作顺序
+
+1. 先使用短轮询，并选择合理间隔，例如五秒或十秒。
+2. 记录请求数量、重复响应比例、用户感受到的更新时间，以及后端处理成本。
+3. 只有当重复请求造成明显浪费，或更新延迟已经影响体验时，才改成长轮询。
+4. 为长轮询加入 timeout、断线清理、权限验证与监控。
+5. 当后端部署成多个实例时，引入共享事件传递机制。
+6. 只有在确实需要持续推送或双向实时沟通时，才进一步采用 Server-Sent Events 或 WebSockets。
+
+## 核心原则
+
+短轮询的思路是不断询问服务器：“现在有变化了吗？”长轮询的思路是发送一次请求，然后让服务器在有变化时再回答。
+
+实现系统时，应先选择能够满足体验需求的最简单方案。只有当实际测量显示大量请求都没有带回新数据，或者固定等待间隔造成明显延迟时，才值得把设计升级成长轮询或更实时的通信方式。
+
+</Lang>
