@@ -15,6 +15,8 @@ series:
   order: 2
 ---
 
+<Lang lang="en">
+
 CPU overhead is processor time spent on work that does not produce proportional value for the user. Parsing requests, checking permissions, calculating results, and serializing responses are necessary. Repeated scans, oversized responses, unnecessary transformations, and uncontrolled concurrency are waste.
 
 When a service becomes CPU-bound, adding more servers may restore capacity, but it does not identify why the application needs so much CPU. The correct workflow is to locate the expensive work, reduce it, and scale only when the remaining workload is legitimate demand.
@@ -23,11 +25,11 @@ When a service becomes CPU-bound, adding more servers may restore capacity, but 
 
 A CPU-heavy service commonly shows:
 
-* Request latency increasing during traffic spikes.
-* CPU usage remaining close to saturation.
-* Queues growing while disk latency remains normal.
-* Background jobs competing with user-facing requests.
-* More application instances being required for the same traffic.
+- Request latency increasing during traffic spikes.
+- CPU usage remaining close to saturation.
+- Queues growing while disk latency remains normal.
+- Background jobs competing with user-facing requests.
+- More application instances being required for the same traffic.
 
 Run this on the affected Linux server to check whether CPU execution is the dominant source of pressure:
 
@@ -86,13 +88,13 @@ This result gives a useful direction: investigate filtering and JSON serializati
 
 Use the profiler appropriate for the application runtime:
 
-| Runtime         | Profiling Direction                               |
-| --------------- | ------------------------------------------------- |
-| Node.js         | CPU profiles, flame graphs, event-loop monitoring |
-| Java            | Java Flight Recorder, async-profiler              |
-| Go              | `pprof`                                           |
-| Python          | `py-spy`                                          |
-| Native services | `perf`, flame graphs                              |
+| Runtime | Profiling Direction |
+| --- | --- |
+| Node.js | CPU profiles, flame graphs, event-loop monitoring |
+| Java | Java Flight Recorder, async-profiler |
+| Go | `pprof` |
+| Python | `py-spy` |
+| Native services | `perf`, flame graphs |
 
 ## Five Ways to Reduce CPU Overhead
 
@@ -146,10 +148,10 @@ const matched = requestedIds.filter((id) =>
 
 The important principle is not limited to JavaScript:
 
-* Replace repeated full scans with indexed lookups.
-* Avoid nested loops where a map or set is sufficient.
-* Do not sort records unless ordering is required.
-* Reuse computations when their result remains valid.
+- Replace repeated full scans with indexed lookups.
+- Avoid nested loops where a map or set is sufficient.
+- Do not sort records unless ordering is required.
+- Reuse computations when their result remains valid.
 
 A larger server provides more CPU capacity. A better algorithm reduces the amount of work each request requires.
 
@@ -181,11 +183,11 @@ This reduces work across the application and database boundary.
 
 For list endpoints:
 
-* Push selective filtering into the database.
-* Apply pagination before response formatting.
-* Return summary fields for list screens.
-* Load full details only for detail views.
-* Avoid serializing fields that the client does not use.
+- Push selective filtering into the database.
+- Apply pagination before response formatting.
+- Return summary fields for list screens.
+- Load full details only for detail views.
+- Avoid serializing fields that the client does not use.
 
 ## Example: Bound Costly Requests
 
@@ -193,11 +195,11 @@ An endpoint does not need to be broken or malicious to overload a system. It onl
 
 Typical risks include:
 
-* Unlimited report exports.
-* Large ID validation batches.
-* Searches without result limits.
-* Historical queries without date boundaries.
-* Responses containing thousands of objects.
+- Unlimited report exports.
+- Large ID validation batches.
+- Searches without result limits.
+- Historical queries without date boundaries.
+- Responses containing thousands of objects.
 
 Expose explicit limits in the API:
 
@@ -205,13 +207,13 @@ Expose explicit limits in the API:
 GET /orders?limit=50&cursor=...
 ```
 
-| Limit                   | Purpose                                   |
-| ----------------------- | ----------------------------------------- |
-| Maximum page size       | Prevent oversized response construction   |
-| Maximum batch size      | Limit loops and validation work           |
-| Maximum report range    | Prevent unbounded aggregation             |
-| Timeout or cancellation | Stop work no longer useful to the caller  |
-| Rate limit              | Protect high-cost endpoints during bursts |
+| Limit | Purpose |
+| --- | --- |
+| Maximum page size | Prevent oversized response construction |
+| Maximum batch size | Limit loops and validation work |
+| Maximum report range | Prevent unbounded aggregation |
+| Timeout or cancellation | Stop work no longer useful to the caller |
+| Rate limit | Protect high-cost endpoints during bursts |
 
 Limits make CPU consumption predictable and prevent normal requests from becoming accidental denial-of-service events.
 
@@ -223,12 +225,12 @@ When CPU cores are already occupied, additional concurrent work usually increase
 
 Useful controls include:
 
-* Limit worker concurrency.
-* Move report generation and batch processing to background jobs.
-* Separate workers from request-serving instances.
-* Apply queue backpressure.
-* Rate-limit expensive endpoints.
-* Defer non-urgent work during peak traffic.
+- Limit worker concurrency.
+- Move report generation and batch processing to background jobs.
+- Separate workers from request-serving instances.
+- Apply queue backpressure.
+- Rate-limit expensive endpoints.
+- Defer non-urgent work during peak traffic.
 
 Concurrency should be based on available capacity, not on how many jobs the application can accept.
 
@@ -238,10 +240,10 @@ Caching can remove repeated computation when many requests require the same expe
 
 Good candidates include:
 
-* Dashboard totals.
-* Infrequently changing configuration.
-* Precomputed report summaries.
-* Permission mappings that change rarely.
+- Dashboard totals.
+- Infrequently changing configuration.
+- Precomputed report summaries.
+- Permission mappings that change rarely.
 
 Before adding a cache, confirm:
 
@@ -253,18 +255,299 @@ Caching without clear invalidation rules can reduce CPU usage while introducing 
 
 ## A Practical Optimization Workflow
 
-| Step    | Action                                                               |
-| ------- | -------------------------------------------------------------------- |
+| Step | Action |
+| --- | --- |
 | Confirm | Verify that CPU execution, not I/O waiting, is the dominant pressure |
-| Locate  | Identify the process and code path consuming CPU                     |
-| Reduce  | Remove repeated work and transform less data                         |
-| Bound   | Limit request size, report ranges, and costly endpoint rates         |
-| Control | Prevent excessive concurrent CPU-heavy work                          |
-| Reuse   | Cache only repeated results with clear freshness rules               |
-| Scale   | Add CPU or instances after reducing unnecessary work                 |
+| Locate | Identify the process and code path consuming CPU |
+| Reduce | Remove repeated work and transform less data |
+| Bound | Limit request size, report ranges, and costly endpoint rates |
+| Control | Prevent excessive concurrent CPU-heavy work |
+| Reuse | Cache only repeated results with clear freshness rules |
+| Scale | Add CPU or instances after reducing unnecessary work |
 
 ## The Main Principle
 
 CPU optimization is not about changing infrastructure first. It is about reducing unnecessary computation.
 
 Profile the expensive path, process less data, place limits around costly operations, control concurrency, and scale only after the remaining workload is justified.
+
+</Lang>
+
+<Lang lang="zh">
+
+CPU overhead，也就是 CPU 的额外开销，指的是处理器花费了大量时间执行工作，但这些工作没有为用户带来相对应的价值。解析请求、验证权限、计算结果、序列化响应，都是必要成本；重复扫描资料、建立过大的响应对象、不必要的格式转换，以及失控的并发执行，则属于可以减少的浪费。
+
+当一个服务变成 CPU-bound，也就是性能主要受 CPU 限制时，增加服务器确实可能暂时恢复容量。但这只能让系统拥有更多执行资源，并不能回答一个更重要的问题：应用程序为什么需要消耗这么多 CPU？
+
+正确流程应该是先找出昂贵的工作路径，减少不必要的计算量，最后才为真正合理的业务负载扩容。
+
+## CPU 额外开销如何出现
+
+一个 CPU 压力过高的服务，通常会出现以下现象：
+
+- 流量上升时，请求延迟明显增加。
+- CPU 使用率长时间接近饱和。
+- 磁盘延迟正常，但请求或任务队列持续增长。
+- 后台任务开始与用户请求争夺处理能力。
+- 为了承受相同流量，系统需要部署越来越多应用实例。
+
+在受影响的 Linux 服务器上执行以下命令，用来确认主要压力是否来自 CPU 执行，而不是磁盘等待：
+
+```bash
+mpstat 1 3
+```
+
+输出范例：
+
+```text
+CPU    %usr   %sys  %iowait  %idle
+all   87.20   9.10      0.40   3.30
+```
+
+如果 `%usr` 很高、`%idle` 很低，而 `%iowait` 并不高，通常表示机器主要忙于执行应用程序或系统层工作，而不是卡在等待储存设备返回结果。
+
+| 指标 | 说明 |
+| --- | --- |
+| `%usr` | CPU 执行应用程序代码所花费的时间 |
+| `%sys` | CPU 执行操作系统与系统调用所花费的时间 |
+| `%iowait` | CPU 等待 I/O 完成的时间 |
+| `%idle` | 仍然可用的 CPU 空闲容量 |
+
+这一步的目的不是马上决定如何修复，而是先证明优化方向是否应该放在 CPU 工作量上。
+
+## 步骤一：找出最消耗 CPU 的进程
+
+当服务器整体 CPU 使用率过高时，下一步不是直接阅读所有代码，而是先确认哪一个进程正在消耗资源。
+
+在受影响的 Linux 服务器上执行以下命令，用来找出使用最多 CPU 时间的进程：
+
+```bash
+pidstat -u 1 5
+```
+
+输出范例：
+
+```text
+UID       PID    %usr  %system   %CPU  Command
+1001    28417   82.40     7.30  89.70  node
+999      1732    2.80     1.40   4.20  postgres
+```
+
+在这个例子中，`node` 进程消耗了绝大部分 CPU。此时若优先优化 PostgreSQL，可能不会解决眼前最严重的问题，因为当前的瓶颈并不主要来自数据库进程。
+
+这一层诊断回答的是：**哪一个服务正在制造 CPU 压力？**
+
+## 步骤二：找出昂贵的代码路径
+
+操作系统指标能够指出是哪一个进程造成压力，但不能说明这个进程内部的哪一段逻辑最昂贵。要回答这个问题，需要使用 profiler。
+
+在受影响的 Linux 服务器上执行以下命令，用来查看已确认进程中当前最消耗 CPU 的函数：
+
+```bash
+sudo perf top -p 28417
+```
+
+输出范例：
+
+```text
+Overhead  Shared Object      Symbol
+  31.42%  app-server         parse_and_filter_records
+  18.76%  libc.so.6          __memcmp_avx2_movbe
+  13.08%  app-server         serialize_response_json
+   9.44%  libcrypto.so       sha256_block_data_order_avx2
+```
+
+这个结果提供了明确方向：CPU 主要花费在资料过滤与 JSON 序列化上。与其笼统地说“整个 API 很慢”，更有效的做法是调查这些具体处理步骤为什么消耗过高。
+
+不同运行环境适合使用不同的分析工具：
+
+| 运行环境 | Profiling 方向 |
+| --- | --- |
+| Node.js | CPU profile、flame graph、event loop 监控 |
+| Java | Java Flight Recorder、async-profiler |
+| Go | `pprof` |
+| Python | `py-spy` |
+| 原生服务 | `perf`、flame graph |
+
+Profiler 的价值在于把优化范围从“整个系统”收缩到“具体函数或代码路径”。只有做到这一点，后续修改才不是猜测。
+
+## 五种降低 CPU 开销的方法
+
+<CardGrid columns={2}>
+  <InfoCard title="1. 减少重复计算">
+    将重复扫描、巢状循环、不必要排序，以及重复计算替换为索引查询或可复用的结果。
+  </InfoCard>
+
+  <InfoCard title="2. 先过滤，再转换">
+    在执行 mapping、格式化、衍生值计算或序列化之前，先把不需要的数据排除掉。
+  </InfoCard>
+
+  <InfoCard title="3. 限制昂贵请求的范围">
+    使用分页、批次大小限制、报表时间范围、timeout 与 rate limit，避免单一请求触发无限量计算。
+  </InfoCard>
+
+  <InfoCard title="4. 控制并发量">
+    限制同时执行的 CPU 密集型任务，并将后台处理与需要低延迟的 API 请求分离。
+  </InfoCard>
+
+  <InfoCard title="5. 缓存重复结果">
+    只有在资料新鲜度需求与缓存失效规则明确时，才重复使用昂贵的计算结果。
+  </InfoCard>
+</CardGrid>
+
+这些方法分别对应不同类型的 CPU 浪费。不要在没有 profiling 证据时一次性套用所有优化，因为你可能增加系统复杂度，却没有处理真正昂贵的路径。
+
+## 范例：将重复扫描改为索引查询
+
+应用层常见的 CPU 浪费，是针对同一批资料进行大量重复扫描。
+
+假设一个 endpoint 需要从可用 ID 中找出请求传入的有效 ID：
+
+```javascript
+const matched = requestedIds.filter((id) =>
+  availableIds.includes(id)
+);
+```
+
+这段代码的问题是：对于每一个 `requestedIds` 中的项目，`includes()` 都可能重新扫描一次 `availableIds`。当两个数组都变大时，重复工作会明显增加。
+
+更好的方式是先建立一次查找结构，再进行快速查询：
+
+```javascript
+const availableIdSet = new Set(availableIds);
+
+const matched = requestedIds.filter((id) =>
+  availableIdSet.has(id)
+);
+```
+
+这里的重要原则并不限于 JavaScript：
+
+- 能用索引查询解决的问题，不要反复完整扫描。
+- 能用 map 或 set 解决的问题，不要保留不必要的双层循环。
+- 如果业务不需要排序，就不要先进行排序。
+- 当计算结果仍然有效时，不要重复计算相同内容。
+
+升级服务器只能提供更多 CPU 容量；改善算法则会直接减少每一个请求需要执行的工作量。
+
+## 范例：先过滤，再转换资料
+
+应用程序也经常把大量资料转换完成后，才发现其中绝大部分最后不会返回给客户端。这同样属于 CPU 浪费。
+
+一个低效率的请求流程可能如下：
+
+```text
+读取 100,000 笔订单
+把每一笔资料转换为 response object
+计算所有衍生字段
+最后过滤出 20 笔符合条件的订单
+返回响应
+```
+
+更合理的流程应该是：
+
+```text
+先应用 tenant 与权限过滤
+再应用状态与日期过滤
+执行分页
+只选择画面实际需要的栏位
+最后转换真正要返回的资料
+```
+
+这样做不仅减少 Node.js 中的计算量，也可能降低数据库传输资料量与 response serialization 成本。
+
+对于清单型 endpoint，应优先考虑：
+
+- 将选择性高的过滤条件交给数据库执行。
+- 在格式化 response 之前先完成分页。
+- 清单页面只返回摘要栏位。
+- 只有详情页面才读取完整资料。
+- 不要序列化客户端根本不会使用的字段。
+
+核心思路是：**越早排除不需要的资料，后续每一层就做越少工作。**
+
+## 范例：限制高成本请求
+
+一个 endpoint 不需要存在 bug，也不需要遭受恶意攻击，仍然可能拖垮系统。只要它允许单一请求触发超过服务器在线处理能力的工作量，就会形成风险。
+
+典型情况包括：
+
+- 没有限制范围的报表导出。
+- 一次验证数量极大的 ID 批次。
+- 没有结果上限的搜寻接口。
+- 没有日期边界的历史查询。
+- 一次响应包含数千个复杂对象。
+
+API 应明确暴露限制，例如：
+
+```http
+GET /orders?limit=50&cursor=...
+```
+
+| 限制方式 | 用途 |
+| --- | --- |
+| 最大页面大小 | 避免建立过大的响应对象 |
+| 最大批次大小 | 限制循环与验证工作量 |
+| 最大报表时间范围 | 避免没有边界的聚合计算 |
+| Timeout 或取消机制 | 停止调用方已经不需要的工作 |
+| Rate limit | 在流量突发时保护高成本接口 |
+
+限制的意义，是让 CPU 消耗变得可预测。正常用户的一次请求，不应该因为参数没有边界而意外变成对系统的拒绝服务攻击。
+
+## 范例：控制并发量
+
+即使每一个请求本身已经足够高效，只要太多 CPU 密集型操作同时执行，系统仍然可能变慢。
+
+当所有 CPU 核心都已经忙碌时，继续加入更多并发工作，通常不会明显增加吞吐量，反而只会让任务排队时间变长。请求延迟升高后，客户端可能出现 timeout 与 retry，进一步制造更多负载。
+
+常见控制方式包括：
+
+- 限制 worker 同时执行的任务数量。
+- 将报表生成与批次处理移动到后台 job。
+- 将后台 worker 与处理在线请求的服务实例分开。
+- 为队列加入 backpressure。
+- 对昂贵 endpoint 施加 rate limit。
+- 在尖峰时段延后非必要工作。
+
+并发量不应该根据“应用程序最多能接收多少任务”来设定，而应该根据“当前 CPU 能同时有效完成多少工作”来设定。
+
+## 范例：只缓存真正重复的计算
+
+当许多请求都需要同一个昂贵结果时，缓存可以消除重复计算。
+
+较适合作为缓存对象的资料包括：
+
+- Dashboard 的统计总数。
+- 不常变化的系统设定。
+- 预先计算好的报表摘要。
+- 很少变更的权限映射关系。
+
+加入缓存之前，需要先确认三个问题：
+
+1. 这项计算是否真的昂贵，而且频繁重复发生？
+2. 使用者可以接受结果延迟更新多久？
+3. 哪一个事件会触发缓存失效或刷新？
+
+如果没有清楚的失效规则，缓存可能确实降低 CPU 使用率，但同时让 API 返回过时甚至错误的资料。
+
+## 实际优化流程
+
+| 步骤 | 行动 |
+| --- | --- |
+| 确认 | 验证主要压力来自 CPU 执行，而不是 I/O 等待 |
+| 定位 | 找出消耗 CPU 的进程与代码路径 |
+| 减少 | 移除重复工作，并减少需要转换的资料量 |
+| 设限 | 限制请求大小、报表范围与昂贵 endpoint 的调用频率 |
+| 控制 | 防止过量 CPU 密集型任务同时执行 |
+| 复用 | 只缓存具备清楚新鲜度规则的重复结果 |
+| 扩容 | 在移除不必要工作后，才增加 CPU 或服务实例 |
+
+这套顺序很重要。假如你先扩容，系统可能暂时恢复正常，但原本浪费 CPU 的代码仍然存在，并会随着流量成长再次成为问题。
+
+## 核心原则
+
+CPU 优化的第一步，不是修改基础设施规格，而是减少不必要的计算。
+
+先使用 profiling 找出真正昂贵的路径，再减少处理的数据量、为高成本操作设定边界、控制并发数量，并只在剩余工作确实属于合理业务需求时进行扩容。
+
+</Lang>

@@ -3,7 +3,7 @@ title: "How to Resolve I/O Overhead in Database-Driven Applications"
 category: "Software Development"
 createdAt: "2026-06-03"
 summary: "A practical PostgreSQL-focused guide to reducing storage pressure through query analysis, indexing, read replicas, write control, and data-access design."
-readTime: "12 min read"
+readTime: "9 min read"
 tags:
   - "Database"
   - "PostgreSQL"
@@ -15,22 +15,41 @@ series:
   order: 3
 ---
 
-I/O overhead occurs when an application spends too much time reading or writing data instead of progressing through useful work.
+<Lang lang="en">
 
-In database-driven applications, this often appears as:
+I/O overhead occurs when an application spends too much time reading or writing data instead of completing useful work. In database-driven systems, the database is often called “slow” when it is actually executing inefficient access patterns created by the application.
 
-* Slow API endpoints even though application CPU is not saturated.
-* Database processes performing heavy reads or writes.
-* Elevated storage latency.
-* High I/O wait on the server.
-* Query response times increasing as tables grow.
-* Background writes affecting normal user traffic.
+The first goal is not to redesign the database. It is to prove that storage waits exist, identify the query or write path producing them, and reduce unnecessary movement of data.
 
-I/O problems are often blamed on “the database being slow.” In reality, the database may be faithfully executing inefficient access patterns created by the application.
+## What I/O Overhead Looks Like
 
-## Confirm That I/O Is the Bottleneck
+A database-related I/O bottleneck often appears through several signals at the same time:
 
-Before changing indexes or adding replicas, confirm the diagnosis at the operating-system level.
+<CardGrid columns={2}>
+  <InfoCard title="Slow APIs, Normal App CPU">
+    Requests slow down even though the application process is not close to CPU saturation.
+  </InfoCard>
+
+  <InfoCard title="High Storage Wait">
+    The server reports elevated disk latency, large I/O queues, or high `%iowait`.
+  </InfoCard>
+
+  <InfoCard title="Heavy Database Activity">
+    PostgreSQL performs large reads or writes while the application process performs relatively little disk traffic.
+  </InfoCard>
+
+  <InfoCard title="Growth Makes It Worse">
+    Query time increases as tables, logs, history records, or related objects become larger.
+  </InfoCard>
+</CardGrid>
+
+Read overhead commonly comes from table scans, weak indexes, oversized results, repeated relationship queries, and analytics traffic sharing resources with user requests.
+
+Write overhead commonly comes from unnecessary updates, excessive indexes, large transaction batches, append-only tables growing without control, checkpoints, vacuum work, or replication pressure.
+
+## Step 1: Confirm Storage Pressure
+
+Run this on the affected Linux server to measure device latency, I/O queueing, and whether storage is remaining busy during the slowdown:
 
 ```bash
 iostat -xz 1 5
@@ -39,11 +58,18 @@ iostat -xz 1 5
 Example output:
 
 ```text
-Device            r/s     w/s    rkB/s    wkB/s  r_await  w_await  aqu-sz  %util
-nvme0n1        1410.00  722.00  93820.0  68120.0    38.20    52.70   22.14   99.40
+Device        r/s    w/s  r_await  w_await  aqu-sz  %util
+nvme0n1    1410.0  722.0    38.20    52.70   22.14   99.40
 ```
 
-Then identify the process producing that I/O:
+| Signal | Interpretation |
+| --- | --- |
+| High `r_await` or `w_await` | Reads or writes are taking longer |
+| Growing `aqu-sz` | I/O requests are queueing |
+| High `%util` plus high latency | Storage is a likely constraint |
+| High `%util` alone | Not enough evidence |
+
+Run this on the same server to identify which process is generating the storage traffic:
 
 ```bash
 pidstat -d 1 5
@@ -52,48 +78,24 @@ pidstat -d 1 5
 Example output:
 
 ```text
-UID       PID   kB_rd/s   kB_wr/s  Command
-999      1732   78120.00  22740.00 postgres
-1001    28417     320.00    680.00 node
+UID      PID   kB_rd/s   kB_wr/s  Command
+999     1732   78120.00  22740.00 postgres
+1001   28417     320.00    680.00 node
 ```
 
-This is enough to move the investigation toward database queries and write behavior.
+This result points the investigation toward PostgreSQL queries and write behaviour rather than application-side CPU optimization.
 
-## The Database I/O Mental Model
+## Step 2: Find the Expensive Queries
 
-A database must perform I/O when it needs data pages that are not already available in memory or when it must persist changed data.
+PostgreSQL's `pg_stat_statements` extension records execution statistics for normalized SQL statements. Enable it through the normal database change process before relying on its statistics.
 
-Read overhead commonly comes from:
-
-* Full table scans.
-* Missing or ineffective indexes.
-* Reading unnecessary columns.
-* Returning too many records.
-* Repeated queries for the same related objects.
-* Analytics queries sharing resources with transactional traffic.
-
-Write overhead commonly comes from:
-
-* High insert or update volume.
-* Updating indexed columns repeatedly.
-* Too many indexes on write-heavy tables.
-* Large transaction batches.
-* Audit logging or event tables growing without control.
-* Vacuum, checkpoints, or replication pressure.
-
-The goal is not to eliminate I/O. The goal is to perform only the reads and writes required for the product behavior.
-
-## Step 1: Identify Expensive Queries with `pg_stat_statements`
-
-PostgreSQL provides the `pg_stat_statements` extension to track execution statistics for normalized SQL statements.
-
-Enable it, subject to your PostgreSQL configuration and operational change process:
+Run this in PostgreSQL to enable query-level execution tracking when it is not already available:
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 ```
 
-Find queries with large total execution time:
+Run this in PostgreSQL to identify queries that consume the most total execution time and read many shared blocks:
 
 ```sql
 SELECT
@@ -109,25 +111,22 @@ ORDER BY total_exec_time DESC
 LIMIT 5;
 ```
 
-Illustrative output:
+Interpret the result in two directions:
 
-```text
- calls | total_ms  | avg_ms | shared_blks_read | shared_blks_hit | rows   | query
--------+-----------+--------+------------------+-----------------+--------+--------------------------------------------
-  4821 | 921440.22 | 191.14 |          8142204 |          224110 | 482100 | SELECT * FROM orders WHERE customer_id = $1
-   214 | 410221.80 |1916.92 |          2718400 |           43182 |    214 | SELECT ... FROM audit_logs WHERE created_at...
- 90211 | 182330.44 |   2.02 |             1284 |         9821440 |  90211 | SELECT id FROM users WHERE email = $1
-```
+| Pattern | Why It Matters |
+| --- | --- |
+| High calls and high total time | Frequent query is continuously taxing the system |
+| Low calls but very high average time | Rare query may create latency spikes or reporting pressure |
+| High `shared_blks_read` | Query repeatedly needs blocks from storage |
+| High hits with acceptable latency | Data is often served from memory instead of disk |
 
-The first query deserves attention because it runs frequently and reads a large number of blocks from storage.
+Do not optimize only the slowest single query. A moderately slow query called thousands of times may consume more system capacity than an occasional report query.
 
-The second query may also matter because each execution is extremely expensive, even though it runs less often.
+## Step 3: Inspect the Query Plan
 
-## Step 2: Analyze the Query Plan
+After locating an expensive query, inspect how PostgreSQL reaches the result. On production systems, use `EXPLAIN (ANALYZE, BUFFERS)` carefully because it executes the query.
 
-Use `EXPLAIN` to understand how PostgreSQL accesses the data.
-
-For production systems, use `EXPLAIN (ANALYZE, BUFFERS)` carefully because it actually executes the query.
+Run this in PostgreSQL for a confirmed expensive user-facing query to see whether rows are found through an index or scanned from a larger table:
 
 ```sql
 EXPLAIN (ANALYZE, BUFFERS)
@@ -138,89 +137,74 @@ ORDER BY created_at DESC
 LIMIT 20;
 ```
 
-Example output before indexing:
+Example plan before a suitable index exists:
 
 ```text
 Limit  (actual time=184.101..184.118 rows=20 loops=1)
   Buffers: shared hit=92 read=18342
   ->  Sort  (actual time=184.099..184.103 rows=20 loops=1)
         Sort Key: created_at DESC
-        ->  Seq Scan on orders  (actual time=0.091..176.204 rows=4821 loops=1)
+        ->  Seq Scan on orders
               Filter: (customer_id = 8821)
               Rows Removed by Filter: 1924830
-Planning Time: 0.291 ms
 Execution Time: 184.166 ms
 ```
 
-The important signals are:
+| Plan Signal | Meaning |
+| --- | --- |
+| `Seq Scan` | PostgreSQL is examining the table instead of directly finding matching rows |
+| Large `Rows Removed by Filter` | Much of the read work produces no returned value |
+| High `shared read` | Many blocks are loaded from storage |
+| Sort before a small `LIMIT` | Index order may not match the requested result order |
 
-* `Seq Scan on orders`: the database scanned the table rather than using an index.
-* `Rows Removed by Filter`: a large amount of data was examined and rejected.
-* `shared read=18342`: many data blocks had to be read.
-* Execution time is high for a small result set.
+For this access pattern, an index that supports both filtering and ordering can reduce reads sharply.
 
-## Strategy 1: Add Indexes That Match Real Access Patterns
-
-For the query above, a composite index can support both the filter and ordering:
+Run this in PostgreSQL through the approved migration process to create an index for recent orders by customer without blocking ordinary writes during creation:
 
 ```sql
 CREATE INDEX CONCURRENTLY idx_orders_customer_created_at
 ON orders (customer_id, created_at DESC);
 ```
 
-Run the plan again:
+A good index matches a frequent, valuable query path. It should not be added merely because a column appears in a filter.
 
-```sql
-EXPLAIN (ANALYZE, BUFFERS)
-SELECT id, status, total_amount, created_at
-FROM orders
-WHERE customer_id = 8821
-ORDER BY created_at DESC
-LIMIT 20;
-```
+## Strategies That Reduce I/O
 
-Illustrative output after indexing:
+<CardGrid columns={2}>
+  <InfoCard title="1. Index Real Access Paths">
+    Support selective filters, frequent joins, and common filter-plus-sort patterns. Prefer indexes justified by measured queries.
+  </InfoCard>
 
-```text
-Limit  (actual time=0.081..0.142 rows=20 loops=1)
-  Buffers: shared hit=24 read=2
-  ->  Index Scan using idx_orders_customer_created_at on orders
-        Index Cond: (customer_id = 8821)
-Planning Time: 0.390 ms
-Execution Time: 0.171 ms
-```
+  <InfoCard title="2. Read Less Data">
+    Select only required columns, paginate list endpoints, require bounded history ranges, and avoid returning large JSON or text fields unnecessarily.
+  </InfoCard>
 
-The database now finds the requested rows directly instead of scanning unrelated orders.
+  <InfoCard title="3. Remove Repeated Reads">
+    Replace N+1 query patterns with bounded joins, batched `WHERE id IN (...)` reads, ORM preloading, or caching for stable reference data.
+  </InfoCard>
 
-### Indexing Principles
+  <InfoCard title="4. Reduce Write Amplification">
+    Avoid updates that do not change values, review unused indexes on write-heavy tables, and process background writes in controlled batches.
+  </InfoCard>
 
-A good index usually supports a frequent, important query pattern.
+  <InfoCard title="5. Separate Read Workloads">
+    Route reporting, analytics, exports, or delay-tolerant dashboards to read replicas when primary read load becomes significant.
+  </InfoCard>
 
-Consider indexes for:
+  <InfoCard title="6. Manage Large Historical Data">
+    For logs, events, or time-series tables, use retention, summaries, or partitioning when queries naturally operate over time ranges.
+  </InfoCard>
+</CardGrid>
 
-* Foreign keys used in joins.
-* Columns frequently used in selective `WHERE` conditions.
-* Columns used together for filtering and sorting.
-* High-value user-facing queries.
-* Partial subsets frequently requested by the application.
+These strategies are not interchangeable. Indexing helps a query find rows efficiently; pagination reduces the amount requested; replicas redistribute eligible reads; write control prevents the primary database from spending excessive effort maintaining changes.
 
-For example, if most requests fetch pending jobs only:
+## Important Trade-Offs
 
-```sql
-CREATE INDEX CONCURRENTLY idx_jobs_pending_created_at
-ON jobs (created_at)
-WHERE status = 'pending';
-```
+### More Indexes Can Increase Write Cost
 
-A partial index can be smaller and cheaper than indexing every row.
+An index may make an important read query much faster, but each insert, update, or delete may also need to maintain that index. Large, unused indexes on frequently written tables should be reviewed.
 
-## Do Not Index Everything
-
-Indexes improve reads, but every additional index also creates write work.
-
-When a row is inserted, updated, or deleted, PostgreSQL may need to update multiple indexes. A table with too many indexes may become expensive to write.
-
-Inspect index usage:
+Run this in PostgreSQL to identify indexes with low recorded scan usage and significant size for further investigation:
 
 ```sql
 SELECT
@@ -232,215 +216,308 @@ FROM pg_stat_user_indexes
 ORDER BY idx_scan ASC, pg_relation_size(indexrelid) DESC;
 ```
 
-Illustrative output:
+A low `idx_scan` value makes an index a candidate for review, not automatic deletion. It may still support rare operational tasks, constraints, failover workloads, or periodic reports.
+
+### Read Replicas Can Return Stale Data
+
+Read replicas can protect the primary database from delay-tolerant read traffic, but they may lag behind recent writes.
 
 ```text
- table_name | index_name                       | idx_scan | index_size
-------------+----------------------------------+----------+-----------
- orders     | idx_orders_unused_legacy_status  |        0 | 184 MB
- events     | idx_events_user_type_created     |       18 | 620 MB
- orders     | idx_orders_customer_created_at   |  8821941 | 412 MB
+User changes profile -> primary commits update -> replica has not replayed it yet -> user reads old profile
 ```
 
-An unused large index is a candidate for review, not immediate deletion. Confirm that it is not required for occasional reports, constraints, failover traffic, or a seasonal workload before removing it.
+Use the primary for flows requiring immediate read-after-write consistency. Route tolerant reads, such as historical reports or dashboards, to replicas only when slight delay is acceptable.
 
-## Strategy 2: Read Less Data
+### Partitioning Is Not a Replacement for Query Design
 
-A common I/O mistake is selecting more data than the endpoint needs.
+Partitioning can help very large, time-bounded datasets such as audit logs or events. It does not fix an application that selects unnecessary columns, requests unbounded rows, or lacks useful indexes.
 
-Avoid:
+## A Practical Resolution Workflow
 
-```sql
-SELECT *
-FROM orders
-WHERE customer_id = $1
-ORDER BY created_at DESC;
+<CardGrid columns={2}>
+  <InfoCard title="1. Confirm">
+    Use Linux metrics to verify that storage waiting, rather than application CPU, is affecting latency.
+  </InfoCard>
+
+  <InfoCard title="2. Locate">
+    Confirm that PostgreSQL is generating the reads or writes, then find costly statements with `pg_stat_statements`.
+  </InfoCard>
+
+  <InfoCard title="3. Explain">
+    Use query plans and buffer statistics to understand whether the cost comes from scans, sorting, repeated reads, or write work.
+  </InfoCard>
+
+  <InfoCard title="4. Reduce">
+    Add justified indexes, return fewer rows and columns, eliminate N+1 reads, and avoid unnecessary updates.
+  </InfoCard>
+
+  <InfoCard title="5. Separate">
+    Move delay-tolerant reads or analytical workloads away from critical transactional traffic when required.
+  </InfoCard>
+
+  <InfoCard title="6. Measure Again">
+    Compare query time, blocks read, storage latency, API percentiles, write cost, and replica lag after each change.
+  </InfoCard>
+</CardGrid>
+
+## The Main Principle
+
+I/O overhead usually means the system is moving more data than the product behaviour requires.
+
+Reduce the amount of data read, reduce unnecessary writes, index the access paths that matter, and isolate heavy workloads only after measurement proves they are responsible. A database becomes faster not only when storage improves, but when the application asks it to do less unnecessary work.
+
+</Lang>
+
+<Lang lang="zh">
+
+I/O overhead，也就是读写开销过高，代表应用程序花了太多时间从储存设备读取数据，或把变更写入储存设备，而不是推进真正对用户有价值的工作。
+
+在数据库驱动的系统中，人们经常直接说“数据库太慢”。但很多时候，数据库只是忠实地执行了应用程序设计出来的低效率读取方式，例如扫过大量无关资料、反复读取关联对象，或者写入了不必要的更新。
+
+## I/O 瓶颈如何出现
+
+数据库相关的 I/O 问题，通常不会只表现为一个指标异常，而是多个现象同时出现：
+
+<CardGrid columns={2}>
+  <InfoCard title="API 变慢，但应用 CPU 不高">
+    应用程序并没有忙于计算，请求却持续延迟，说明它可能正在等待外部读写完成。
+  </InfoCard>
+
+  <InfoCard title="储存等待明显增加">
+    磁盘延迟提高、I/O 队列变长，或者服务器上的 `%iowait` 显著上升。
+  </InfoCard>
+
+  <InfoCard title="数据库产生大量读写">
+    PostgreSQL 持续读取或写入大量资料，而 Node.js 等应用进程本身磁盘活动较低。
+  </InfoCard>
+
+  <InfoCard title="资料越多，查询越慢">
+    随着订单、日志、事件或历史记录增长，原本可接受的查询开始明显拖慢。
+  </InfoCard>
+</CardGrid>
+
+读取压力通常来自全表扫描、索引不适合、查询返回太多资料、N+1 查询，或分析型任务和正常用户请求争用同一个数据库。
+
+写入压力通常来自没有实际变化的 update、过多索引、大型 transaction、不断增长的日志表，以及 checkpoint、vacuum 或 replication 带来的额外工作。
+
+## 步骤一：确认问题来自储存等待
+
+在受影响的 Linux 服务器上执行以下命令，用来检查设备读写延迟、I/O 排队情况，以及储存设备在 API 变慢期间是否持续忙碌：
+
+```bash
+iostat -xz 1 5
 ```
 
-Prefer:
+输出范例：
+
+```text
+Device        r/s    w/s  r_await  w_await  aqu-sz  %util
+nvme0n1    1410.0  722.0    38.20    52.70   22.14   99.40
+```
+
+| 观察指标 | 代表意义 |
+| --- | --- |
+| `r_await` 或 `w_await` 偏高 | 读取或写入完成速度变慢 |
+| `aqu-sz` 持续上升 | 更多 I/O 请求正在排队 |
+| `%util` 高，同时延迟也高 | 储存可能已经成为限制因素 |
+| 只有 `%util` 高 | 证据仍然不足 |
+
+在同一台服务器上执行以下命令，用来找出是哪一个进程产生了主要磁盘流量：
+
+```bash
+pidstat -d 1 5
+```
+
+输出范例：
+
+```text
+UID      PID   kB_rd/s   kB_wr/s  Command
+999     1732   78120.00  22740.00 postgres
+1001   28417     320.00    680.00 node
+```
+
+这个结果表示主要 I/O 来自 PostgreSQL。此时排查方向应该转向 SQL 查询、索引与写入行为，而不是优先优化 Node.js 的 CPU 运算。
+
+## 步骤二：找出昂贵查询
+
+PostgreSQL 的 `pg_stat_statements` extension 可以记录标准化 SQL 语句的执行统计，用来找出哪些查询长期消耗最多资源。
+
+当环境尚未启用该 extension 时，应通过正式的数据库变更流程执行以下 SQL，以提供查询层级的统计依据：
 
 ```sql
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+```
+
+在 PostgreSQL 中执行以下查询，用来找出总执行时间高、平均执行时间高，或者大量读取共享 block 的 SQL：
+
+```sql
+SELECT
+  calls,
+  round(total_exec_time::numeric, 2) AS total_ms,
+  round(mean_exec_time::numeric, 2) AS avg_ms,
+  shared_blks_read,
+  shared_blks_hit,
+  rows,
+  query
+FROM pg_stat_statements
+ORDER BY total_exec_time DESC
+LIMIT 5;
+```
+
+结果应从以下方向解释：
+
+| 查询表现 | 为什么重要 |
+| --- | --- |
+| 调用很多次，总耗时很高 | 它正在持续消耗系统容量 |
+| 调用不多，但平均耗时非常高 | 它可能制造延迟尖峰或拖慢报表任务 |
+| `shared_blks_read` 很高 | 查询需要频繁从储存读取资料页 |
+| block hit 高，且延迟可接受 | 很多资料已经由内存提供 |
+
+不要只优化单次执行最慢的查询。一条每次只慢一点、但被调用数千次的 SQL，可能比偶尔发生一次的重型报表更值得优先处理。
+
+## 步骤三：理解查询如何读取资料
+
+找出昂贵 SQL 后，需要确认 PostgreSQL 是如何访问资料的。`EXPLAIN (ANALYZE, BUFFERS)` 会实际执行查询，因此在生产环境中应谨慎使用。
+
+在 PostgreSQL 中对已确认昂贵的用户查询执行以下计划分析，用来判断它是否通过索引取得资料，还是正在扫描大量无关记录：
+
+```sql
+EXPLAIN (ANALYZE, BUFFERS)
 SELECT id, status, total_amount, created_at
 FROM orders
-WHERE customer_id = $1
+WHERE customer_id = 8821
 ORDER BY created_at DESC
 LIMIT 20;
 ```
 
-This improvement applies at the API level as well:
-
-* Paginate lists.
-* Require date ranges for history endpoints.
-* Avoid returning large text or JSON fields in listing screens.
-* Load attachments or audit details only when requested.
-* Do not run full exports through normal synchronous endpoints.
-
-A fast index cannot compensate for an application that unnecessarily requests millions of rows.
-
-## Strategy 3: Eliminate Repeated Reads
-
-An application can generate I/O overhead through repeated small queries, commonly called the N+1 query problem.
-
-For example:
+缺少合适索引时，可能得到类似结果：
 
 ```text
-1 query to load 100 orders
-100 additional queries to load each customer
-100 additional queries to load each payment status
+Limit  (actual time=184.101..184.118 rows=20 loops=1)
+  Buffers: shared hit=92 read=18342
+  ->  Sort  (actual time=184.099..184.103 rows=20 loops=1)
+        Sort Key: created_at DESC
+        ->  Seq Scan on orders
+              Filter: (customer_id = 8821)
+              Rows Removed by Filter: 1924830
+Execution Time: 184.166 ms
 ```
 
-This produces many database round trips and repeated index or table access.
+| Plan 信号 | 说明 |
+| --- | --- |
+| `Seq Scan` | PostgreSQL 正在扫表，而不是直接定位目标资料 |
+| 大量 `Rows Removed by Filter` | 读取了许多最终不会返回的记录 |
+| `shared read` 很高 | 查询必须从储存设备载入大量 block |
+| 只返回少量结果却需要排序 | 当前索引顺序可能无法支援查询需求 |
 
-Better options include:
+对于这个查询模式，适合同时支持 `customer_id` 过滤与 `created_at` 排序的索引，可以大幅减少读取量。
 
-* Join related data when the result remains manageable.
-* Batch related reads using `WHERE id IN (...)`.
-* Preload relationships in the ORM.
-* Cache stable reference data.
-* Use query tracing to detect request paths that issue excessive SQL statements.
+通过正式 migration 流程在 PostgreSQL 中执行以下 SQL，用来建立符合客户近期订单查询路径的索引，并在建立期间减少对一般写入的阻塞：
 
-The purpose is not to create one enormous query for everything. The purpose is to avoid repeated access to data that could be retrieved efficiently in a bounded number of operations.
+```sql
+CREATE INDEX CONCURRENTLY idx_orders_customer_created_at
+ON orders (customer_id, created_at DESC);
+```
 
-## Strategy 4: Separate Read Traffic with Read Replicas
+索引的目标不是为每一个被查询过的栏位建立结构，而是支援真正高频且具有业务价值的访问路径。
 
-When the primary database handles a large amount of read traffic, read replicas can move eligible queries away from the primary writer.
+## 降低 I/O 的策略
 
-A simplified architecture is:
+<CardGrid columns={2}>
+  <InfoCard title="1. 为真实查询建立索引">
+    支援选择性高的筛选、常用 join，以及频繁出现的筛选加排序组合。索引应由测量结果支持。
+  </InfoCard>
+
+  <InfoCard title="2. 少读取资料">
+    只选择必要栏位，为清单接口加入分页，限制历史查询范围，并避免不必要地返回大型 JSON 或文字内容。
+  </InfoCard>
+
+  <InfoCard title="3. 消除重复读取">
+    将 N+1 查询改成受控的 join、批次 `WHERE id IN (...)`、ORM preload，或对稳定参考资料使用缓存。
+  </InfoCard>
+
+  <InfoCard title="4. 减少写入放大">
+    不要写回没有改变的值；检查写入频繁资料表上的多余索引；后台写入应采用受控批次。
+  </InfoCard>
+
+  <InfoCard title="5. 分离读取型负载">
+    当 primary 的读取压力已经明显时，将报表、分析、导出或允许轻微延迟的 dashboard 导向 read replica。
+  </InfoCard>
+
+  <InfoCard title="6. 管理大型历史资料">
+    对日志、事件或时间序列资料，在查询天然依赖时间范围时考虑 retention、摘要表或 partitioning。
+  </InfoCard>
+</CardGrid>
+
+这些策略处理的是不同问题。索引让查询更快找到资料；分页与栏位选择让系统少传输资料；replica 负责分散可容忍延迟的读取；写入控制则减少 primary 必须维护的变更量。
+
+## 必须理解的取舍
+
+### 索引越多，写入成本可能越高
+
+索引可以明显改善重要读取查询，但每一次 insert、update 或 delete，都可能需要同步维护更多索引。对于写入频繁的资料表，大型但几乎没有被使用的索引必须经过检查。
+
+在 PostgreSQL 中执行以下查询，用来找出记录中扫描次数很低、同时占用空间较大的索引，以便进一步调查：
+
+```sql
+SELECT
+  relname AS table_name,
+  indexrelname AS index_name,
+  idx_scan,
+  pg_size_pretty(pg_relation_size(indexrelid)) AS index_size
+FROM pg_stat_user_indexes
+ORDER BY idx_scan ASC, pg_relation_size(indexrelid) DESC;
+```
+
+`idx_scan` 很低，只代表索引值得审查，并不代表它应该立刻删除。它仍然可能支援低频但重要的报告、约束验证、故障切换流量或季节性任务。
+
+### Read Replica 可能返回旧资料
+
+Read replica 可以把允许延迟的查询从 primary 转移出去，但刚写入 primary 的资料，不一定马上出现在 replica 中。
 
 ```text
-Application writes ───────> Primary database
-Application critical reads -> Primary database
-Application report reads ──> Read replica
-Application dashboard reads -> Read replica
+用户修改个人资料 -> primary 确认成功 -> replica 尚未同步完成 -> 用户看到旧资料
 ```
 
-Good candidates for replicas include:
+需要 read-after-write consistency 的流程，应继续读取 primary。历史报表、非关键 dashboard 等可以接受短暂延迟的读取，才适合导向 replica。
 
-* Analytics dashboards.
-* Search-result enrichment.
-* Historical reporting.
-* Data exports.
-* Non-critical list screens that tolerate slight delay.
+### Partitioning 不能取代正确查询设计
 
-However, read replicas are not a universal fix.
+对于大型日志表、事件表或时间序列资料，partitioning 可以帮助限制查询需要考虑的数据范围。但如果应用程序仍然读取不必要的栏位、请求没有边界的结果，或缺少关键索引，partitioning 本身不会解决根本问题。
 
-### Understand Replication Lag
+## 实际处理流程
 
-A write accepted by the primary may not appear on a replica immediately.
+<CardGrid columns={2}>
+  <InfoCard title="1. 确认">
+    使用 Linux 指标验证响应延迟确实来自储存等待，而不是应用程序 CPU 运算。
+  </InfoCard>
 
-For example:
+  <InfoCard title="2. 定位">
+    确认 PostgreSQL 正在制造主要读写流量，再通过 `pg_stat_statements` 找出昂贵 SQL。
+  </InfoCard>
 
-```text
-User updates profile -> primary confirms success -> next read goes to replica -> old profile appears
-```
+  <InfoCard title="3. 解释">
+    使用 query plan 与 buffer 统计理解成本来自扫表、排序、重复读取，还是写入工作。
+  </InfoCard>
 
-For read-after-write consistency, route critical reads to the primary for a short period or keep that user flow on the primary.
+  <InfoCard title="4. 减少">
+    建立有依据的索引，减少返回行数与栏位，消除 N+1，并停止不必要的 update。
+  </InfoCard>
 
-### Replicas Do Not Fix Bad Queries
+  <InfoCard title="5. 分离">
+    当业务需要时，把允许延迟的读取或分析型负载移出关键交易流量路径。
+  </InfoCard>
 
-A table scan that overloads one database can also overload a replica. Replicas distribute read workload; they do not remove inefficient access patterns.
+  <InfoCard title="6. 再次测量">
+    每次变更后重新比较查询耗时、block 读取量、储存延迟、API latency、写入成本与 replica lag。
+  </InfoCard>
+</CardGrid>
 
-Index and query improvements should generally come before, or alongside, replica scaling.
+## 核心原则
 
-## Strategy 5: Reduce Write Amplification
+I/O overhead 通常表示系统移动了超过产品行为实际需要的数据量。
 
-Write-heavy systems can become I/O-bound even when reads are efficient.
+减少读取的行数与栏位，停止不必要的写入，为重要访问路径建立合适索引，并且只在测量证明有需要时分离重型负载。数据库变快，不只是因为硬盘更快，也因为应用程序不再要求它执行无价值的资料搬运工作。
 
-Common improvements include:
-
-### Avoid Updating Rows Unnecessarily
-
-Before writing an update, ensure the value actually changed. Repeatedly updating identical values produces database work, index maintenance, and replication traffic without changing application state.
-
-### Batch Background Writes Carefully
-
-Batching can reduce overhead, but extremely large transactions increase lock duration, replication delay, and recovery cost.
-
-Prefer bounded batches:
-
-```text
-Process 500 rows
-Commit
-Continue with the next 500 rows
-```
-
-The correct batch size depends on row size, indexes, traffic, and latency requirements.
-
-### Review Index Count on Write-Heavy Tables
-
-Indexes on frequently updated tables should justify their write cost through real query usage.
-
-### Separate Operational and Analytical Workloads
-
-A reporting query scanning months of event data should not be allowed to harm payment creation, login, checkout, or message delivery traffic.
-
-Options include:
-
-* Read replicas.
-* Warehousing or analytics pipelines.
-* Scheduled reports outside peak periods.
-* Materialized summaries for dashboard workloads.
-* Data retention and partitioning strategies for large append-only tables.
-
-## Strategy 6: Consider Partitioning for Very Large Tables
-
-When tables grow extremely large, partitioning can help limit the amount of data accessed or maintained for time-bounded queries.
-
-Typical candidates include:
-
-* Audit logs.
-* Application events.
-* Time-series measurements.
-* Transaction histories.
-* Message delivery records.
-
-For example, an `events` table may be partitioned by month so that a query for June 2026 does not need to consider years of historical partitions.
-
-Partitioning is not a substitute for correct indexing or query design. It is an additional data-management strategy for large and naturally separable datasets.
-
-## Strategy 7: Monitor After Every Change
-
-An optimization is only successful if it reduces actual resource cost while preserving correctness.
-
-After deploying an index or query change, compare:
-
-* Query mean and total execution time.
-* Blocks read versus blocks hit.
-* Storage latency.
-* API latency percentiles.
-* Database CPU and I/O.
-* Write performance.
-* Replica lag, if replicas are involved.
-
-A change that makes one endpoint faster but doubles write cost may not be an improvement for the full system.
-
-## A Practical Resolution Workflow
-
-When PostgreSQL-related I/O pressure is confirmed:
-
-1. Use operating-system metrics to verify storage pressure.
-2. Use `pidstat` to verify PostgreSQL is producing the I/O.
-3. Use `pg_stat_statements` to identify costly queries.
-4. Use `EXPLAIN (ANALYZE, BUFFERS)` to understand access patterns.
-5. Add or adjust indexes for important query paths.
-6. Reduce unnecessary selected columns and returned rows.
-7. Eliminate repeated reads and N+1 patterns.
-8. Review excessive write volume and unused indexes.
-9. Add replicas for eligible read traffic when the workload requires scaling.
-10. Measure again after each production change.
-
-## The Main Principle
-
-I/O overhead usually means the system is moving more data than the product behavior requires.
-
-The most effective fixes are often straightforward:
-
-* Read fewer rows.
-* Read fewer columns.
-* Use indexes that match real queries.
-* Stop repeating the same reads.
-* Avoid unnecessary writes.
-* Move tolerant read workloads to replicas.
-* Keep heavy analytics away from critical transactional traffic.
-
-A database becomes faster not only when storage improves, but when the application asks it to do less unnecessary work.
+</Lang>
+````
