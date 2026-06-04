@@ -1,0 +1,877 @@
+---
+title: "How to Find a Slow Database Query Before Adding an Index"
+category: "Software Development"
+createdAt: "2026-06-04"
+summary: "A practical PostgreSQL workflow for identifying expensive queries and reading execution plans before choosing an optimization."
+readTime: "14 min read"
+tags:
+  - "Backend"
+  - "HTTP"
+  - "Node.js"
+  - "System Design"
+featured: false
+series:
+  title: "Database Performance"
+  slug: "database-performance"
+  order: 2
+---
+
+<Lang lang="en">
+
+When an API endpoint becomes slow, the first instinct is often to add an index. Sometimes that is correct. Sometimes the real problem is excessive returned data, missing pagination, repeated queries, expensive sorting, inefficient joins, or planner statistics that no longer reflect the table. Database optimization should begin with evidence, not guesses.
+
+## Short Answer
+
+Before creating an index, answer three questions:
+
+| Question | Why It Matters | PostgreSQL Tool |
+| --- | --- | --- |
+| Which query is expensive in the real workload? | A visible slow page may not contain the largest database cost | `pg_stat_statements` |
+| What work does that query perform? | The cause may be scanning, sorting, joining, or repeated execution | `EXPLAIN (ANALYZE, BUFFERS)` |
+| Is the database choosing a poor plan because its estimates are wrong? | An index may exist but remain unused when planner estimates are inaccurate | `ANALYZE` and row estimate comparison |
+
+A correct workflow is:
+
+1. Find the expensive query.
+2. Reproduce it with realistic parameters.
+3. Read its execution plan.
+4. Identify where rows and buffers are being consumed.
+5. Apply the smallest fix that addresses that specific cause.
+6. Rerun the same measurement to confirm improvement.
+
+The important principle is simple: a slow endpoint is only a symptom. The query plan reveals the work.
+
+## The Example Endpoint
+
+Assume an application exposes an order-history endpoint:
+
+```text
+GET /api/users/421/orders?status=paid&limit=20
+```
+
+The endpoint retrieves the twenty most recent paid orders for one user:
+
+```sql
+SELECT
+  id,
+  created_at,
+  total_amount,
+  status
+FROM orders
+WHERE user_id = 421
+  AND status = 'paid'
+ORDER BY created_at DESC
+LIMIT 20;
+```
+
+At first, this query may be fast because the `orders` table contains only a few thousand records. Later, when the table contains millions of records, the endpoint becomes slow.
+
+That still does not prove the missing solution is an index. Several different problems could produce the same symptom:
+
+| Possible Cause | What It Means |
+| --- | --- |
+| Large sequential scan | The database examines many records to find twenty matches |
+| Expensive sort | Matching rows are found, but ordering them consumes time or memory |
+| Repeated execution | One request triggers the same query many times |
+| Incorrect row estimates | The planner expects a small result but receives a much larger one |
+| Excessive output | The endpoint returns more data than the screen needs |
+| External delay | The SQL is acceptable, but application or network work is slow |
+
+The investigation begins by identifying whether this SQL statement is truly important in the total workload.
+
+## Step 1: Find Expensive Queries in the Real Workload
+
+Optimizing the query that feels slow is not always the highest-impact change. A query taking 400 milliseconds once per day may matter less than a query taking 30 milliseconds but running hundreds of thousands of times.
+
+PostgreSQL provides the `pg_stat_statements` extension for tracking aggregated planning and execution statistics across SQL statements. It helps answer two different questions:
+
+- Which query has the highest total cost across the system?
+- Which query has the worst average latency per call?
+
+Assuming `pg_stat_statements` has already been enabled in the PostgreSQL server configuration and installed in the database, run this query in PostgreSQL to find statements consuming the greatest total execution time:
+
+```sql
+SELECT
+  calls,
+  total_exec_time,
+  mean_exec_time,
+  rows,
+  query
+FROM pg_stat_statements
+ORDER BY total_exec_time DESC
+LIMIT 10;
+```
+
+A simplified result may look like this:
+
+```text
+ calls | total_exec_time | mean_exec_time | rows   | query
+-------+-----------------+----------------+--------+----------------------------------------
+ 92000 |       184000.21 |           2.00 | 920000 | SELECT ... FROM products WHERE ...
+   430 |        53120.90 |         123.54 |   8600 | SELECT ... FROM orders WHERE ...
+   120 |        24800.11 |         206.67 |   2400 | SELECT ... FROM reports WHERE ...
+```
+
+This output suggests two different optimization opportunities:
+
+- The product query is individually fast but expensive in total because it is executed very frequently.
+- The order and report queries are individually slow and may be noticeable to users.
+
+To find queries with the worst average latency, run this query in PostgreSQL so rare but very slow statements are not hidden by high-frequency traffic:
+
+```sql
+SELECT
+  calls,
+  mean_exec_time,
+  total_exec_time,
+  rows,
+  query
+FROM pg_stat_statements
+WHERE calls >= 10
+ORDER BY mean_exec_time DESC
+LIMIT 10;
+```
+
+Do not optimize from this table alone. Aggregated statistics identify candidates. The next step is to reproduce one important query with realistic parameter values and inspect how it executes.
+
+## Step 2: Reproduce the Query With Representative Data
+
+Execution plans are meaningful only when the data and parameters resemble real use.
+
+The following differences can completely change a query plan:
+
+- A test table containing 500 orders instead of 5 million orders.
+- A user with 3 orders compared with a merchant account containing 200,000 orders.
+- A common status such as `paid` compared with a rare status such as `refunded`.
+- Recently imported data before planner statistics have been refreshed.
+
+For the example endpoint, select a user whose order history resembles the slow production case. Then run the same SQL with the same filtering and ordering behavior.
+
+Before comparing plans, run this in PostgreSQL on the relevant table after major test-data imports or large data changes, so the planner has current statistical information about the table contents:
+
+```sql
+ANALYZE orders;
+```
+
+`ANALYZE` does not make the query fast by itself. It updates the statistical information the planner uses when estimating row counts and choosing between plan alternatives.
+
+A diagnosis performed against tiny or unrepresentative data can produce a misleading conclusion. The database may correctly choose a sequential scan on a small test table, while production requires a different access path.
+
+## Step 3: Inspect the Execution Plan
+
+`EXPLAIN` shows the plan PostgreSQL intends to use. `EXPLAIN ANALYZE` executes the query and reports what actually happened. Adding `BUFFERS` shows how many database buffer pages were touched during execution.
+
+Run this in PostgreSQL against a safe `SELECT` query to measure how the order-history request actually executes:
+
+```sql
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT
+  id,
+  created_at,
+  total_amount,
+  status
+FROM orders
+WHERE user_id = 421
+  AND status = 'paid'
+ORDER BY created_at DESC
+LIMIT 20;
+```
+
+A simplified slow plan might look like this:
+
+```text
+Limit  (actual time=146.382..146.390 rows=20 loops=1)
+  Buffers: shared hit=18420
+  ->  Sort  (actual time=146.379..146.383 rows=20 loops=1)
+        Sort Key: created_at DESC
+        Sort Method: top-N heapsort  Memory: 29kB
+        Buffers: shared hit=18420
+        ->  Seq Scan on orders  (actual time=0.041..143.110 rows=1842 loops=1)
+              Filter: ((user_id = 421) AND (status = 'paid'))
+              Rows Removed by Filter: 998158
+              Buffers: shared hit=18420
+Planning Time: 0.380 ms
+Execution Time: 146.441 ms
+```
+
+This plan reveals more than the final execution time:
+
+- The query returns only `20` rows.
+- The sequential scan examines roughly one million records.
+- More than `998,000` rows are rejected by the filter.
+- The query touches `18,420` shared buffers.
+- Sorting exists, but the dominant work is finding matching rows.
+
+This is strong evidence that the query lacks an efficient access path for its filtering and ordering pattern. An index may be justified here. But the reason is not merely “the endpoint is slow”; the reason is that the plan performs a large scan to obtain a small ordered result.
+
+## Step 4: Read the Important Plan Signals
+
+An execution plan contains many details. At the beginning, focus on a small set of signals that answer practical questions.
+
+| Plan Signal | Interpretation | Likely Direction |
+| --- | --- | --- |
+| `Seq Scan` on a large table | PostgreSQL is reading rows directly instead of using an index | Check whether filtering is selective enough for an index |
+| `Rows Removed by Filter` is very large | Much of the work is discarded after inspection | Consider a better access path or stronger filtering |
+| Expensive `Sort` node | Ordering consumes material work | Check whether an index can provide the required order |
+| High `Buffers: shared hit/read` | The query touches many pages | Reduce scanned data or improve access path |
+| Estimated rows differ heavily from actual rows | Planner assumptions do not match reality | Refresh or improve planner statistics |
+| Large `loops` count inside a join | An inner operation is repeated many times | Inspect join design and join indexes |
+
+### Sequential Scan Is Not Automatically Wrong
+
+A sequential scan is not a bug by itself. If a query requests most records in a table, reading the table sequentially may be more efficient than repeatedly following index entries.
+
+For example, this query may legitimately scan the table if most orders are paid:
+
+```sql
+SELECT
+  id,
+  total_amount
+FROM orders
+WHERE status = 'paid';
+```
+
+If `paid` represents 95% of all rows, an index on `status` alone may provide little benefit. The database still needs to read most of the table.
+
+In contrast, the order-history query combines a single user, a status, an ordering requirement, and a small limit. It is searching for a narrow ordered subset. That is the type of pattern an index can often support effectively.
+
+### Estimated Rows Versus Actual Rows
+
+A plan node usually contains estimated row counts and actual row counts. A large difference matters because the planner chooses algorithms before execution begins.
+
+Consider this simplified output:
+
+```text
+Index Scan on orders  (rows=5) (actual rows=1842 loops=1)
+```
+
+The planner expected five rows but encountered 1,842. That mismatch can affect decisions about joins, sorting, and index usage.
+
+Run this in PostgreSQL when table contents have changed substantially or imported test data has not yet been analyzed, so the planner can refresh its estimates:
+
+```sql
+ANALYZE orders;
+```
+
+If estimates remain poor because multiple columns are correlated, such as certain statuses being common only for specific merchants, the problem may eventually require extended statistics. The first step remains the same: identify the estimate mismatch before changing architecture.
+
+## Step 5: Distinguish Query Problems From Index Problems
+
+Not every slow query should be fixed with an index. The execution plan should direct the type of improvement.
+
+<CardGrid columns={2}>
+  <InfoCard title="Too Much Returned Data">
+    If the API returns thousands of records or unnecessary columns, reduce the result shape and add pagination before creating new indexes.
+  </InfoCard>
+
+  <InfoCard title="Too Many Scanned Rows">
+    If a selective query returns few rows but scans a large table, a targeted index is often justified.
+  </InfoCard>
+
+  <InfoCard title="Repeated Query Calls">
+    If one endpoint runs the same lookup repeatedly, remove N+1 behavior, batch work, or cache safe results.
+  </InfoCard>
+
+  <InfoCard title="Incorrect Estimates">
+    If estimated and actual rows differ sharply, refresh or improve statistics before assuming the access path is missing.
+  </InfoCard>
+</CardGrid>
+
+The following table maps common observations to first actions:
+
+| Observation | First Action | Why Not Index Immediately? |
+| --- | --- | --- |
+| `SELECT *` returns large records | Select only required columns | Indexing does not reduce response payload |
+| Endpoint loads full history | Add pagination or limits | Indexing an unlimited response still permits excessive work |
+| Query runs once per list item | Replace N+1 calls with one grouped query | The problem is execution count |
+| Scan returns a tiny subset | Evaluate a matching index | An index directly addresses row location |
+| Sort dominates execution | Evaluate order-supporting index or query change | The bottleneck is ordering |
+| Estimates are badly wrong | Run `ANALYZE`; inspect data distribution | A planner using poor estimates may ignore useful plans |
+
+## Step 6: Decide Whether an Index Is Justified
+
+Return to the example query:
+
+```sql
+SELECT
+  id,
+  created_at,
+  total_amount,
+  status
+FROM orders
+WHERE user_id = 421
+  AND status = 'paid'
+ORDER BY created_at DESC
+LIMIT 20;
+```
+
+The query has a stable access pattern:
+
+- `user_id` is filtered by equality.
+- `status` is filtered by equality.
+- Results are read in descending `created_at` order.
+- Only a small number of rows are required.
+
+After confirming that this query is important and performs a large scan, run this in PostgreSQL to provide an access path aligned with its filtering and ordering pattern:
+
+```sql
+CREATE INDEX idx_orders_user_status_created_at
+ON orders (user_id, status, created_at DESC);
+```
+
+Then rerun the same diagnostic query:
+
+```sql
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT
+  id,
+  created_at,
+  total_amount,
+  status
+FROM orders
+WHERE user_id = 421
+  AND status = 'paid'
+ORDER BY created_at DESC
+LIMIT 20;
+```
+
+A simplified improved result may look like this:
+
+```text
+Limit  (actual time=0.058..0.074 rows=20 loops=1)
+  Buffers: shared hit=24
+  ->  Index Scan using idx_orders_user_status_created_at on orders
+        (actual time=0.056..0.069 rows=20 loops=1)
+        Index Cond: ((user_id = 421) AND (status = 'paid'))
+        Buffers: shared hit=24
+Planning Time: 0.290 ms
+Execution Time: 0.101 ms
+```
+
+The important comparison is not the presence of the words `Index Scan`. The important comparison is the reduction in work:
+
+| Measurement | Before Index | After Index |
+| --- | ---: | ---: |
+| Returned rows | 20 | 20 |
+| Rows discarded after filtering | 998,158 | Minimal |
+| Shared buffers touched | 18,420 | 24 |
+| Execution time in example | 146.441 ms | 0.101 ms |
+
+This is what a justified index looks like: it enables the database to perform substantially less work for an important query pattern.
+
+## A Practical Diagnostic Workflow
+
+The workflow below should be repeated whenever an application appears to need database optimization.
+
+<CardGrid columns={2}>
+  <InfoCard title="1. Identify Candidate Queries">
+    Use request timing, database monitoring, or `pg_stat_statements` to find SQL statements with high total or average execution cost.
+  </InfoCard>
+
+  <InfoCard title="2. Reproduce Real Conditions">
+    Use representative table sizes, realistic parameters, and data distributions that resemble the slow case.
+  </InfoCard>
+
+  <InfoCard title="3. Refresh Statistics">
+    Run `ANALYZE` after major data changes so the query planner evaluates plans with current information.
+  </InfoCard>
+
+  <InfoCard title="4. Read the Actual Plan">
+    Use `EXPLAIN (ANALYZE, BUFFERS)` for safe queries to inspect rows, loops, filtering, sorting, and buffer usage.
+  </InfoCard>
+
+  <InfoCard title="5. Choose the Smallest Fix">
+    Reduce returned data, change query shape, repair repeated execution, update statistics, or add a targeted index depending on the evidence.
+  </InfoCard>
+
+  <InfoCard title="6. Measure Again">
+    Run the same query and compare the same signals. An optimization is accepted because measured work decreases, not because the code looks improved.
+  </InfoCard>
+</CardGrid>
+
+Be careful with write statements. `EXPLAIN ANALYZE` actually executes the SQL statement. For `INSERT`, `UPDATE`, `DELETE`, or other statements with side effects, do not run it casually against production data.
+
+When testing a write statement in a controlled PostgreSQL environment where rolling back is safe, run it inside a transaction so execution information can be inspected without preserving the change:
+
+```sql
+BEGIN;
+
+EXPLAIN ANALYZE
+UPDATE orders
+SET status = 'paid'
+WHERE id = 98121;
+
+ROLLBACK;
+```
+
+This prevents the test update from being committed, but it does not make unsafe production testing acceptable. Diagnosis should still be performed with operational caution.
+
+## Common Mistakes
+
+### Adding Indexes Without Measuring Query Frequency
+
+A query may become faster after an index is added, but every additional index increases storage and write-maintenance cost. An index created for a rare administrative screen may be less valuable than optimizing a moderate query that runs continuously.
+
+### Testing Against Tiny Local Data
+
+A plan chosen for hundreds of rows may not represent a plan chosen for millions of rows. Performance testing should contain realistic row counts and realistic value distributions.
+
+### Looking Only at Execution Time
+
+Execution time varies with cache state, machine load, concurrent traffic, and storage conditions. Buffer usage, rows filtered, loops, and plan structure provide additional evidence about whether the amount of work has changed.
+
+### Treating Sequential Scans as Always Bad
+
+Sequential scans are often correct for small tables or queries returning a large portion of a table. The correct question is not “Did PostgreSQL use an index?” but “Did PostgreSQL perform a reasonable amount of work for the requested result?”
+
+### Optimizing a Query That Is Not the Bottleneck
+
+A technically slow query may still be irrelevant if it rarely runs. Begin with workload impact, then inspect individual execution behavior.
+
+## The Main Principle
+
+Indexing is not the beginning of database performance work. Diagnosis is.
+
+A disciplined database optimization process is:
+
+1. Find the SQL statement that matters in the real workload.
+2. Reproduce it using realistic data and parameters.
+3. Use `EXPLAIN (ANALYZE, BUFFERS)` to see actual rows, filtering, sorting, loops, and page activity.
+4. Check whether planner estimates are credible.
+5. Fix the specific source of waste.
+6. Add an index only when the query needs a faster access path.
+7. Verify the improvement by comparing the same measurements again.
+
+The next article in this series can now discuss indexing properly: not as a magic performance switch, but as a deliberate data structure chosen to support a verified query pattern.
+
+</Lang>
+
+<Lang lang="zh">
+
+当一个 API endpoint 开始变慢时，很多开发者第一反应就是加 index。有时这是正确答案，但有时真正的问题是返回数据过多、没有 pagination、同一条查询被重复执行、大量排序、低效 join，或者 planner 使用的统计信息已经不能反映当前数据分布。数据库优化不能从猜测开始，而应该从证据开始。
+
+## 简短答案
+
+在建立索引之前，先回答三个问题：
+
+| 问题 | 为什么重要 | PostgreSQL 工具 |
+| --- | --- | --- |
+| 真实 workload 中到底是哪条 SQL 昂贵？ | 用户感觉慢的页面，不一定是数据库总成本最高的位置 | `pg_stat_statements` |
+| 这条查询具体把时间花在哪里？ | 原因可能是扫描、排序、join 或执行次数过多 | `EXPLAIN (ANALYZE, BUFFERS)` |
+| 数据库是不是因为估算错误而选择了差的计划？ | 即使存在可用方案，错误估算也可能导致 planner 不采用它 | `ANALYZE` 与行数对比 |
+
+正确流程应该是：
+
+1. 找到真正昂贵的查询。
+2. 使用接近真实情况的参数重现它。
+3. 阅读实际执行计划。
+4. 判断成本来自扫描、过滤、排序、join 还是返回数据。
+5. 使用复杂度最低、但能处理该原因的修复方式。
+6. 用相同测量方式重新验证结果。
+
+核心观念是：endpoint 慢只是症状，query plan 才能告诉你数据库真正做了多少工作。
+
+## 示例 Endpoint
+
+假设应用提供一个订单历史接口：
+
+```text
+GET /api/users/421/orders?status=paid&limit=20
+```
+
+这个接口的职责是读取某个用户最近二十条已付款订单：
+
+```sql
+SELECT
+  id,
+  created_at,
+  total_amount,
+  status
+FROM orders
+WHERE user_id = 421
+  AND status = 'paid'
+ORDER BY created_at DESC
+LIMIT 20;
+```
+
+在 `orders` 表只有几千条记录时，这条查询可能非常快。但当表增长到几百万条记录之后，页面开始明显变慢。
+
+这个现象仍然不能直接证明“缺少 index”。相同的慢速表现可能由不同原因造成：
+
+| 可能原因 | 实际含义 |
+| --- | --- |
+| 大量 sequential scan | 数据库为了找到二十条记录，检查了大量无关行 |
+| 昂贵的 sort | 数据库能找到记录，但排序成本明显 |
+| 查询被重复执行 | 单次查询不算太慢，但一个请求内执行了很多次 |
+| 行数估算错误 | Planner 对结果数量的判断与现实差异很大 |
+| 返回内容过多 | 页面只需要少量内容，但接口传输了大量数据 |
+| SQL 以外的延迟 | 查询可以接受，慢点来自后端逻辑或网络 |
+
+因此，调查第一步不是立即创建索引，而是确认这条 SQL 是否真的在整体 workload 中造成重要成本。
+
+## 第一步：从真实 Workload 中找出昂贵查询
+
+开发过程中，最容易注意到的是“某个页面感觉很慢”。但优化优先级不能只看感觉。一条每天只执行一次、耗时 400 毫秒的查询，影响可能小于一条每次只耗时 30 毫秒、但每天执行几十万次的查询。
+
+PostgreSQL 的 `pg_stat_statements` extension 可以聚合 SQL statement 的 planning 与 execution statistics。它能够回答两类问题：
+
+- 哪些查询在系统中累计消耗的执行时间最高？
+- 哪些查询每次调用的平均延迟最高？
+
+假设 DBA 已经在 PostgreSQL server configuration 中启用并安装了 `pg_stat_statements`，在 PostgreSQL 中运行以下查询，可以找到累计执行时间最高的 SQL：
+
+```sql
+SELECT
+  calls,
+  total_exec_time,
+  mean_exec_time,
+  rows,
+  query
+FROM pg_stat_statements
+ORDER BY total_exec_time DESC
+LIMIT 10;
+```
+
+简化后的结果可能如下：
+
+```text
+ calls | total_exec_time | mean_exec_time | rows   | query
+-------+-----------------+----------------+--------+----------------------------------------
+ 92000 |       184000.21 |           2.00 | 920000 | SELECT ... FROM products WHERE ...
+   430 |        53120.90 |         123.54 |   8600 | SELECT ... FROM orders WHERE ...
+   120 |        24800.11 |         206.67 |   2400 | SELECT ... FROM reports WHERE ...
+```
+
+这份结果体现了两种不同的优化价值：
+
+- 商品查询单次很快，但执行次数极高，因此累计成本最大。
+- 订单查询与报表查询单次耗时较高，更可能直接影响用户体验。
+
+在 PostgreSQL 中运行以下查询，可以找出平均执行时间最慢、而且至少执行过一定次数的 statement，避免少量偶发请求完全主导判断：
+
+```sql
+SELECT
+  calls,
+  mean_exec_time,
+  total_exec_time,
+  rows,
+  query
+FROM pg_stat_statements
+WHERE calls >= 10
+ORDER BY mean_exec_time DESC
+LIMIT 10;
+```
+
+但不要只根据这张统计表直接修改 schema。Aggregated statistics 的作用是找出调查对象。下一步仍然要使用真实参数重现一条重要查询，并阅读它的实际执行过程。
+
+## 第二步：使用有代表性的数据重现查询
+
+Execution plan 是否有意义，取决于你的数据与参数是否接近真实场景。
+
+以下差异都可能让 PostgreSQL 选择完全不同的 plan：
+
+- 测试环境只有 500 条订单，但线上环境有 500 万条订单。
+- 一般用户只有 3 条订单，但某个企业用户拥有 20 万条订单。
+- `paid` 是常见状态，而 `refunded` 是极少出现的状态。
+- 测试数据刚刚导入，但 planner statistics 还没有更新。
+
+对于订单历史案例，应当选择一个接近线上慢速案例的用户，然后使用相同的 filtering、ordering 与 limit 行为执行查询。
+
+在进行 plan 对比之前，如果测试环境刚完成大量数据导入，或者目标表的数据已经发生明显变化，应当在 PostgreSQL 中运行以下语句，让 planner 获取当前 `orders` 表的数据统计信息：
+
+```sql
+ANALYZE orders;
+```
+
+`ANALYZE` 本身不是给查询“加速”。它的作用是更新 planner 用来估算行数与选择执行计划的统计信息。
+
+如果你只用很小的本地数据表进行诊断，结论可能完全错误。数据库在小表上使用 sequential scan 可能是正确的，但相同查询在生产数据规模下可能需要完全不同的访问路径。
+
+## 第三步：读取实际 Execution Plan
+
+`EXPLAIN` 显示 PostgreSQL 计划如何执行 SQL。`EXPLAIN ANALYZE` 会真正执行查询，并显示实际发生的执行行为。加入 `BUFFERS` 后，还可以看到查询执行过程中触碰了多少数据库 buffer page。
+
+对于安全的 `SELECT` 查询，在 PostgreSQL 中运行以下语句，可以测量订单历史请求的实际执行方式：
+
+```sql
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT
+  id,
+  created_at,
+  total_amount,
+  status
+FROM orders
+WHERE user_id = 421
+  AND status = 'paid'
+ORDER BY created_at DESC
+LIMIT 20;
+```
+
+一个简化后的慢查询计划可能如下：
+
+```text
+Limit  (actual time=146.382..146.390 rows=20 loops=1)
+  Buffers: shared hit=18420
+  ->  Sort  (actual time=146.379..146.383 rows=20 loops=1)
+        Sort Key: created_at DESC
+        Sort Method: top-N heapsort  Memory: 29kB
+        Buffers: shared hit=18420
+        ->  Seq Scan on orders  (actual time=0.041..143.110 rows=1842 loops=1)
+              Filter: ((user_id = 421) AND (status = 'paid'))
+              Rows Removed by Filter: 998158
+              Buffers: shared hit=18420
+Planning Time: 0.380 ms
+Execution Time: 146.441 ms
+```
+
+这份 plan 提供的证据远比“页面大概需要 146 毫秒”更重要：
+
+- 查询最后只返回 `20` 条记录。
+- Sequential scan 检查了接近一百万条记录。
+- 超过 `998,000` 条记录在 filter 阶段被丢弃。
+- 查询触碰了 `18,420` 个 shared buffers。
+- 虽然存在排序，但主要工作量来自寻找匹配记录。
+
+这已经是较强的证据：当前查询缺少一个能够支持其 filtering 与 ordering 模式的有效访问路径。此时考虑 index 是合理的。但理由不是“endpoint 很慢”，而是“数据库为了获得极小的有序结果，扫描了非常大量的数据”。
+
+## 第四步：理解最重要的 Plan Signals
+
+执行计划中会出现大量信息。初期不需要一次理解全部细节，先专注于能够帮助做工程决策的信号。
+
+| Plan Signal | 应该怎样理解 | 可能方向 |
+| --- | --- | --- |
+| 大表出现 `Seq Scan` | PostgreSQL 直接读取记录，没有通过 index 定位目标范围 | 判断查询是否足够 selective，是否适合 index |
+| `Rows Removed by Filter` 很高 | 大量读取工作最后被丢弃 | 考虑更好的访问路径或更强过滤条件 |
+| `Sort` 节点成本明显 | Ordering 消耗了主要工作量 | 检查是否能用符合排序需求的 index |
+| `Buffers: shared hit/read` 很高 | 查询触碰了大量 page | 减少扫描数据，或改善 access path |
+| Estimated rows 与 actual rows 差距很大 | Planner 对数据分布的判断不准确 | 更新或增强 statistics |
+| Join 内部节点 `loops` 很高 | 某个操作被反复执行很多次 | 检查 join 条件、索引或查询结构 |
+
+### Sequential Scan 不一定代表错误
+
+看到 `Seq Scan` 并不代表数据库做错了。如果查询需要读取表中大部分记录，那么 sequential scan 可能反而比通过 index 反复跳转读取更合理。
+
+例如，如果绝大部分订单都是 `paid`，下面的查询就可能合理地扫描整张表：
+
+```sql
+SELECT
+  id,
+  total_amount
+FROM orders
+WHERE status = 'paid';
+```
+
+如果 `paid` 占全部记录的 95%，仅仅为 `status` 建立 index 不一定能带来明显价值，因为数据库最终仍然需要读取大部分记录。
+
+但订单历史查询的条件不同：它限定了单一用户、特定状态、最新时间排序，并且只需要二十条结果。这是一个狭窄而稳定的 ordered subset，更适合由 index 支持。
+
+### Estimated Rows 与 Actual Rows
+
+Plan 中通常同时包含 estimated rows 与 actual rows。两者差距很大时，需要特别注意，因为 planner 在查询真正执行之前，就必须依据估算结果选择执行算法。
+
+考虑以下简化输出：
+
+```text
+Index Scan on orders  (rows=5) (actual rows=1842 loops=1)
+```
+
+Planner 预计只有五条记录，实际上却得到 1,842 条。这类误差会影响 join 方式、sorting 策略与 index 使用选择。
+
+如果表内容已经发生大量变化，或者导入后的测试数据尚未更新统计信息，在 PostgreSQL 中运行以下语句，可以刷新 planner 对 `orders` 表的估算基础：
+
+```sql
+ANALYZE orders;
+```
+
+如果更新统计信息之后，估算仍然因为多个 column 之间存在相关关系而明显错误，例如某些订单状态只集中在特定 merchant 上，之后才需要进一步研究 extended statistics。第一步仍然是先观察到 estimate mismatch，而不是直接增加系统复杂度。
+
+## 第五步：区分 Query Problem 与 Index Problem
+
+慢查询不等于缺少 index。Execution plan 应当决定你选择哪种解决方式。
+
+<CardGrid columns={2}>
+  <InfoCard title="返回数据过多">
+    如果 API 返回几千条记录或很多不会显示的字段，优先缩小结果与加入 pagination，而不是先建立新索引。
+  </InfoCard>
+
+  <InfoCard title="扫描数据过多">
+    如果查询只需要少量记录，却扫描了非常大的范围，targeted index 往往是合理方向。
+  </InfoCard>
+
+  <InfoCard title="同一查询重复调用">
+    如果一个 endpoint 重复进行相同 lookup，应先移除 N+1、批量读取，或在安全情况下缓存结果。
+  </InfoCard>
+
+  <InfoCard title="估算与现实不一致">
+    如果 estimated rows 与 actual rows 差距很大，应先刷新或改善 statistics，再判断是否真的缺少 access path。
+  </InfoCard>
+</CardGrid>
+
+下面这张表可以作为初步判断框架：
+
+| 观察结果 | 优先动作 | 为什么不应该立即 Index？ |
+| --- | --- | --- |
+| `SELECT *` 返回大量字段 | 只查询页面真正需要的 columns | Index 不会降低 response payload |
+| Endpoint 读取全部历史记录 | 加入 pagination 或 limit | 无限结果即使能找到，也仍然昂贵 |
+| 每个 list item 再执行一次查询 | 改为单次 grouped query 或 batch query | 问题来自执行次数 |
+| 扫描大量数据后只返回少量行 | 评估符合查询模式的 index | Index 能直接减少查找工作 |
+| Sort 占据主要成本 | 评估支持排序的 index 或修改查询 | 此时瓶颈是 ordering |
+| Planner 估算严重不准确 | 运行 `ANALYZE` 并检查数据分布 | 错误估算可能让有效方案不被选择 |
+
+## 第六步：判断 Index 是否真的合理
+
+回到订单历史查询：
+
+```sql
+SELECT
+  id,
+  created_at,
+  total_amount,
+  status
+FROM orders
+WHERE user_id = 421
+  AND status = 'paid'
+ORDER BY created_at DESC
+LIMIT 20;
+```
+
+它具有非常稳定的 access pattern：
+
+- `user_id` 使用 equality filter。
+- `status` 使用 equality filter。
+- 结果按照 `created_at` 降序读取。
+- 最终只需要极少量记录。
+
+在确认这条查询具有实际业务价值，而且当前 plan 确实进行大范围扫描之后，在 PostgreSQL 中运行以下语句，可以建立一个符合其 filtering 与 ordering 行为的访问路径：
+
+```sql
+CREATE INDEX idx_orders_user_status_created_at
+ON orders (user_id, status, created_at DESC);
+```
+
+创建索引之后，在 PostgreSQL 中重新运行同一条诊断查询，用相同指标验证工作量是否真正下降：
+
+```sql
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT
+  id,
+  created_at,
+  total_amount,
+  status
+FROM orders
+WHERE user_id = 421
+  AND status = 'paid'
+ORDER BY created_at DESC
+LIMIT 20;
+```
+
+简化后的改善结果可能如下：
+
+```text
+Limit  (actual time=0.058..0.074 rows=20 loops=1)
+  Buffers: shared hit=24
+  ->  Index Scan using idx_orders_user_status_created_at on orders
+        (actual time=0.056..0.069 rows=20 loops=1)
+        Index Cond: ((user_id = 421) AND (status = 'paid'))
+        Buffers: shared hit=24
+Planning Time: 0.290 ms
+Execution Time: 0.101 ms
+```
+
+真正重要的对比，不是输出中出现了 `Index Scan` 字样，而是数据库为了取得相同结果，所需工作量明显下降：
+
+| 测量项目 | 建立 Index 前 | 建立 Index 后 |
+| --- | ---: | ---: |
+| 返回记录数 | 20 | 20 |
+| Filter 后丢弃记录 | 998,158 | 极少 |
+| Shared buffers touched | 18,420 | 24 |
+| 示例执行时间 | 146.441 ms | 0.101 ms |
+
+这才是一个有证据支持的 index：它让数据库能够以明显更低的工作量处理一个重要且稳定的查询模式。
+
+## 一套可重复使用的诊断流程
+
+每当应用似乎需要优化数据库性能时，都可以重复使用下面这套流程。
+
+<CardGrid columns={2}>
+  <InfoCard title="1. 找出候选查询">
+    使用 request timing、database monitoring 或 `pg_stat_statements` 找出累计成本或平均延迟高的 SQL。
+  </InfoCard>
+
+  <InfoCard title="2. 重现真实条件">
+    使用接近真实的表规模、参数与数据分布，避免在极小测试数据上错误判断。
+  </InfoCard>
+
+  <InfoCard title="3. 刷新 Statistics">
+    在数据大量变化后运行 `ANALYZE`，让 planner 使用较新的数据估算基础。
+  </InfoCard>
+
+  <InfoCard title="4. 阅读实际 Plan">
+    对安全查询使用 `EXPLAIN (ANALYZE, BUFFERS)`，观察 rows、loops、filter、sort 与 buffer 使用量。
+  </InfoCard>
+
+  <InfoCard title="5. 选择最小修复方式">
+    依据证据决定是减少返回数据、改变 query shape、移除重复调用、更新 statistics，还是建立 targeted index。
+  </InfoCard>
+
+  <InfoCard title="6. 再次测量">
+    重新运行同一查询并比较相同指标。优化被接受的理由应当是实际工作量下降，而不是代码看起来更高级。
+  </InfoCard>
+</CardGrid>
+
+使用 write statement 时必须特别小心。`EXPLAIN ANALYZE` 会真正执行 SQL。对于 `INSERT`、`UPDATE`、`DELETE` 或任何带有 side effect 的 statement，不应该在生产数据上随意执行。
+
+当你在受控的 PostgreSQL 环境中测试 write statement，而且确认 rollback 是安全的，可以在 transaction 内运行以下语句，以读取执行信息而不保留数据变更：
+
+```sql
+BEGIN;
+
+EXPLAIN ANALYZE
+UPDATE orders
+SET status = 'paid'
+WHERE id = 98121;
+
+ROLLBACK;
+```
+
+这种做法可以防止测试更新被 commit，但它不代表你可以在生产环境中随意测试写入行为。Database diagnosis 仍然需要明确的操作边界。
+
+## 常见错误
+
+### 没有测量 Query Frequency 就添加 Index
+
+一条查询建立 index 之后可能真的变快，但每一个额外 index 都会增加储存空间，并提高写入时的维护成本。为一个极少使用的管理页面建立索引，价值可能低于优化一条每分钟都被调用的大量查询。
+
+### 只在极小的本地数据上测试
+
+几百条记录适合的 plan，不一定适合几百万条记录。性能诊断必须尽可能接近真实 row count 与 value distribution。
+
+### 只看 Execution Time
+
+Execution time 会受到 cache state、机器负载、并发请求以及 storage condition 影响。Buffer usage、过滤掉的行数、loops 与 plan structure 可以提供更稳定的工作量证据。
+
+### 认为 Sequential Scan 永远不好
+
+小表或者需要返回表中大部分数据的查询，使用 sequential scan 可能完全正确。正确问题不是“数据库有没有使用 index”，而是“数据库是否为了所需结果付出了合理工作量”。
+
+### 优化了并非真正 Bottleneck 的查询
+
+一条技术上很慢的查询，如果很少执行，对整体系统的影响也可能有限。应当先看 workload impact，再深入分析单次执行行为。
+
+## 核心原则
+
+Indexing 不是数据库性能优化的起点。Diagnosis 才是。
+
+一套可靠的数据库优化流程应该是：
+
+1. 在真实 workload 中找到真正重要的 SQL statement。
+2. 使用接近真实的数据量与参数重现它。
+3. 通过 `EXPLAIN (ANALYZE, BUFFERS)` 观察实际 rows、filtering、sorting、loops 与 page activity。
+4. 检查 planner 的估算是否可信。
+5. 针对具体浪费来源选择最小修复方式。
+6. 只有当查询确实需要更快的 access path 时，才建立 index。
+7. 用同样的测量方式重新比较结果。
+
+在建立这个诊断基础之后，下一篇文章才能正确讨论 indexing：index 不是自动提高性能的开关，而是为了支持已经被验证的重要查询模式而设计的数据结构。
+
+</Lang>

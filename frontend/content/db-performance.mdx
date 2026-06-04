@@ -1,0 +1,655 @@
+---
+title: "A Practical Roadmap for Database Performance Optimization"
+category: "Software Development"
+createdAt: "2026-06-04"
+summary: "A practical escalation path for improving database performance, from better queries and indexes to replicas, partitioning, and distributed storage."
+readTime: "14 min read"
+tags:
+  - "Backend"
+  - "HTTP"
+  - "Node.js"
+  - "System Design"
+featured: false
+series:
+  title: "Database Performance"
+  slug: "database-performance"
+  order: 1
+---
+
+<Lang lang="en">
+
+Database performance optimization is not about immediately introducing replicas, partitions, or distributed databases. Most slow systems should first reduce unnecessary work inside ordinary queries. Only when cheaper fixes stop being sufficient should architecture become more complex.
+
+## Short Answer
+
+A sensible database performance path usually looks like this:
+
+| Stage | Main Question | Typical Technique |
+| --- | --- | --- |
+| 1. Observe | Which query is actually slow? | Logs, metrics, `EXPLAIN ANALYZE` |
+| 2. Reduce work | Is the query fetching or scanning too much? | Filtering, pagination, smaller selects |
+| 3. Add access paths | Can the database locate rows faster? | Indexes, composite indexes, partial indexes |
+| 4. Reshape repeated reads | Are expensive results calculated repeatedly? | Summary tables, materialized views, caching |
+| 5. Separate workloads | Are reads overwhelming writes? | Read replicas, read/write routing |
+| 6. Divide large data | Is one large table becoming difficult to manage? | Partitioning |
+| 7. Distribute ownership | Has one database node become the limit? | Sharding or distributed databases |
+
+The key rule is escalation: start with the smallest change that removes the measured bottleneck.
+
+## What Database Performance Actually Means
+
+A database is slow when the application waits too long for data operations to complete. That delay may come from several different causes:
+
+- A query scans far more rows than it returns.
+- The application asks for unnecessary columns or unnecessary records.
+- Sorting, aggregation, or joins operate on large intermediate results.
+- Writes must update too many indexes.
+- Many concurrent requests compete for locks, memory, disk, or CPU.
+- One database server is being asked to serve workloads that no longer fit on one machine.
+
+These are not the same problem. An index can help a selective lookup, but it will not automatically fix a badly designed API that returns 200,000 rows. A read replica can distribute reads, but it will not repair one inefficient query being executed thousands of times.
+
+## Start With Measurement, Not Architecture
+
+Before modifying the schema or infrastructure, identify the expensive query and inspect how the database executes it.
+
+Suppose an order history page is slow because it loads recent paid orders for one user:
+
+```sql
+SELECT
+  id,
+  created_at,
+  total_amount,
+  status
+FROM orders
+WHERE user_id = 421
+  AND status = 'paid'
+ORDER BY created_at DESC
+LIMIT 20;
+```
+
+Run this in PostgreSQL against a representative dataset to see whether the query uses an index, scans many rows, sorts in memory, or consumes most of its time elsewhere:
+
+```sql
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT
+  id,
+  created_at,
+  total_amount,
+  status
+FROM orders
+WHERE user_id = 421
+  AND status = 'paid'
+ORDER BY created_at DESC
+LIMIT 20;
+```
+
+The important output is not merely the final execution time. Look for these signals:
+
+| Signal | Meaning | Likely Next Action |
+| --- | --- | --- |
+| `Seq Scan` on a large table | Many rows are being checked directly | Consider a matching index |
+| Actual rows far above returned rows | The query filters late or poorly | Improve filters or index design |
+| Expensive `Sort` | Ordering is consuming work | Consider an index matching the order |
+| Repeated nested-loop work | A join may multiply cost | Inspect joins and cardinality |
+| High buffer reads | The query touches large amounts of data | Reduce scanned rows or returned data |
+
+A slow endpoint is not enough evidence to choose a solution. The query plan tells you where the work is happening.
+
+## Level 1: Improve the Query Before Adding Infrastructure
+
+The cheapest optimization is often to ask the database to do less work.
+
+### Select Only What the Request Needs
+
+This query may be convenient:
+
+```sql
+SELECT *
+FROM orders
+WHERE user_id = 421;
+```
+
+But an order list page may only need an identifier, timestamp, status, and amount. Returning large text fields, addresses, internal metadata, or JSON payloads increases disk reads, memory use, network payload size, and application processing.
+
+### Filter Early
+
+A query that loads every order and filters inside application code wastes database and network resources. Put stable filtering conditions into SQL so the database can remove irrelevant records before transferring results.
+
+### Add Pagination
+
+An endpoint should not return an unlimited history table. For large ordered datasets, cursor-based pagination is often more stable than deep `OFFSET` pagination.
+
+Run this query in PostgreSQL when the client already holds the final `created_at` and `id` values from the previous page, so the database can continue from a known position instead of skipping a growing number of rows:
+
+```sql
+SELECT
+  id,
+  created_at,
+  total_amount,
+  status
+FROM orders
+WHERE user_id = 421
+  AND status = 'paid'
+  AND (created_at, id) < ('2026-06-03 14:30:00', 98121)
+ORDER BY created_at DESC, id DESC
+LIMIT 20;
+```
+
+This design bounds the amount of data returned and provides a query shape that indexes can support effectively.
+
+## Level 2: Add Indexes That Match Real Queries
+
+An index is an additional access structure that helps the database locate rows without examining the entire table. It is usually the first schema-level improvement to consider, but it is not free.
+
+Every additional index consumes storage and must be maintained during `INSERT`, `UPDATE`, and `DELETE` operations. Therefore, the goal is not to index every column. The goal is to support important query patterns.
+
+For the paid-order query, run this in PostgreSQL after confirming that the query is common and currently scans too many rows:
+
+```sql
+CREATE INDEX idx_orders_user_status_created_at
+ON orders (user_id, status, created_at DESC);
+```
+
+This index matches:
+
+- Equality filtering by `user_id`.
+- Equality filtering by `status`.
+- Ordering by recent `created_at` values.
+
+A specialized alternative is a partial index when the application repeatedly queries only a narrow, important subset, such as paid orders:
+
+```sql
+CREATE INDEX idx_orders_paid_user_created_at
+ON orders (user_id, created_at DESC)
+WHERE status = 'paid';
+```
+
+The partial index contains fewer entries than an index covering every order status, but it only helps queries whose conditions match its predicate.
+
+| Index Type | Useful When | Main Risk |
+| --- | --- | --- |
+| Single-column index | Queries filter strongly on one column | May not support combined filters or ordering |
+| Composite index | Common queries use the same filter/order pattern | Column order matters; overuse increases write cost |
+| Partial index | Queries repeatedly target a stable subset | Other query shapes cannot use it |
+| Unique index | The database must enforce uniqueness | Write conflicts become visible immediately |
+
+After creating an index, rerun `EXPLAIN (ANALYZE, BUFFERS)`. An index is successful only when the real workload improves without creating unacceptable write overhead.
+
+## Level 3: Avoid Recomputing Expensive Read Results
+
+Some queries remain expensive even with proper indexes. Reports, dashboards, rankings, and analytics often repeatedly aggregate large amounts of historical data.
+
+Consider a dashboard that recalculates daily revenue from millions of order rows whenever a user opens the page. The problem is no longer only row lookup. The system is recomputing a result that changes less frequently than it is requested.
+
+<CardGrid columns={2}>
+  <InfoCard title="Summary Table">
+    Store application-controlled aggregates such as daily revenue totals. This gives precise control over update timing and business logic.
+  </InfoCard>
+
+  <InfoCard title="Materialized View">
+    Store the result of an expensive query in database-managed form and refresh it when acceptable. This is suitable when slightly stale reads are allowed.
+  </InfoCard>
+
+  <InfoCard title="Application Cache">
+    Cache repeated request results when invalidation rules are understood. This reduces database traffic but adds freshness decisions.
+  </InfoCard>
+
+  <InfoCard title="Denormalized Read Model">
+    Maintain a read-optimized structure for endpoints that otherwise require expensive joins. This trades simpler reads for more complicated writes.
+  </InfoCard>
+</CardGrid>
+
+Run this in PostgreSQL when a dashboard can tolerate refreshed rather than instantly current totals, so the aggregate result is stored instead of recomputed on every request:
+
+```sql
+CREATE MATERIALIZED VIEW daily_paid_revenue AS
+SELECT
+  DATE(created_at) AS revenue_date,
+  SUM(total_amount) AS total_revenue
+FROM orders
+WHERE status = 'paid'
+GROUP BY DATE(created_at);
+```
+
+Run this according to the dashboard's freshness requirement to rebuild the stored result from current order data:
+
+```sql
+REFRESH MATERIALIZED VIEW daily_paid_revenue;
+```
+
+The trade-off is explicit: reads become cheaper, while the displayed result may be stale until refreshed.
+
+## Level 4: Use Read/Write Separation Only After Query Work Is Sound
+
+Read/write separation usually means:
+
+- One primary database handles writes.
+- One or more replicas receive replicated changes.
+- Read-only traffic, such as product browsing or reporting, can be routed to replicas.
+
+This can increase read capacity because not every read competes with writes on the primary. However, replicas introduce new constraints:
+
+| Concern | Why It Matters |
+| --- | --- |
+| Replication lag | A read immediately after a write may not see the newest value |
+| Routing logic | The application must choose which reads may go to replicas |
+| Operational cost | Monitoring, failover, backups, and consistency become more complex |
+| Inefficient queries | A bad query now wastes resources on additional servers |
+
+For example, a user who has just completed a payment may need to read the newly created order from the primary database. A public product catalogue page may safely read from a replica if slight delay is acceptable.
+
+Read replicas are a scaling technique for a read-heavy workload. They should not be the first response to missing filters or missing indexes.
+
+## Level 5: Partition Large Tables When Data Has Natural Boundaries
+
+Partitioning divides one logical table into smaller physical parts, often by time, tenant, or another predictable boundary.
+
+An `orders` table containing several years of records may be partitioned by month or year. Queries that target a known time range may then avoid examining unrelated partitions.
+
+Run this in PostgreSQL when the system stores large time-based order history and most queries target recent periods, so older records can be managed separately:
+
+```sql
+CREATE TABLE orders_partitioned (
+  id BIGINT,
+  user_id BIGINT,
+  created_at TIMESTAMP NOT NULL,
+  total_amount NUMERIC(12, 2),
+  status TEXT
+) PARTITION BY RANGE (created_at);
+```
+
+Run this to create a physical partition for orders created during June 2026:
+
+```sql
+CREATE TABLE orders_2026_06
+PARTITION OF orders_partitioned
+FOR VALUES FROM ('2026-06-01') TO ('2026-07-01');
+```
+
+Partitioning can improve maintenance and certain access patterns, but it is not a universal speed button. A query without useful partition filters may still touch many partitions. Poor indexes inside partitions can still produce poor performance.
+
+## Level 6: Distributed Databases and Sharding Are Last-Stage Decisions
+
+Eventually, one database node may become insufficient because of data volume, write throughput, geographic latency, tenant isolation, or availability requirements. At that point, the system may distribute data across nodes.
+
+Sharding assigns different rows to different database owners. For example:
+
+- Users `1` to `1,000,000` may live on shard A.
+- Users `1,000,001` to `2,000,000` may live on shard B.
+- A tenant-based system may assign each business account to one shard.
+
+This creates serious design questions:
+
+- How is the shard key selected?
+- How are cross-shard joins or reports handled?
+- What happens when one shard grows much faster than others?
+- How are migrations, backups, transactions, and failures managed?
+
+A distributed database is appropriate when a measured constraint cannot reasonably be solved on one database node. It is not an advanced-looking replacement for writing efficient SQL.
+
+## Recommended Implementation Order
+
+The practical order is not based on how impressive a technique sounds. It is based on cost, risk, and reversibility.
+
+<CardGrid columns={2}>
+  <InfoCard title="1. Find the Slow Query">
+    Capture the endpoint, SQL statement, frequency, latency, and query plan before changing anything.
+  </InfoCard>
+
+  <InfoCard title="2. Reduce Returned Work">
+    Select fewer columns, filter in SQL, paginate results, and prevent unlimited requests.
+  </InfoCard>
+
+  <InfoCard title="3. Add Targeted Indexes">
+    Build indexes around frequent, expensive query patterns and verify their effect with execution plans.
+  </InfoCard>
+
+  <InfoCard title="4. Precompute Repeated Reads">
+    Use caches, summary tables, read models, or materialized views for expensive repeated results.
+  </InfoCard>
+
+  <InfoCard title="5. Scale Read Capacity">
+    Add read replicas only when validated read traffic is overloading the primary.
+  </InfoCard>
+
+  <InfoCard title="6. Divide Data Carefully">
+    Use partitioning or distributed ownership only when table size, throughput, or operational boundaries justify them.
+  </InfoCard>
+</CardGrid>
+
+This order matters because each stage teaches you more about the actual workload. Skipping directly to replication or sharding often adds operational complexity while preserving the original inefficient queries.
+
+## The Main Principle
+
+Database performance optimization should be treated as an escalation ladder:
+
+1. Measure the slow workload.
+2. Reduce unnecessary data work.
+3. Create indexes that match important access patterns.
+4. Avoid repeatedly calculating the same expensive read result.
+5. Separate reads from writes when read capacity becomes the bottleneck.
+6. Partition or distribute data only when one-node design is genuinely reaching its limits.
+
+The mature engineering decision is not to use the most advanced technique. It is to choose the least complex technique that removes the measured bottleneck and remains maintainable as the system grows.
+
+</Lang>
+
+<Lang lang="zh">
+
+数据库性能优化不是一开始就上读写分离、分区表或者分布式数据库。大部分系统变慢时，最先应该处理的是普通查询本身做了太多没有必要的工作。只有当低成本优化已经无法解决已确认的瓶颈时，才值得把系统架构变复杂。
+
+## 简短答案
+
+一个合理的数据库性能优化路径通常是这样的：
+
+| 阶段 | 主要问题 | 常见手段 |
+| --- | --- | --- |
+| 1. 观察 | 到底是哪条查询慢？ | 日志、指标、`EXPLAIN ANALYZE` |
+| 2. 减少工作量 | 查询是不是扫描或返回了太多数据？ | filtering、pagination、减少字段 |
+| 3. 增加访问路径 | 数据库能不能更快定位目标记录？ | index、composite index、partial index |
+| 4. 优化重复读取 | 是否不断重算同一个昂贵结果？ | 汇总表、物化视图、缓存 |
+| 5. 分离负载 | 读取流量是否开始压垮写入节点？ | read replica、读写路由 |
+| 6. 拆分大表 | 单张大表是否越来越难维护？ | partitioning |
+| 7. 分布数据 | 单一数据库节点是否已成为上限？ | sharding、distributed database |
+
+核心顺序是：先使用最便宜、最容易验证的办法，只有确认它不够时，才进入更重的架构手段。
+
+## 数据库性能问题到底是什么
+
+数据库慢，表面上看是 API 响应时间变长，实际上可能来自完全不同的原因：
+
+- 一条查询扫描了大量记录，最后只返回很少几条。
+- 应用层请求了根本不会显示的字段或记录。
+- 排序、聚合或 join 产生了很大的中间结果。
+- 表上存在太多索引，导致写入时维护成本变高。
+- 并发请求争用锁、内存、磁盘或 CPU。
+- 一台数据库服务器已经无法承受当前业务量。
+
+这些问题不能混为一谈。索引可以帮助精确查询，但它不能修复一个一次返回几十万行数据的 API。读写分离可以扩展读取能力，但它不会自动把低效 SQL 变成高效 SQL。
+
+## 先确认瓶颈，再谈架构
+
+在修改表结构或增加服务器之前，先找到真正昂贵的查询，并观察数据库执行这条查询的方式。
+
+例如，一个订单历史页面需要查询某个用户最近完成付款的订单：
+
+```sql
+SELECT
+  id,
+  created_at,
+  total_amount,
+  status
+FROM orders
+WHERE user_id = 421
+  AND status = 'paid'
+ORDER BY created_at DESC
+LIMIT 20;
+```
+
+在 PostgreSQL 中对接近真实数据量的测试环境运行以下语句，用来确认数据库是否使用索引、是否扫描大量记录、是否产生昂贵排序，或者主要时间是否消耗在其他阶段：
+
+```sql
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT
+  id,
+  created_at,
+  total_amount,
+  status
+FROM orders
+WHERE user_id = 421
+  AND status = 'paid'
+ORDER BY created_at DESC
+LIMIT 20;
+```
+
+阅读执行计划时，不要只看最后的执行时间。更重要的是这些信号：
+
+| 信号 | 代表什么 | 下一步方向 |
+| --- | --- | --- |
+| 大表出现 `Seq Scan` | 数据库逐行检查大量记录 | 考虑匹配查询的索引 |
+| 实际检查行数远高于返回行数 | 过滤效率低 | 改善过滤条件或索引设计 |
+| 出现昂贵 `Sort` | 排序消耗明显 | 考虑匹配排序顺序的索引 |
+| join 重复执行成本很高 | 中间结果可能被放大 | 检查 join 条件与数据关系 |
+| buffer reads 很高 | 查询触碰的数据量太大 | 缩小扫描范围或返回内容 |
+
+一个页面慢，并不能直接说明你应该加 replica 或做 partition。执行计划才会告诉你工作量真正发生在哪里。
+
+## 第一层：先让查询少做无意义的工作
+
+最便宜的优化方式，通常不是增加任何新设施，而是让数据库处理更少的数据。
+
+### 不要默认查询所有字段
+
+下面的查询写起来很方便：
+
+```sql
+SELECT *
+FROM orders
+WHERE user_id = 421;
+```
+
+但订单列表页面可能只需要订单编号、创建时间、状态和金额。如果同时返回长文本、地址、内部 metadata 或 JSON 内容，就会增加磁盘读取、数据库内存、网络传输以及后端处理成本。
+
+### 让数据库负责稳定过滤
+
+如果应用程序先读取所有订单，再在 Node.js 代码里筛选 `paid` 状态，这是明显的资源浪费。只要筛选条件稳定且属于数据查询逻辑，就应该放进 SQL，让数据库在传输结果前排除无关记录。
+
+### 限制单次返回的数据量
+
+订单历史接口不应该无限制地返回完整历史记录。对于按照时间排序的大数据集，cursor-based pagination 往往比越来越深的 `OFFSET` 更稳定。
+
+当前端已经持有上一页最后一条订单的 `created_at` 与 `id` 时，在 PostgreSQL 中运行以下查询，可以让数据库从明确位置继续读取，而不是不断跳过越来越多的旧记录：
+
+```sql
+SELECT
+  id,
+  created_at,
+  total_amount,
+  status
+FROM orders
+WHERE user_id = 421
+  AND status = 'paid'
+  AND (created_at, id) < ('2026-06-03 14:30:00', 98121)
+ORDER BY created_at DESC, id DESC
+LIMIT 20;
+```
+
+这个设计同时解决两个问题：每次返回量有上限，而且后续索引能够围绕稳定的查询模式进行优化。
+
+## 第二层：为真实查询模式建立索引
+
+索引是数据库额外维护的一种访问结构，让它不必每次都扫描整张表来寻找目标记录。它通常是最先考虑的 schema-level 优化，但它不是免费的。
+
+每增加一个索引，都会占用额外空间，并在 `INSERT`、`UPDATE` 与 `DELETE` 时产生维护成本。因此，正确目标不是“所有字段都加 index”，而是“为高频且昂贵的查询模式建立合适索引”。
+
+针对前面的已付款订单查询，在确认它属于高频查询，而且目前扫描记录过多之后，可以在 PostgreSQL 中运行以下语句：
+
+```sql
+CREATE INDEX idx_orders_user_status_created_at
+ON orders (user_id, status, created_at DESC);
+```
+
+这个索引与查询模式相匹配：
+
+- 使用 `user_id` 做精确过滤。
+- 使用 `status` 做精确过滤。
+- 按照最近的 `created_at` 排序读取。
+
+如果系统经常只查询一个稳定且重要的子集，例如已付款订单，还可以考虑 partial index：
+
+```sql
+CREATE INDEX idx_orders_paid_user_created_at
+ON orders (user_id, created_at DESC)
+WHERE status = 'paid';
+```
+
+这种索引只包含 `paid` 记录，所以体积可能更小，但它只能帮助符合该 predicate 的查询。
+
+| 索引类型 | 适用情况 | 主要风险 |
+| --- | --- | --- |
+| 单字段索引 | 查询主要依赖一个高选择性的字段 | 无法完整支持组合过滤或排序 |
+| 组合索引 | 高频查询拥有固定的过滤与排序模式 | 字段顺序重要，过多会影响写入 |
+| Partial index | 查询长期集中在某个稳定子集 | 其他查询模式无法直接受益 |
+| Unique index | 数据库必须强制保证唯一性 | 重复写入会立即失败 |
+
+建立索引之后，必须重新执行 `EXPLAIN (ANALYZE, BUFFERS)`。真正有效的索引应该让真实查询更快，同时没有带来无法接受的写入成本。
+
+## 第三层：不要重复计算昂贵的读取结果
+
+即使索引设计正确，有些查询仍然会很昂贵。例如 dashboard、排行榜、统计报表与历史分析页面，它们可能不断对大量旧数据执行聚合计算。
+
+假设一个营收 dashboard 每次打开时，都从几百万条订单记录重新计算每日收入。此时问题已经不只是查找记录的速度，而是系统不断重算一个变化频率低于读取频率的结果。
+
+<CardGrid columns={2}>
+  <InfoCard title="汇总表">
+    由应用程序维护每日营收等聚合结果。更新时机与业务逻辑都由系统明确控制。
+  </InfoCard>
+
+  <InfoCard title="物化视图">
+    将昂贵查询的结果以数据库对象形式保存，并按照允许的 freshness 规则刷新。
+  </InfoCard>
+
+  <InfoCard title="应用缓存">
+    当 invalidation 规则清晰时，缓存重复请求结果以降低数据库访问量。
+  </InfoCard>
+
+  <InfoCard title="反范式读取模型">
+    为高频读取端点维护专门的数据结构，减少昂贵 join，但会让写入逻辑更复杂。
+  </InfoCard>
+</CardGrid>
+
+当 dashboard 可以接受定期更新而不是每秒完全实时的营收数据时，可以在 PostgreSQL 中运行以下语句，将聚合结果保存起来，而不是每次请求都重新计算：
+
+```sql
+CREATE MATERIALIZED VIEW daily_paid_revenue AS
+SELECT
+  DATE(created_at) AS revenue_date,
+  SUM(total_amount) AS total_revenue
+FROM orders
+WHERE status = 'paid'
+GROUP BY DATE(created_at);
+```
+
+按照页面允许的数据新鲜度要求运行以下语句，用当前订单数据重新构建已保存的结果：
+
+```sql
+REFRESH MATERIALIZED VIEW daily_paid_revenue;
+```
+
+这里的 trade-off 很明确：读取成本降低了，但在下一次刷新之前，页面显示的数据可能不是最新状态。
+
+## 第四层：查询本身合理之后，才考虑读写分离
+
+读写分离通常代表：
+
+- primary database 负责写入。
+- 一个或多个 replica 接收同步后的数据变化。
+- 商品浏览、报表查询等 read-only 流量可以发送到 replica。
+
+这样做能够提高读取容量，因为不是所有读取请求都必须和写入竞争 primary 的资源。但 replica 会引入额外约束：
+
+| 问题 | 为什么重要 |
+| --- | --- |
+| Replication lag | 写入完成后立即读取，可能暂时看不到最新数据 |
+| 路由逻辑 | 应用程序必须判断哪些读取允许走 replica |
+| 运维成本 | 需要监控同步、failover、backup 与一致性 |
+| 低效查询扩散 | 原本的坏查询现在会在更多机器上浪费资源 |
+
+例如，用户刚刚成功付款后查看自己的新订单，这类读取通常应该继续走 primary。公开商品目录页面如果能够接受短暂延迟，则更适合发送到 replica。
+
+读写分离解决的是读取负载容量问题，而不是缺少 filtering 或缺少 index 的问题。
+
+## 第五层：当数据具有天然边界时使用 Partitioning
+
+Partitioning 是把一张逻辑表拆成多个物理部分，常见边界包括时间、租户或者其他稳定范围。
+
+例如，一张保存多年订单记录的 `orders` 表，可以按照月份或年份拆分。只查询某个明确时间范围时，数据库可能避开无关 partition。
+
+当系统保存大量按时间增长的订单历史，而且大部分查询集中在近期数据时，可以在 PostgreSQL 中运行以下语句建立按时间范围分区的表：
+
+```sql
+CREATE TABLE orders_partitioned (
+  id BIGINT,
+  user_id BIGINT,
+  created_at TIMESTAMP NOT NULL,
+  total_amount NUMERIC(12, 2),
+  status TEXT
+) PARTITION BY RANGE (created_at);
+```
+
+运行以下语句，为 2026 年 6 月创建实际存储订单记录的 partition：
+
+```sql
+CREATE TABLE orders_2026_06
+PARTITION OF orders_partitioned
+FOR VALUES FROM ('2026-06-01') TO ('2026-07-01');
+```
+
+Partitioning 可以改善维护工作与部分访问模式，但它不是通用加速按钮。如果查询没有提供有效的 partition filter，仍然可能触碰多个分区。如果每个分区内部的索引设计很差，查询表现同样会差。
+
+## 第六层：Distributed Database 与 Sharding 是后期决定
+
+当一台数据库节点已经无法满足数据量、写入吞吐量、跨地区延迟、租户隔离或可用性要求时，系统才可能需要把数据分布到不同节点。
+
+Sharding 的基本思想是让不同记录归属于不同数据库节点。例如：
+
+- 用户 `1` 到 `1,000,000` 位于 shard A。
+- 用户 `1,000,001` 到 `2,000,000` 位于 shard B。
+- 多租户系统可以按照企业账户分配 shard。
+
+但这会带来严重的设计问题：
+
+- shard key 应该如何选择？
+- 跨 shard 的 join 或报表要怎样处理？
+- 如果某一个 shard 增长速度明显更快，怎样重新平衡？
+- migration、backup、transaction 与故障恢复如何完成？
+
+分布式数据库适合解决已经被测量确认、而且单节点确实无法合理处理的限制。它不是一种用来取代高效 SQL 的“高级方案”。
+
+## 推荐的优化执行顺序
+
+实际优化顺序不应该依据哪种技术听起来更高级，而应该依据成本、风险与可逆性。
+
+<CardGrid columns={2}>
+  <InfoCard title="1. 找到慢查询">
+    记录相关 endpoint、SQL、调用频率、延迟与执行计划，在修改之前先确认瓶颈。
+  </InfoCard>
+
+  <InfoCard title="2. 减少查询工作量">
+    减少返回字段、在 SQL 中过滤、加入 pagination，并禁止无限制请求。
+  </InfoCard>
+
+  <InfoCard title="3. 建立目标明确的索引">
+    围绕高频且昂贵的查询模式建立索引，并通过执行计划验证实际效果。
+  </InfoCard>
+
+  <InfoCard title="4. 预计算重复读取结果">
+    对昂贵的重复结果使用缓存、汇总表、读取模型或物化视图。
+  </InfoCard>
+
+  <InfoCard title="5. 扩展读取容量">
+    只有当已确认的读取流量开始压垮 primary 时，才引入 read replica。
+  </InfoCard>
+
+  <InfoCard title="6. 谨慎拆分数据">
+    只有当表规模、吞吐量或运维边界足以支持复杂度时，才使用 partitioning 或 distributed ownership。
+  </InfoCard>
+</CardGrid>
+
+这个顺序重要，是因为每一个阶段都会让你更了解真实 workload。直接跳到 replication 或 sharding，通常只是增加运维难度，同时保留原本低效的查询。
+
+## 核心原则
+
+数据库性能优化应该被看成一条逐层升级的路线：
+
+1. 测量真正慢的 workload。
+2. 删除没有必要的数据处理量。
+3. 为重要访问模式建立匹配的索引。
+4. 避免重复计算同一个昂贵读取结果。
+5. 当读取容量成为瓶颈时，再把读取与写入分离。
+6. 只有当单节点确实接近限制时，才进行分区或分布式拆分。
+
+成熟的工程决策，不是使用看起来最先进的技术，而是选择复杂度最低、能够移除已确认瓶颈、并且未来仍然容易维护的方案。
+
+</Lang>
