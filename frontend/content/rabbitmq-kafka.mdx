@@ -1,0 +1,993 @@
+---
+title: "Kafka vs RabbitMQ: Event History or Task Delivery?"
+category: "Software Development"
+createdAt: "2026-06-04"
+summary: "A practical comparison of Kafka and RabbitMQ based on retention, replay, routing, consumer behavior, and backend system design."
+readTime: "11 min read"
+tags:
+  - "Backend"
+  - "HTTP"
+  - "Node.js"
+  - "System Design"
+featured: false
+---
+
+<Lang lang="en">
+
+Kafka and RabbitMQ are both message brokers, but treating them as interchangeable creates poor system design decisions. RabbitMQ is usually used when a message represents work that should be delivered to a worker. Kafka is usually used when a message represents an event that should remain available as part of a durable event history.
+
+This difference becomes important when building API performance logging, order workflows, notification systems, audit trails, analytics pipelines, or communication between services written in Java, Go, Node.js, and other languages.
+
+## Short Answer
+
+| Question | RabbitMQ | Kafka |
+| --- | --- | --- |
+| Main purpose | Deliver work to consumers | Store and distribute event streams |
+| Core structure | Exchange and queue | Topic and partition |
+| Message after successful processing | Normally removed from the queue | Retained according to policy |
+| Replay historical data | Not the normal queue model | A core capability |
+| Multiple independent consumers | Usually requires separate queues or routing | Consumer groups can read independently |
+| Routing capability | Rich exchange-based routing | Topic and key-based partitioning |
+| Typical use case | Jobs, commands, background tasks | Logs, analytics, audit trails, event pipelines |
+
+The simplest decision rule is:
+
+<CardGrid columns={2}>
+  <InfoCard title="Choose RabbitMQ">
+    Use it when the important question is: which worker should execute this task now?
+  </InfoCard>
+
+  <InfoCard title="Choose Kafka">
+    Use it when the important question is: what happened, and which systems may need to read this event now or later?
+  </InfoCard>
+</CardGrid>
+
+## The Core Difference: Work Queue vs Event Log
+
+A message broker sits between producers and consumers. The producer sends information without directly calling every downstream service. The broker stores or routes that information until consumers process it.
+
+The key difference is what the broker treats the message as.
+
+### RabbitMQ: a message is usually work waiting to be completed
+
+In a typical RabbitMQ design, a producer publishes a message to an **exchange**. The exchange applies routing rules and places the message into one or more **queues**. Consumers receive messages from queues and acknowledge them after successful processing.
+
+Imagine an order service publishing this message:
+
+```json
+{
+  "type": "email.send",
+  "orderId": "ORD-9182",
+  "recipient": "customer@example.com",
+  "template": "payment-confirmed"
+}
+```
+
+The purpose of this message is not mainly to preserve history. The purpose is to ensure that one email worker sends the confirmation email.
+
+Once a worker successfully processes and acknowledges the message, the queue does not normally need to retain it. The task has been completed.
+
+### Kafka: a message is an event that already happened
+
+In Kafka, a producer writes an event into a **topic**. A topic is divided into **partitions**, and the event remains stored based on retention configuration. Consumers read events and track their positions through offsets.
+
+Imagine an API service publishing this event:
+
+```json
+{
+  "type": "api.request.completed",
+  "service": "payment-service",
+  "endpoint": "POST /payments",
+  "statusCode": 201,
+  "durationMs": 482,
+  "traceId": "tr_82af19",
+  "occurredAt": "2026-06-04T10:32:19Z"
+}
+```
+
+This event is useful to more than one consumer:
+
+- A monitoring service calculates request latency.
+- An alerting service detects abnormal error rates.
+- A dashboard service displays performance metrics.
+- An audit or data-analysis service reads the same history later.
+
+Kafka is strong here because consumers do not need the event to disappear after one system reads it.
+
+## How Data Flows Through RabbitMQ
+
+RabbitMQ is built around routing messages to queues.
+
+A simplified flow looks like this:
+
+```text
+Producer
+   |
+   v
+Exchange
+   |
+   +------------------+
+   |                  |
+   v                  v
+Email Queue       Audit Queue
+   |                  |
+   v                  v
+Email Worker      Audit Worker
+```
+
+The exchange determines where a message goes. For example:
+
+| Exchange Pattern | Meaning | Example Use |
+| --- | --- | --- |
+| Direct routing | Send messages with a matching routing key | `email.send` goes to the email queue |
+| Topic routing | Match routing patterns | `order.*` or `payment.failed` |
+| Fanout routing | Copy a message to all bound queues | Notify several systems of one event |
+
+This makes RabbitMQ useful when message delivery rules matter. A payment failure may need to go to a retry worker, a notification worker, and an incident queue using explicit routing rules.
+
+RabbitMQ consumers also use acknowledgements. If a worker receives a task but crashes before acknowledging it, the broker can redeliver the work so another consumer can attempt it.
+
+That is exactly the behavior expected for background jobs:
+
+- Generate a PDF invoice.
+- Send an email.
+- Resize an uploaded image.
+- Trigger a retryable integration call.
+- Process a scheduled task.
+
+The message represents work that must eventually be completed.
+
+## How Data Flows Through Kafka
+
+Kafka is built around appending events to ordered partitions inside topics.
+
+A simplified flow looks like this:
+
+```text
+API Services
+     |
+     v
+Topic: api-performance-events
+     |
+     +---------------------+---------------------+
+     |                     |                     |
+     v                     v                     v
+Monitoring Group      Alerting Group       Analytics Group
+```
+
+Each consumer group can read the same event stream independently. The monitoring service reading an event does not prevent analytics from reading that same event later.
+
+Kafka topics use partitions for scale and ordering:
+
+```text
+Topic: api-performance-events
+
+Partition 0: [event 1] [event 4] [event 7]
+Partition 1: [event 2] [event 5] [event 8]
+Partition 2: [event 3] [event 6] [event 9]
+```
+
+Within a partition, events have an order. Across different partitions, there is no single total order unless the application designs for it.
+
+For example, if all events for one `traceId` or one `orderId` must remain ordered, the producer can use that identifier as the message key so related events are written into the same partition.
+
+Kafka consumers track their progress with offsets:
+
+```text
+Partition 0: [0] [1] [2] [3] [4] [5] [6]
+                             ^
+                     Consumer has processed up to offset 3
+```
+
+If the consumer restarts, it can resume from its committed offset. If a new analytics application is created later, it can start from an earlier offset and replay retained historical events.
+
+This is why Kafka fits event logging, observability, analytics, change data capture, and event-driven systems.
+
+## The Most Important Difference: Consumption and Replay
+
+The difference becomes obvious when asking what should happen after a consumer reads a message.
+
+| Situation | RabbitMQ Queue | Kafka Topic |
+| --- | --- | --- |
+| Worker completes processing | Message is acknowledged and normally removed | Event remains until retention removes it |
+| Consumer fails before completion | Message can be redelivered | Consumer can re-read based on offset handling |
+| New consumer is created tomorrow | Old processed queue messages are usually unavailable | Retained events can be replayed |
+| Several systems need the same information | Usually create separate queues or bindings | Create separate consumer groups |
+| Need historical analysis | Store results elsewhere or design additional retention | Read previous events from the topic |
+
+Consider API performance logging across Java, Go, and Node.js services.
+
+Each application can record a completed-request event using its own middleware:
+
+```json
+{
+  "service": "order-service",
+  "language": "go",
+  "route": "GET /orders/:id",
+  "durationMs": 76,
+  "statusCode": 200,
+  "traceId": "tr_f120ab"
+}
+```
+
+If the purpose is only to immediately trigger one task, RabbitMQ may be enough.
+
+However, if the purpose is to preserve events for dashboards, alerts, debugging, trend analysis, and later investigation, Kafka provides a more natural model. The event stream is the record. Consumers are different interpretations of that record.
+
+## Consumer Scaling Is Also Different
+
+Both technologies can distribute work across multiple consumers, but the mechanism and meaning differ.
+
+### RabbitMQ competing consumers
+
+Multiple workers can consume from the same RabbitMQ queue:
+
+```text
+Image Resize Queue
+   |
+   +------> Worker A
+   +------> Worker B
+   +------> Worker C
+```
+
+Each message is generally delivered to one worker. Adding workers increases the rate at which queued jobs are processed.
+
+This is useful for tasks where one completed result is enough.
+
+### Kafka consumer groups
+
+In Kafka, consumers inside the same consumer group divide partitions between themselves:
+
+```text
+Topic Partitions: P0  P1  P2  P3
+
+Monitoring Consumer Group:
+Consumer A -> P0, P1
+Consumer B -> P2, P3
+
+Analytics Consumer Group:
+Consumer C -> P0, P1, P2, P3
+```
+
+Within the monitoring group, consumers cooperate to divide work. But the analytics group still reads the same full event stream independently.
+
+This means Kafka handles two goals at once:
+
+- Scale one type of processing by adding consumers to a group.
+- Let different applications independently consume the same event history.
+
+One important constraint is that partition count controls parallelism within a consumer group. If a topic has four partitions, adding ten consumers to one group does not let all ten actively process partitions at the same time.
+
+## Ordering and Failure Handling
+
+Ordering is often misunderstood in event broker discussions.
+
+| Concern | RabbitMQ | Kafka |
+| --- | --- | --- |
+| Basic ordering | Queues are generally FIFO | Events are ordered within a partition |
+| Multiple parallel consumers | Processing completion may finish out of order | Different partitions are processed independently |
+| Retry behavior | Redelivery can affect observed order | Retry strategy may pause or redirect failed events |
+| Best way to preserve entity order | Control concurrency carefully | Use an entity key so related events share a partition |
+
+Neither broker means that the entire distributed business process automatically happens in perfect order.
+
+For example, if payment events for the same order must be processed sequentially, Kafka should use the `orderId` as the event key. With RabbitMQ, the application may need a dedicated queue strategy, limited concurrency, or idempotent processing.
+
+In both systems, consumers should be idempotent where possible. A message can be retried or delivered again after a network failure, consumer crash, timeout, or acknowledgement problem.
+
+An idempotent consumer means that receiving the same event twice does not incorrectly apply the business effect twice. For example, processing `payment.confirmed` twice should not charge the customer twice.
+
+## When RabbitMQ Is the Better Choice
+
+RabbitMQ is usually the clearer option when your message describes a command or job.
+
+<CardGrid columns={2}>
+  <InfoCard title="Background Job Processing">
+    A user uploads an image and one worker must resize it. The job should be retried if the worker fails.
+  </InfoCard>
+
+  <InfoCard title="Email and Notification Delivery">
+    An order is completed and a worker must send an email or push notification exactly as an operational task.
+  </InfoCard>
+
+  <InfoCard title="Complex Message Routing">
+    Messages need to be sent to queues according to routing keys, topics, severity levels, regions, or business rules.
+  </InfoCard>
+
+  <InfoCard title="Short-Lived Work Backlog">
+    The system mainly needs a temporary buffer while workers catch up, rather than a long-lived event history.
+  </InfoCard>
+</CardGrid>
+
+Example workflow:
+
+```text
+Order Service
+   |
+   | publish: invoice.generate
+   v
+RabbitMQ Exchange
+   |
+   v
+Invoice Job Queue
+   |
+   v
+PDF Generation Worker
+```
+
+Here, retaining every message for later replay is not the main objective. The main objective is reliable delivery and successful execution of a task.
+
+## When Kafka Is the Better Choice
+
+Kafka is usually the clearer option when your message describes a fact or event that multiple systems may need.
+
+<CardGrid columns={2}>
+  <InfoCard title="API Performance Events">
+    Every service publishes request completion events. Monitoring, alerts, and analytics read the same stream independently.
+  </InfoCard>
+
+  <InfoCard title="Audit Trails">
+    Business actions such as payment approval, refund creation, or role changes need a durable historical event record.
+  </InfoCard>
+
+  <InfoCard title="Data Pipelines">
+    Events need to flow into search, dashboards, fraud detection, reporting, or machine learning pipelines.
+  </InfoCard>
+
+  <InfoCard title="Event-Driven Services">
+    Multiple downstream services react independently to the same completed business event.
+  </InfoCard>
+</CardGrid>
+
+Example workflow:
+
+```text
+Java API      Go API      Node.js API
+   |            |              |
+   +------------+--------------+
+                |
+                v
+     Kafka Topic: api-events
+                |
+     +----------+----------+-----------+
+     |                     |           |
+     v                     v           v
+ Monitoring             Alerting     Analytics
+```
+
+This matches an event log system because the same event is useful for real-time monitoring today and historical debugging later.
+
+## A Important Boundary: RabbitMQ Streams
+
+It is inaccurate to say that RabbitMQ can only operate as a traditional destructive queue.
+
+RabbitMQ also provides **Streams**, which use a non-destructive read model. Messages in a stream can remain available for retention-based replay, making this model closer to Kafka than ordinary RabbitMQ queues.
+
+The comparison should therefore be understood like this:
+
+| Technology Mode | Best Mental Model |
+| --- | --- |
+| RabbitMQ traditional queue | Route and deliver tasks to consumers |
+| RabbitMQ Streams | Retained message stream inside the RabbitMQ ecosystem |
+| Kafka topics | Distributed retained event log and streaming platform |
+
+RabbitMQ Streams may be relevant when a team already operates RabbitMQ and needs replayable streams without introducing Kafka immediately.
+
+However, this does not erase the architectural distinction. Traditional RabbitMQ queues remain highly suitable for job delivery and routing. Kafka remains designed around distributed event streaming, retained topics, partition-based scaling, and independent consumers reading event history.
+
+## Can Kafka and RabbitMQ Be Used Together?
+
+Yes. A real system does not need to force every message through one broker.
+
+For example, an order platform may use Kafka for durable business events:
+
+```text
+Kafka:
+order.created
+payment.completed
+shipment.dispatched
+api.request.completed
+```
+
+The same platform may use RabbitMQ for operational tasks:
+
+```text
+RabbitMQ:
+email.send
+invoice.generate
+image.resize
+payment.retry
+```
+
+A Kafka consumer may even receive `order.completed` and then submit an `email.send` task to RabbitMQ.
+
+The distinction is clean:
+
+| Message Meaning | Better Default |
+| --- | --- |
+| This fact happened and several systems may need it | Kafka |
+| This task should be completed by a worker | RabbitMQ |
+| This information must be replayed later | Kafka |
+| This job needs routing and acknowledgement-based retries | RabbitMQ |
+| This system needs both durable event history and job execution | Use both where appropriate |
+
+Using both is not unnecessary duplication when they serve different responsibilities. It becomes unnecessary only when the same requirement is implemented twice without a clear reason.
+
+## Applying This to an API Event Log System
+
+Suppose a request passes through several services:
+
+```text
+Client
+  |
+  v
+Node.js Gateway -> Java Order Service -> Go Payment Service
+```
+
+Each service records its own lifecycle event:
+
+```json
+{
+  "traceId": "tr_91aa20",
+  "service": "payment-service",
+  "phase": "request.completed",
+  "durationMs": 194,
+  "statusCode": 200,
+  "timestamp": "2026-06-04T11:04:28Z"
+}
+```
+
+All services can publish events into Kafka:
+
+```text
+Node.js Gateway
+Java Order Service    -> Kafka Topic: request-lifecycle-events
+Go Payment Service
+```
+
+Downstream consumers can then process the same events differently:
+
+| Consumer | Purpose |
+| --- | --- |
+| Monitoring consumer | Calculate latency and throughput |
+| Alerting consumer | Detect elevated failure rates |
+| Trace analysis consumer | Reconstruct one request across services |
+| Data warehouse consumer | Store long-term reporting data |
+| Debugging consumer | Replay events during investigation |
+
+RabbitMQ could transport these messages, especially in a small system, but the model becomes less natural once multiple independent consumers need the same historical event stream.
+
+For an API observability and performance event system, Kafka is usually the better default because events are facts that should remain analyzable, not tasks that disappear after one worker handles them.
+
+## Common Mistakes
+
+| Mistake | Why It Causes Problems | Better Rule |
+| --- | --- | --- |
+| Choosing Kafka because it sounds more scalable | It adds operational and consumer complexity for simple job queues | Use Kafka when replayable event history matters |
+| Choosing RabbitMQ for long-term analytics events without planning retention | Successfully consumed messages are not automatically a historical dataset | Use a retained stream or write events to durable storage |
+| Assuming Kafka replaces every queue | Job execution, routing, and simple retries may be clearer in RabbitMQ | Match the broker to message meaning |
+| Assuming RabbitMQ cannot support streaming | RabbitMQ Streams exist and support non-destructive reads | Distinguish queues from streams |
+| Ignoring duplicate delivery | Failures and retries can cause repeated processing | Build idempotent consumers |
+
+The broker does not solve business correctness by itself. Consumers still need validation, idempotency, retry limits, dead-letter or failure handling, monitoring, and a clear event schema.
+
+## Decision Rule
+
+Ask these questions before choosing a broker:
+
+| Question | If Yes, Prefer |
+| --- | --- |
+| Is the message a job that one worker should execute? | RabbitMQ |
+| Do routing rules determine which queue should receive the work? | RabbitMQ |
+| Should completed messages remain available for replay? | Kafka |
+| Do several independent systems need to consume the same event history? | Kafka |
+| Are you building observability, auditing, or analytics pipelines? | Kafka |
+| Do you already use RabbitMQ but require retained replayable streams? | Consider RabbitMQ Streams |
+| Do you have both events and operational jobs? | Consider Kafka and RabbitMQ together |
+
+A useful naming test is also available:
+
+- If the message name looks like a command, such as `email.send`, `invoice.generate`, or `image.resize`, it usually fits RabbitMQ.
+- If the message name looks like a completed fact, such as `payment.completed`, `order.created`, or `api.request.completed`, it usually fits Kafka.
+
+## The Main Principle
+
+Do not choose Kafka or RabbitMQ based only on performance claims or popularity.
+
+Choose based on the meaning and lifetime of the message.
+
+RabbitMQ is mainly about reliably delivering work to the right consumer. Kafka is mainly about durably recording events so multiple consumers can process and replay the same history independently.
+
+For an API performance event log system across multiple backend services, the event is not merely a temporary task. It is evidence of what happened during a request lifecycle. That is why Kafka is usually the more natural foundation for the event stream, while RabbitMQ remains suitable for operational jobs triggered from those events.
+
+</Lang>
+
+<Lang lang="zh">
+
+Kafka 和 RabbitMQ 都可以把消息从一个服务传递到另一个服务，但它们的核心用途并不一样。RabbitMQ 通常用于把一项待完成的工作交给合适的 worker；Kafka 通常用于保存已经发生过的事件，让多个系统可以各自读取、分析和重播这段事件历史。
+
+这个差异会直接影响 API 性能日志、订单流程、通知发送、审计记录、数据分析管线，以及 Java、Go、Node.js 等多个服务之间的事件通信设计。
+
+## 简短答案
+
+| 问题 | RabbitMQ | Kafka |
+| --- | --- | --- |
+| 主要目的 | 把任务交给消费者处理 | 保存并分发事件流 |
+| 核心结构 | Exchange 与 Queue | Topic 与 Partition |
+| 消息成功处理后 | 通常会从队列中移除 | 按保留策略继续存在 |
+| 重播历史消息 | 不是传统队列的主要模型 | 核心能力之一 |
+| 多个独立消费者读取同一信息 | 通常需要额外队列或绑定规则 | 不同 Consumer Group 可独立读取 |
+| 路由能力 | Exchange 路由规则很强 | 主要通过 Topic 与 Key 分区 |
+| 常见场景 | 后台任务、命令、工作分发 | 日志、审计、分析、事件驱动系统 |
+
+最简单的判断规则是：
+
+<CardGrid columns={2}>
+  <InfoCard title="选择 RabbitMQ">
+    当你关心的是：哪一个 worker 应该现在完成这项任务？
+  </InfoCard>
+
+  <InfoCard title="选择 Kafka">
+    当你关心的是：发生了什么，以及哪些系统现在或未来需要读取这些事件？
+  </InfoCard>
+</CardGrid>
+
+## 核心区别：工作队列与事件日志
+
+消息 broker 的作用，是让 producer 不需要直接调用所有 downstream services。Producer 只需要把消息交给 broker，消费者再根据自己的职责处理这些消息。
+
+但 Kafka 和 RabbitMQ 对消息本身的理解不同。
+
+### RabbitMQ：消息通常代表等待执行的工作
+
+在典型的 RabbitMQ 架构中，producer 先把消息发送到 **exchange**。Exchange 根据 routing rule，把消息放入一个或多个 **queue**。Consumer 从 queue 取得消息，成功处理后发送 acknowledgement。
+
+例如，订单服务发布以下消息：
+
+```json
+{
+  "type": "email.send",
+  "orderId": "ORD-9182",
+  "recipient": "customer@example.com",
+  "template": "payment-confirmed"
+}
+```
+
+这条消息的主要目的不是保存历史，而是确保某个邮件 worker 最终把确认邮件发送出去。
+
+当 worker 成功处理并确认消息后，这条消息通常不需要继续留在队列中，因为任务已经完成。
+
+### Kafka：消息通常代表已经发生的事实
+
+在 Kafka 中，producer 会把事件写入 **topic**。Topic 会拆分为多个 **partition**，事件会根据 retention configuration 保留一段时间。Consumer 通过 offset 记录自己读取到的位置。
+
+例如，一个 API 服务发布以下事件：
+
+```json
+{
+  "type": "api.request.completed",
+  "service": "payment-service",
+  "endpoint": "POST /payments",
+  "statusCode": 201,
+  "durationMs": 482,
+  "traceId": "tr_82af19",
+  "occurredAt": "2026-06-04T10:32:19Z"
+}
+```
+
+这条事件可能同时对多个系统有价值：
+
+- Monitoring service 用它计算请求延迟。
+- Alerting service 用它侦测异常错误率。
+- Dashboard service 用它展示性能数据。
+- Data analysis service 可能在明天重新读取同一批事件。
+
+Kafka 适合这个场景，因为某个 consumer 读取事件后，并不会导致其他 consumer 无法再次读取它。
+
+## RabbitMQ 的消息流动方式
+
+RabbitMQ 的核心是把消息路由到不同的 queue。
+
+一个简化流程如下：
+
+```text
+Producer
+   |
+   v
+Exchange
+   |
+   +------------------+
+   |                  |
+   v                  v
+Email Queue       Audit Queue
+   |                  |
+   v                  v
+Email Worker      Audit Worker
+```
+
+Exchange 决定一条消息应该进入哪些 queue。例如：
+
+| Exchange 模式 | 含义 | 示例场景 |
+| --- | --- | --- |
+| Direct routing | 按照准确 routing key 匹配 | `email.send` 进入邮件队列 |
+| Topic routing | 按照 pattern 匹配 | `order.*` 或 `payment.failed` |
+| Fanout routing | 复制消息到所有绑定队列 | 一个事件通知多个系统 |
+
+这使得 RabbitMQ 很适合需要明确路由规则的工作流。例如，一次支付失败可能需要同时进入重试队列、通知队列以及事故处理队列。
+
+RabbitMQ consumer 也会使用 acknowledgement。如果某个 worker 收到任务后崩溃，还没有完成确认，broker 可以重新派发这项工作，让其他 consumer 再次尝试处理。
+
+这种行为非常适合后台任务：
+
+- 生成 PDF invoice。
+- 发送邮件。
+- 调整用户上传图片的尺寸。
+- 重试失败的第三方 API 请求。
+- 执行排程任务。
+
+在这些场景中，消息代表的是一项必须完成的工作。
+
+## Kafka 的事件流动方式
+
+Kafka 的核心是把事件追加写入 topic 内有序的 partition。
+
+一个简化流程如下：
+
+```text
+API Services
+     |
+     v
+Topic: api-performance-events
+     |
+     +---------------------+---------------------+
+     |                     |                     |
+     v                     v                     v
+Monitoring Group      Alerting Group       Analytics Group
+```
+
+每一个 consumer group 都可以独立读取同一批事件。Monitoring service 读过一条事件，不会阻止 analytics service 之后再次读取相同事件。
+
+Kafka 使用 partition 来实现扩展能力以及局部顺序：
+
+```text
+Topic: api-performance-events
+
+Partition 0: [event 1] [event 4] [event 7]
+Partition 1: [event 2] [event 5] [event 8]
+Partition 2: [event 3] [event 6] [event 9]
+```
+
+同一个 partition 内的事件具有顺序。不同 partition 之间，则不存在天然的全局顺序。
+
+例如，如果同一个 `traceId` 或 `orderId` 的相关事件必须保持顺序，producer 可以使用该 identifier 作为 message key，使相关事件写入相同的 partition。
+
+Kafka consumer 通过 offset 记录读取进度：
+
+```text
+Partition 0: [0] [1] [2] [3] [4] [5] [6]
+                             ^
+                     Consumer 已处理到 offset 3
+```
+
+如果 consumer 重启，它可以从已经提交的 offset 继续读取。如果明天新增一个 analytics application，它也可以从较早的位置开始读取仍然被保留的历史事件。
+
+这就是 Kafka 适合事件日志、observability、analytics、change data capture 和 event-driven system 的原因。
+
+## 最重要的区别：消费后是否还能重播
+
+判断两者差异最直接的方法，是问一句：consumer 读取消息后，这条消息应该发生什么？
+
+| 情况 | RabbitMQ Queue | Kafka Topic |
+| --- | --- | --- |
+| Worker 完成处理 | 消息确认后通常被移除 | 事件继续存在直到 retention 清除 |
+| Consumer 处理中失败 | 消息可以重新派发 | Consumer 可以根据 offset 再次读取 |
+| 明天新增一个 consumer | 已处理的旧消息通常无法重新取得 | 可读取仍在保留范围内的历史事件 |
+| 多个系统需要同样的信息 | 通常需要建立不同 queue 或 binding | 建立不同 consumer group 即可 |
+| 需要做历史分析 | 通常要另外设计存储方式 | 可从 topic 中读取过去事件 |
+
+考虑一个横跨 Java、Go 和 Node.js 服务的 API 性能日志系统。
+
+每一个应用都可以通过自己的 middleware 记录 request 完成事件：
+
+```json
+{
+  "service": "order-service",
+  "language": "go",
+  "route": "GET /orders/:id",
+  "durationMs": 76,
+  "statusCode": 200,
+  "traceId": "tr_f120ab"
+}
+```
+
+如果这些消息只是为了马上触发某一项工作，RabbitMQ 可能已经足够。
+
+但如果你的目标是把这些事件保留下来，用于 dashboard、alert、debugging、趋势分析以及之后的调查，那么 Kafka 的模型会更自然。事件流本身就是记录，而不同 consumer 只是对这份记录进行不同用途的处理。
+
+## Consumer 扩展方式也不一样
+
+两种工具都能够让多个 consumer 分担工作，但它们分担工作的含义并不一样。
+
+### RabbitMQ 的 competing consumers
+
+多个 worker 可以从同一个 RabbitMQ queue 中消费任务：
+
+```text
+Image Resize Queue
+   |
+   +------> Worker A
+   +------> Worker B
+   +------> Worker C
+```
+
+每一条消息一般只会交给其中一个 worker 处理。增加 worker 的目的，是更快处理队列里等待完成的任务。
+
+这适合只需要一个最终执行结果的任务。
+
+### Kafka 的 consumer groups
+
+在 Kafka 中，同一个 consumer group 内的 consumer 会共同分配 topic partitions：
+
+```text
+Topic Partitions: P0  P1  P2  P3
+
+Monitoring Consumer Group:
+Consumer A -> P0, P1
+Consumer B -> P2, P3
+
+Analytics Consumer Group:
+Consumer C -> P0, P1, P2, P3
+```
+
+在 monitoring group 内，Consumer A 和 Consumer B 共同分担监控处理工作。但 analytics group 仍然能够独立读取完整的事件流。
+
+因此，Kafka 同时满足两个目标：
+
+- 同一种处理逻辑可以通过增加 group 内 consumer 进行扩展。
+- 不同应用可以独立读取同一份事件历史。
+
+需要注意的是，同一个 consumer group 的并行能力受到 partition 数量限制。如果 topic 只有四个 partition，即使你在一个 group 中加入十个 consumer，也不会让十个 consumer 都同时积极处理 partition。
+
+## 顺序与失败处理
+
+讨论 event broker 时，事件顺序经常被过度简化。
+
+| 关注点 | RabbitMQ | Kafka |
+| --- | --- | --- |
+| 基础顺序 | Queue 通常遵循 FIFO | 同一 partition 内保证顺序 |
+| 多个并行 consumer | 完成处理的时间可能乱序 | 不同 partition 可独立并行处理 |
+| 重试行为 | Redelivery 可能改变观察到的顺序 | Retry strategy 可能暂停或转移失败事件 |
+| 保持同一业务对象顺序的方法 | 谨慎控制并发与 queue 设计 | 使用 entity key 让相关事件进入同一 partition |
+
+无论选择哪一种 broker，都不代表整个分布式业务流程会自动保持完美顺序。
+
+例如，如果同一个订单的 payment events 必须按顺序处理，在 Kafka 中可以使用 `orderId` 作为 event key。在 RabbitMQ 中，则可能需要限制并发、设计专门的 queue strategy，或依赖幂等处理。
+
+在两种系统中，consumer 都应该尽可能实现 idempotency。因为在网络故障、consumer crash、timeout 或 acknowledgement 异常时，同一条消息可能会被再次处理。
+
+Idempotent consumer 的意思是：同一条事件被处理两次，也不会错误地重复执行业务效果。例如，`payment.confirmed` 被重复处理时，不应该导致客户被重复扣款。
+
+## 什么时候选择 RabbitMQ
+
+当消息描述的是 command 或 job 时，RabbitMQ 通常更加清晰。
+
+<CardGrid columns={2}>
+  <InfoCard title="后台任务处理">
+    用户上传图片后，需要一个 worker 执行压缩或尺寸调整；如果 worker 失败，任务应该可以重试。
+  </InfoCard>
+
+  <InfoCard title="邮件与通知发送">
+    订单完成后，需要一个 worker 实际执行邮件或推送通知的发送工作。
+  </InfoCard>
+
+  <InfoCard title="复杂路由规则">
+    消息需要根据 routing key、错误等级、区域或业务规则进入不同队列。
+  </InfoCard>
+
+  <InfoCard title="短期等待处理的任务量">
+    系统只需要在 worker 忙碌时暂时缓存工作，而不是保存长期事件历史。
+  </InfoCard>
+</CardGrid>
+
+示例流程：
+
+```text
+Order Service
+   |
+   | publish: invoice.generate
+   v
+RabbitMQ Exchange
+   |
+   v
+Invoice Job Queue
+   |
+   v
+PDF Generation Worker
+```
+
+这里的主要目标不是未来重新读取所有消息，而是可靠地完成一次 PDF 生成任务。
+
+## 什么时候选择 Kafka
+
+当消息描述的是已经发生的事实，并且多个系统可能需要读取它时，Kafka 通常更加合适。
+
+<CardGrid columns={2}>
+  <InfoCard title="API 性能事件">
+    每个服务都发布 request completion events，监控、告警和分析系统分别读取同一份事件流。
+  </InfoCard>
+
+  <InfoCard title="审计记录">
+    支付批准、退款建立或权限变更等业务动作需要保留可追查的历史事件。
+  </InfoCard>
+
+  <InfoCard title="数据管线">
+    事件需要继续进入搜索系统、dashboard、风控分析、报表或机器学习管线。
+  </InfoCard>
+
+  <InfoCard title="事件驱动服务">
+    多个 downstream services 需要独立回应同一个已完成的业务事件。
+  </InfoCard>
+</CardGrid>
+
+示例流程：
+
+```text
+Java API      Go API      Node.js API
+   |            |              |
+   +------------+--------------+
+                |
+                v
+     Kafka Topic: api-events
+                |
+     +----------+----------+-----------+
+     |                     |           |
+     v                     v           v
+ Monitoring             Alerting     Analytics
+```
+
+这非常符合 event log system 的需求，因为同一条事件既能用于今天的即时监控，也能用于之后的历史 debugging。
+
+## 一个重要边界：RabbitMQ Streams
+
+不能简单地说 RabbitMQ 只能作为传统的消费后删除消息的 queue。
+
+RabbitMQ 也提供 **Streams**。Streams 使用非破坏式读取模型，消息可以按照 retention rule 继续保留，并支持之后重新读取。因此，RabbitMQ Streams 的使用方式会比普通 RabbitMQ queues 更接近 Kafka。
+
+正确的理解应该是：
+
+| 技术模式 | 最适合的理解方式 |
+| --- | --- |
+| RabbitMQ traditional queue | 把任务路由并交付给 consumer |
+| RabbitMQ Streams | RabbitMQ 生态中的可保留消息流 |
+| Kafka topics | 分布式、可保留、可重播的事件日志平台 |
+
+如果团队已经使用 RabbitMQ，而且现在需要一定程度的事件重播能力，RabbitMQ Streams 可能值得考虑，而不是立即引入 Kafka。
+
+但这并不会消除架构上的核心区别。传统 RabbitMQ queue 依然非常适合任务派发与路由；Kafka 依然围绕 distributed event streaming、retained topics、partition scaling 和多个独立 consumer 读取历史事件而设计。
+
+## Kafka 与 RabbitMQ 可以同时使用吗
+
+可以。真实系统没有必要强迫所有消息都通过同一种 broker。
+
+例如，一个订单平台可以使用 Kafka 保存持久化业务事件：
+
+```text
+Kafka:
+order.created
+payment.completed
+shipment.dispatched
+api.request.completed
+```
+
+同一个平台也可以使用 RabbitMQ 执行具体操作任务：
+
+```text
+RabbitMQ:
+email.send
+invoice.generate
+image.resize
+payment.retry
+```
+
+一个 Kafka consumer 甚至可以读取 `order.completed` 事件后，再向 RabbitMQ 发布一个 `email.send` 任务。
+
+边界可以定义得很清楚：
+
+| 消息含义 | 更合理的默认选择 |
+| --- | --- |
+| 这个事实已经发生，而且多个系统可能需要它 | Kafka |
+| 这项任务需要由某个 worker 完成 | RabbitMQ |
+| 这条信息以后需要重新读取 | Kafka |
+| 这个 job 需要明确路由和 acknowledgement retry | RabbitMQ |
+| 系统同时需要事件历史与任务执行 | 按职责同时使用两者 |
+
+只要两者负责不同职责，同时使用并不是不必要的重复。真正的问题，是在没有明确理由时，用两套 broker 重复解决同一个需求。
+
+## 应用到 API Event Log System
+
+假设一次请求经过多个服务：
+
+```text
+Client
+  |
+  v
+Node.js Gateway -> Java Order Service -> Go Payment Service
+```
+
+每一个服务都记录自己的 lifecycle event：
+
+```json
+{
+  "traceId": "tr_91aa20",
+  "service": "payment-service",
+  "phase": "request.completed",
+  "durationMs": 194,
+  "statusCode": 200,
+  "timestamp": "2026-06-04T11:04:28Z"
+}
+```
+
+这些服务都可以把事件发布到 Kafka：
+
+```text
+Node.js Gateway
+Java Order Service    -> Kafka Topic: request-lifecycle-events
+Go Payment Service
+```
+
+不同 downstream consumers 可以用不同方式处理相同事件：
+
+| Consumer | 用途 |
+| --- | --- |
+| Monitoring consumer | 计算 latency 与 throughput |
+| Alerting consumer | 侦测异常失败率 |
+| Trace analysis consumer | 重建一次请求经过多个服务的流程 |
+| Data warehouse consumer | 保存长期报表数据 |
+| Debugging consumer | 在调查问题时重新读取事件 |
+
+RabbitMQ 当然也能够传输这些消息，特别是在规模很小的系统中。但当多个独立 consumer 都需要读取同一份历史事件流时，它的传统 queue 模型就不再那么自然。
+
+对于 API observability 与 performance event system，Kafka 通常是更合理的默认选择，因为这些消息是需要长期分析的事实，而不是由一个 worker 处理完就可以消失的临时任务。
+
+## 常见错误
+
+| 错误 | 为什么会造成问题 | 更好的规则 |
+| --- | --- | --- |
+| 因为 Kafka 看起来更强大就直接选择 Kafka | 简单 job queue 会因此承担额外部署与消费复杂度 | 只有需要可重播事件历史时才优先考虑 Kafka |
+| 用 RabbitMQ 保存长期分析事件，却没有设计额外存储 | 已消费的普通 queue 消息不会自动成为历史数据集 | 使用 retained stream 或将事件写入持久存储 |
+| 认为 Kafka 可以替代所有 queue | Job execution、routing 与简单 retry 在 RabbitMQ 中可能更直接 | 根据消息语义选择 broker |
+| 认为 RabbitMQ 完全不支持 streaming | RabbitMQ Streams 支持非破坏式读取和重播 | 区分传统 queue 与 streams |
+| 忽略重复处理风险 | 失败和重试可能导致同一消息再次执行 | Consumer 必须尽可能幂等 |
+
+Broker 本身不会自动保证业务逻辑正确。Consumer 仍然需要考虑 validation、idempotency、retry limit、dead-letter 或 failure handling、monitoring，以及清晰稳定的 event schema。
+
+## 选择规则
+
+在决定 broker 之前，先回答以下问题：
+
+| 问题 | 如果答案是 Yes，优先考虑 |
+| --- | --- |
+| 这条消息是否是一项需要某个 worker 执行的任务？ | RabbitMQ |
+| 是否需要根据路由规则决定任务进入哪个 queue？ | RabbitMQ |
+| 消息完成处理后是否还需要保留并重播？ | Kafka |
+| 多个独立系统是否都需要消费同一份事件历史？ | Kafka |
+| 你是否正在建立 observability、audit 或 analytics pipeline？ | Kafka |
+| 团队已经使用 RabbitMQ，但现在需要 retained replayable streams？ | 考虑 RabbitMQ Streams |
+| 系统同时包含业务事件与操作任务？ | 根据职责同时使用 Kafka 与 RabbitMQ |
+
+也可以通过消息名称快速判断：
+
+- 如果消息名称像命令，例如 `email.send`、`invoice.generate`、`image.resize`，它通常更适合 RabbitMQ。
+- 如果消息名称像已经完成的事实，例如 `payment.completed`、`order.created`、`api.request.completed`，它通常更适合 Kafka。
+
+## 核心原则
+
+不要因为 Kafka 看起来更高性能，或者 RabbitMQ 看起来更简单，就直接作出选择。
+
+真正应该判断的是：这条消息代表什么，以及它需要存活多久。
+
+RabbitMQ 主要解决的是把工作可靠地交付给正确的 consumer。Kafka 主要解决的是把事件可靠地保存下来，让多个 consumer 可以独立处理并在之后重新读取同一份历史。
+
+对于横跨多个 backend services 的 API performance event log system，请求事件不是处理完成后就可以丢弃的临时任务，而是整个 request lifecycle 中发生过什么的证据。因此，Kafka 通常更适合作为事件流基础；RabbitMQ 则适合处理由这些事件进一步触发的操作任务。
+
+</Lang>
