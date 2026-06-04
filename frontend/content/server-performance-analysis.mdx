@@ -2,83 +2,59 @@
 title: "How to Diagnose Server Performance: CPU vs I/O Overhead"
 category: "Software Development"
 createdAt: "2026-06-03"
-summary: "A practical Linux workflow for deciding whether a slow server is limited by CPU processing, disk I/O, or something else."
-readTime: "10 min read"
+summary: "A practical Linux workflow for identifying whether server slowness comes from CPU execution or storage I/O waits."
+readTime: "6 min read"
 tags:
   - "Linux"
   - "Performance"
   - "Observability"
 featured: false
+series:
+  title: "Server Performance"
+  slug: "server-performance"
+  order: 1
 ---
 
-When an API becomes slow, a worker queue falls behind, or a database starts timing out, the first question should not be:
+When an API slows down or a worker queue falls behind, do not begin by increasing server size. First identify what the application is waiting for: CPU execution, storage I/O, network responses, memory, or locks.
 
-> How do we make the server bigger?
+This note focuses on the first split: **is the server busy executing work, or blocked waiting for disk I/O?**
 
-The first question should be:
+## CPU vs I/O Bottlenecks
 
-> What resource is the application waiting for?
+A **CPU bottleneck** occurs when the server spends most of its time executing instructions. Common causes include expensive loops, serialization, encryption, compression, inefficient filtering, or excessive concurrency.
 
-A slow server may be spending its time executing code on the CPU, waiting for storage I/O, waiting for memory, waiting for network calls, or waiting on locks inside the application or database.
+An **I/O bottleneck** occurs when processes wait for reads or writes to complete. Common causes include slow database queries, missing indexes, heavy logging, storage saturation, cache misses, or write-heavy workloads.
 
-This post focuses on the first diagnosis: **is the problem CPU overhead or I/O overhead?**
+| Observation                       | Likely Direction        | Next Check                                   |
+| --------------------------------- | ----------------------- | -------------------------------------------- |
+| High `%usr`, low `%idle`          | CPU-bound work          | Profile the application process              |
+| High `%iowait`, high disk latency | I/O-bound work          | Inspect storage and database activity        |
+| Low CPU, slow requests            | External waits or locks | Check database locks and downstream calls    |
+| High load average alone           | Inconclusive            | Compare load with CPU count and wait metrics |
 
-## The Basic Difference
+Load average indicates pressure, but it does not prove whether the pressure comes from CPU work or blocked I/O.
 
-A **CPU bottleneck** occurs when the server is busy executing instructions. Common causes include expensive algorithms, excessive serialization, compression, encryption, large loops, inefficient filtering, or too much concurrent work.
+## Step 1: Check Load Relative to CPU Capacity
 
-An **I/O bottleneck** occurs when processes spend too much time waiting for data to be read or written. Common causes include slow database queries, table scans, excessive logging, insufficient indexes, disk saturation, cache misses, or write-heavy workloads.
-
-A useful mental model is:
-
-| Symptom                             | Likely Direction                                        |
-| ----------------------------------- | ------------------------------------------------------- |
-| CPU cores close to 100% busy        | Investigate CPU overhead                                |
-| High disk latency and high I/O wait | Investigate I/O overhead                                |
-| Low CPU but requests are slow       | Investigate I/O, locks, network, or downstream services |
-| High load average alone             | Not enough evidence; continue checking                  |
-
-## Step 1: Check the Server Load
-
-Start with `uptime`.
+Run this on the affected Linux server to view recent load averages and the number of available CPU cores:
 
 ```bash
 uptime
-```
-
-Example output:
-
-```text
-14:42:18 up 31 days,  4:20,  2 users,  load average: 8.91, 8.24, 7.30
-```
-
-The three load-average values represent approximately the last 1, 5, and 15 minutes.
-
-A load average of `8.91` is not automatically bad. On a 16-core server, it may be acceptable. On a 2-core server, it suggests significant pressure.
-
-Check the CPU count:
-
-```bash
 nproc
 ```
 
 Example output:
 
 ```text
+14:42:18 up 31 days, 4:20, 2 users, load average: 8.91, 8.24, 7.30
 4
 ```
 
-In this example, a load average around `8` on a 4-core machine means more work is competing for execution than the CPU can immediately handle. However, load average includes some tasks waiting on I/O, so it does not yet prove that CPU is the bottleneck.
+A load average near `8` on a 4-core machine means work is queueing. However, some queued tasks may be waiting on I/O, so continue with CPU and disk metrics before deciding on a fix.
 
-## Step 2: Check CPU Utilization with `mpstat`
+## Step 2: Check CPU Utilization
 
-Install the `sysstat` package if these commands are not available.
-
-```bash
-sudo apt-get install sysstat
-```
-
-Now sample CPU usage every second:
+Run this on the affected Linux server to sample CPU activity across all cores:
 
 ```bash
 mpstat -P ALL 1 5
@@ -87,48 +63,33 @@ mpstat -P ALL 1 5
 Example output from a CPU-bound server:
 
 ```text
-Linux 6.8.0 (api-prod-01)   06/03/2026   _x86_64_   (4 CPU)
-
-14:45:01  CPU   %usr  %nice   %sys %iowait  %irq %soft  %idle
-14:45:02  all  84.10   0.00  10.40    0.30  0.00  0.70   4.50
-14:45:02    0  89.00   0.00   8.00    0.00  0.00  1.00   2.00
-14:45:02    1  82.00   0.00  12.00    0.00  0.00  1.00   5.00
-14:45:02    2  87.00   0.00   9.00    1.00  0.00  0.00   3.00
-14:45:02    3  78.00   0.00  13.00    0.00  0.00  1.00   8.00
+CPU   %usr  %sys  %iowait  %idle
+all   84.1  10.4      0.3    4.5
 ```
 
-Important columns:
+The important signals are:
 
-| Column    | Meaning                                                                    |
-| --------- | -------------------------------------------------------------------------- |
-| `%usr`    | Time spent running application code                                        |
-| `%sys`    | Time spent in kernel work, system calls, networking, filesystem operations |
-| `%iowait` | Time the CPU was idle while waiting for I/O completion                     |
-| `%idle`   | Unused CPU capacity                                                        |
+| Metric    | Meaning                                    |
+| --------- | ------------------------------------------ |
+| `%usr`    | Time executing application code            |
+| `%sys`    | Time executing kernel or system-call work  |
+| `%iowait` | Idle time while waiting for I/O completion |
+| `%idle`   | Remaining CPU capacity                     |
 
-### Interpretation
+High `%usr` with very low `%idle` and low `%iowait` suggests that the server is mainly busy executing work.
 
-This example strongly suggests a **CPU bottleneck**:
-
-* `%usr` is very high.
-* `%sys` is moderately high.
-* `%idle` is close to zero.
-* `%iowait` is low.
-
-The server is not mainly waiting for storage. It is busy executing work.
-
-Now compare it with an I/O-bound server:
+Compare this with an I/O-heavy sample:
 
 ```text
-14:47:01  CPU   %usr  %nice   %sys %iowait  %irq %soft  %idle
-14:47:02  all  10.20   0.00   4.80   63.50  0.00  0.40  21.10
+CPU   %usr  %sys  %iowait  %idle
+all   10.2   4.8     63.5   21.1
 ```
 
-This server is not consuming most of its time executing application code. A large percentage of time is spent waiting for I/O. The next step is to inspect storage.
+Here, the dominant signal is `%iowait`. The server has CPU capacity available, but tasks are delayed while waiting for I/O.
 
-## Step 3: Check Disk Latency with `iostat`
+## Step 3: Check Disk Latency
 
-Run extended disk statistics:
+Run this on the affected Linux server to measure disk throughput, latency, queueing, and device utilization:
 
 ```bash
 iostat -xz 1 5
@@ -137,35 +98,21 @@ iostat -xz 1 5
 Example output from an I/O-bound server:
 
 ```text
-Device            r/s     w/s   rkB/s   wkB/s  r_await  w_await  aqu-sz  %util
-nvme0n1        1250.00  640.00 82400.0 51200.0    32.40    47.80   18.72   99.10
+Device       r/s    w/s   r_await  w_await  aqu-sz  %util
+nvme0n1   1250.0  640.0     32.4     47.8   18.72    99.1
 ```
 
-Important columns:
+| Metric               | Meaning                               |
+| -------------------- | ------------------------------------- |
+| `r_await`, `w_await` | Average read and write latency        |
+| `aqu-sz`             | Average number of queued I/O requests |
+| `%util`              | Time the device reports being busy    |
 
-| Column               | Meaning                                        |
-| -------------------- | ---------------------------------------------- |
-| `r/s`, `w/s`         | Read and write operations per second           |
-| `rkB/s`, `wkB/s`     | Read and write throughput                      |
-| `r_await`, `w_await` | Average read and write latency in milliseconds |
-| `aqu-sz`             | Average queue length waiting for the device    |
-| `%util`              | Percentage of time the device was busy         |
+Elevated latency together with a growing queue suggests storage pressure. Do not use `%util` alone as proof: modern SSDs and cloud volumes can report high utilization while still serving requests within acceptable latency.
 
-### Interpretation
+## Step 4: Identify the Responsible Process
 
-This example suggests storage saturation:
-
-* `%util` is close to `100%`.
-* `r_await` and `w_await` are elevated.
-* `aqu-sz` shows requests building up in a queue.
-
-Do not rely on `%util` alone, especially with modern SSDs and cloud storage. Latency and application response time are more important. A device can report high utilization while still handling requests quickly.
-
-## Step 4: Identify Which Process Is Consuming Resources
-
-System-wide metrics tell you that a bottleneck exists. They do not yet tell you which application caused it.
-
-### Find CPU-Heavy Processes
+Run this on the affected Linux server to find processes consuming the most CPU time:
 
 ```bash
 pidstat -u 1 5
@@ -174,15 +121,14 @@ pidstat -u 1 5
 Example output:
 
 ```text
-14:50:12      UID       PID    %usr %system  %guest   %CPU   CPU  Command
-14:50:13     1001     28417   78.40    6.20    0.00  84.60     2  node
-14:50:13      999      1732    3.10    1.20    0.00   4.30     1  postgres
-14:50:13        0       812    0.20    0.50    0.00   0.70     0  containerd
+PID    %usr  %system  %CPU  Command
+28417  78.4      6.2  84.6  node
+1732    3.1      1.2   4.3  postgres
 ```
 
-In this example, the `node` application is consuming most CPU time. That does not yet identify the endpoint, function, or job responsible, but it identifies the correct service to profile.
+This points to the `node` service as the CPU consumer. The next step is application profiling: identify the endpoint, background job, loop, serialization step, or deployment causing the work.
 
-### Find I/O-Heavy Processes
+Run this on the same server to identify processes generating the most disk traffic:
 
 ```bash
 pidstat -d 1 5
@@ -191,129 +137,61 @@ pidstat -d 1 5
 Example output:
 
 ```text
-14:51:30      UID       PID   kB_rd/s   kB_wr/s kB_ccwr/s  Command
-14:51:31      999      1732  68420.00  19840.00      0.00  postgres
-14:51:31     1001     28417    420.00    880.00      0.00  node
-14:51:31        0       921      0.00   5620.00      0.00  fluent-bit
+PID    kB_rd/s   kB_wr/s  Command
+1732   68420.0   19840.0  postgres
+28417    420.0     880.0  node
 ```
 
-Here, PostgreSQL is responsible for most read and write traffic. The next investigation should focus on database queries, indexing, cache behavior, checkpoints, and write volume.
+This points to PostgreSQL as the main source of I/O activity. Investigate slow queries, missing indexes, table scans, checkpoints, and write volume.
 
-## Step 5: Use `vmstat` for a Fast Combined View
+## Step 5: Confirm Resource Pressure
 
-`vmstat` is useful during incidents because it shows CPU activity, blocked processes, swap behavior, and I/O in one compact output.
-
-```bash
-vmstat 1 5
-```
-
-Example output:
-
-```text
-procs -----------memory---------- ---swap-- -----io---- -system-- ------cpu-----
- r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa st
- 9  0      0 982144 112320 842112    0    0    12    45 9100 18200 88 10  2  0  0
-10  0      0 974820 112320 842920    0    0    18    32 9400 18700 90  8  2  0  0
-```
-
-This resembles CPU saturation:
-
-* `r` is high: multiple runnable tasks are waiting for CPU time.
-* `us` and `sy` are high.
-* `id` is nearly zero.
-* `wa` is zero.
-
-Now compare an I/O-bound example:
-
-```text
-procs -----------memory---------- ---swap-- -----io---- -system-- ------cpu-----
- r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa st
- 1 18      0 412480  82120 492880    0    0 42100 18700 4600 8300  8  5 22 65  0
- 2 21      0 398120  82120 501240    0    0 46300 21100 4900 8700  9  4 18 69  0
-```
-
-This resembles I/O contention:
-
-* `b` is high: processes are blocked.
-* `bi` and `bo` are elevated: significant block reads and writes.
-* `wa` is high: CPU time is being lost while waiting for I/O.
-
-## Step 6: Check Linux Pressure Stall Information
-
-Utilization shows how busy a resource is. Pressure shows whether workloads are being delayed because that resource is unavailable.
-
-Check CPU pressure:
+Run these commands on the affected Linux server to check whether tasks are being delayed by unavailable CPU time or blocked I/O:
 
 ```bash
 cat /proc/pressure/cpu
-```
-
-Example output:
-
-```text
-some avg10=42.18 avg60=28.40 avg300=16.92 total=782941100
-full avg10=0.00 avg60=0.00 avg300=0.00 total=0
-```
-
-The `some` line means at least some tasks were delayed waiting for CPU execution time.
-
-Check I/O pressure:
-
-```bash
 cat /proc/pressure/io
 ```
 
-Example output:
+Example I/O pressure output:
 
 ```text
 some avg10=56.72 avg60=41.91 avg300=23.14 total=992418003
 full avg10=18.40 avg60=12.62 avg300=6.71 total=284442100
 ```
 
-This indicates serious I/O pressure:
+The `some` value indicates that at least some tasks were stalled. The `full` value indicates periods where all non-idle tasks were stalled on that resource. High I/O pressure supports the diagnosis that storage waits are affecting application latency.
 
-* Some tasks are frequently blocked on I/O.
-* During part of the measurement window, all non-idle tasks were stalled on I/O.
+## A Practical Diagnosis Workflow
 
-Pressure metrics are valuable when CPU percentages or disk percentages do not fully explain why application latency is increasing.
-
-## A Practical Diagnosis Table
-
-| Observation                               | Likely Problem                 | Next Investigation                                       |
-| ----------------------------------------- | ------------------------------ | -------------------------------------------------------- |
-| High `%usr`, low `%idle`, low `%iowait`   | CPU-heavy application work     | Profile code and requests                                |
-| High `%sys`                               | Kernel/system-call overhead    | Networking, filesystem calls, logging, context switching |
-| High `%iowait`, high disk latency         | Storage bottleneck             | Database queries, disks, indexes, write volume           |
-| Low CPU, low disk activity, slow requests | External dependency or locking | Database locks, network calls, downstream APIs           |
-| High CPU pressure                         | Too many runnable tasks        | Reduce work, control concurrency, scale CPU              |
-| High I/O pressure                         | Tasks blocked on reads/writes  | Reduce I/O, improve queries, increase storage capacity   |
-
-## Incident Workflow
-
-During a performance incident, use this sequence:
+Run this sequence during an incident:
 
 ```bash
 uptime
 nproc
 mpstat -P ALL 1 5
 iostat -xz 1 5
-vmstat 1 5
 pidstat -u -d 1 5
 cat /proc/pressure/cpu
 cat /proc/pressure/io
 ```
 
-Then decide:
+Use the results to answer four questions:
 
-1. Is the CPU fully occupied executing work?
-2. Is the server stalled waiting for storage?
-3. Which process is responsible?
-4. Which request, query, job, or deployment introduced the load?
+1. Is the server busy executing CPU work, or waiting for I/O?
+2. Which process is causing the pressure?
+3. Which request, query, background job, or deployment triggered it?
+4. What is the smallest change that removes the bottleneck?
 
-## The Important Mindset
+| Finding                       | Likely Action                                           |
+| ----------------------------- | ------------------------------------------------------- |
+| High application CPU usage    | Profile code, reduce repeated work, control concurrency |
+| High database I/O latency     | Inspect queries, indexes, writes, and storage limits    |
+| Low CPU and low disk activity | Check locks, network waits, and downstream services     |
+| Pressure after a deployment   | Compare changed endpoints, queries, and worker behavior |
 
-Do not optimize from intuition alone.
+## The Main Principle
 
-A slow endpoint does not automatically require caching. A busy database does not automatically require a read replica. A high load average does not automatically mean more CPU is needed.
+Do not optimize from intuition alone. A slow endpoint does not automatically need caching, and a high load average does not automatically require more CPU.
 
-Measure first. Identify the resource under pressure. Identify the process causing that pressure. Then change the smallest part of the system that removes the bottleneck.
+Measure the pressured resource, identify the responsible process, trace it to the request or query causing the load, and then apply the smallest targeted fix.

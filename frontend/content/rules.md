@@ -20,6 +20,10 @@ tags:
   - "Tag Two"
   - "Tag Three"
 featured: false
+series:
+  title: "Series Name"
+  slug: "series-name"
+  order: 1
 ---
 
 Opening paragraph goes here.
@@ -70,6 +74,7 @@ Required fields:
 - `readTime`: Estimate such as `"8 min read"`.
 - `tags`: Three to five short tags.
 - `featured`: Usually `false`.
+- `series`: Optional. Use only when the article is part of an ordered learning sequence.
 
 Good example:
 
@@ -85,8 +90,29 @@ tags:
   - "Performance"
   - "Observability"
 featured: false
+series:
+  title: "Server Performance"
+  slug: "server-performance"
+  order: 1
 ---
 ```
+
+Optional series example:
+
+```yaml
+series:
+  title: "Server Performance"
+  slug: "server-performance"
+  order: 2
+```
+
+Series rules:
+
+- Use the same `series.title` and `series.slug` for every article in the same sequence.
+- Use `series.order` to control previous and next navigation.
+- Start `series.order` at `1`.
+- Do not skip numbers unless a future post is intentionally reserved.
+- Omit the whole `series` block when the article is standalone.
 
 Bad examples:
 
@@ -157,6 +183,7 @@ When writing technical posts:
 - Put SQL in fenced `sql` blocks.
 - Put JavaScript in fenced `javascript` blocks.
 - Put logs or terminal output in fenced `text` blocks.
+- Before every command block, write a context line that tells the reader where and why to run it.
 - After every example output, explain what signals matter.
 - Prefer bullet lists for symptoms, causes, and fixes.
 - Use tables for comparisons.
@@ -169,7 +196,7 @@ Example:
 ````mdx
 ## Check CPU Utilization
 
-Run:
+Run this on the affected Linux server to sample CPU usage across all cores:
 
 ```bash
 mpstat -P ALL 1 5
@@ -184,6 +211,58 @@ all   84.1  10.4      0.3    4.5
 
 This suggests CPU pressure because `%usr` is high, `%idle` is low, and `%iowait` is not the dominant value.
 ````
+
+## Command Prompt Style
+
+Every command must be introduced with a context sentence. Readers should understand:
+
+- Where to run it.
+- Why they are running it.
+- What the command is expected to reveal.
+
+Use this pattern:
+
+````mdx
+Run this on the affected Linux server to check whether processes are waiting on disk I/O:
+
+```bash
+iostat -xz 1 5
+```
+````
+
+For database commands:
+
+````mdx
+Run this in PostgreSQL to identify queries with the highest total execution time:
+
+```sql
+SELECT
+  calls,
+  total_exec_time,
+  query
+FROM pg_stat_statements
+ORDER BY total_exec_time DESC
+LIMIT 5;
+```
+````
+
+For project commands:
+
+````mdx
+Run this from the `frontend` directory to build the static site:
+
+```bash
+npm run build
+```
+````
+
+Avoid vague command introductions:
+
+- Bad: `Run:`
+- Bad: `Use this command:`
+- Bad: `Check this:`
+- Good: `Run this on the database server to identify the process producing the most disk reads:`
+- Good: `Run this from the project root to list changed files before committing:`
 
 ## Table Style
 
@@ -273,6 +352,7 @@ Before returning the MDX file, verify:
 - `title`, `category`, `createdAt`, `summary`, `readTime`, `tags`, and `featured` exist.
 - `category` exactly matches an allowed category.
 - `tags` is a YAML list.
+- If `series` exists, `title`, `slug`, and `order` are present.
 - The body does not repeat the title as an H1.
 - All main sections use `##`.
 - Code fences are closed.
