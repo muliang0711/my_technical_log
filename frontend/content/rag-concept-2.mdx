@@ -1,0 +1,995 @@
+---
+title: "RAG Indexing Strategies: How Document Preparation Changes Answer Accuracy"
+category: "Software Development"
+createdAt: "2026-06-05"
+summary: "A practical explanation of how indexing strategies such as cleaning, chunking, metadata, embeddings, and versioning affect RAG accuracy."
+readTime: "11 min read"
+tags:
+  - "AI"
+  - "RAG"
+  - "Indexing"
+  - "System Design"
+featured: false
+series:
+  title: "Building a RAG Customer Support System"
+  slug: "building-rag-customer-support-system"
+  order: 2
+---
+
+<Lang lang="en">
+
+Indexing is the preparation phase of a RAG system. Before the user asks a question, the system must decide which documents are allowed into the knowledge base, how those documents are cleaned, how they are sliced into chunks, what metadata is attached, which embedding model is used, and how old versions are controlled. If this phase is weak, the retrieval and LLM layers are forced to work with broken material.
+
+## Short Answer
+
+Indexing decides **what knowledge the RAG system can later retrieve**.
+
+If indexing is poor, the correct answer may never be reachable. The retriever cannot find a policy that was not indexed. The LLM cannot answer from a chunk that was cut away from its exception rule. Prompt design cannot fix a knowledge base that contains stale, duplicated, or badly structured content.
+
+| Indexing Strategy | What It Controls | Accuracy Effect |
+| --- | --- | --- |
+| Source selection | Which documents enter the system | Controls knowledge coverage |
+| Text cleaning | Whether the content is readable and useful | Reduces garbage retrieval |
+| Chunking | How documents are sliced | Controls precision and context completeness |
+| Metadata design | What structured facts are attached to chunks | Enables filtering and version control |
+| Embedding strategy | How chunks are represented for semantic search | Affects semantic matching quality |
+| Versioning | Which document copy is active | Prevents outdated answers |
+| Index evaluation | How indexed chunks are inspected | Finds problems before retrieval |
+
+The practical rule is:
+
+```text
+Indexing quality controls the ceiling of RAG accuracy.
+Retrieval and prompting can improve usage of the index, but they cannot recover knowledge that was indexed badly or not indexed at all.
+```
+
+## What Indexing Means in RAG
+
+In RAG, indexing is the process of turning raw knowledge into a searchable structure.
+
+The raw knowledge may come from:
+
+- PDF policy documents.
+- Markdown documentation.
+- Help-center pages.
+- Product manuals.
+- Internal support playbooks.
+- Solved customer tickets.
+- Database exports.
+- FAQ documents.
+
+The indexed knowledge usually contains:
+
+| Stored Item | Purpose |
+| --- | --- |
+| Chunk text | The actual evidence shown to the LLM |
+| Embedding vector | The semantic search representation |
+| Metadata | Structured filters such as product, region, version, and document type |
+| Source reference | Where the chunk came from |
+| Status | Whether the chunk is active, deprecated, or draft |
+
+The indexing pipeline can be simplified as:
+
+```text
+Raw documents
+  -> document selection
+  -> text extraction
+  -> cleaning
+  -> chunking
+  -> metadata attachment
+  -> embedding generation
+  -> storage in vector/search database
+```
+
+This happens before online user traffic. A user question should not trigger full document indexing. The question should only trigger retrieval against an already prepared index.
+
+## Strategy 1: Source Selection Controls Knowledge Coverage
+
+The first indexing decision is not technical. It is deciding what documents should be included.
+
+A customer-support RAG system should not blindly index every file available in the company. Some files are outdated. Some are drafts. Some are internal notes that should not be exposed to customers. Some describe products that are no longer sold.
+
+| Source Choice | Accuracy Effect |
+| --- | --- |
+| Include official policy documents | Improves factual reliability |
+| Include product manuals | Improves troubleshooting answers |
+| Include solved tickets | Adds practical examples, but may introduce inconsistency |
+| Include drafts | Increases risk of wrong answers |
+| Include old policies | Causes outdated answers |
+| Include duplicated documents | Causes conflicting retrieval |
+
+Bad source selection creates a dangerous failure mode: the system may retrieve a document that looks relevant but should not be used.
+
+For example, if both the 2024 and 2026 refund policies are indexed as active, the retriever may return the old policy because the wording matches the user question more closely. The LLM will then answer from stale evidence.
+
+A safer source policy looks like this:
+
+<CardGrid columns={2}>
+  <InfoCard title="Use Official Sources First">
+    Start with approved support policies, current product manuals, and maintained FAQ documents. These have clearer ownership and stronger reliability.
+  </InfoCard>
+
+  <InfoCard title="Treat Tickets Carefully">
+    Historical support tickets can provide realistic wording, but they may contain old decisions, one-off exceptions, or agent mistakes.
+  </InfoCard>
+
+  <InfoCard title="Exclude Drafts by Default">
+    Draft documents should not be indexed into the production knowledge base unless they are clearly marked and filtered away from customer-facing answers.
+  </InfoCard>
+
+  <InfoCard title="Remove Obsolete Copies">
+    Old policies should either be excluded or marked as deprecated so retrieval cannot treat them as current truth.
+  </InfoCard>
+</CardGrid>
+
+The first indexing question should always be:
+
+```text
+Should this document be allowed to influence an answer?
+```
+
+If the answer is unclear, it should not enter the production index yet.
+
+## Strategy 2: Cleaning Controls Whether Text Is Usable
+
+Raw documents often contain noise. PDF extraction may produce broken lines. Web pages may include navigation menus. Exported documents may include page numbers, headers, footers, legal boilerplate, or duplicate sections.
+
+If this noise is embedded and stored, the retriever may later match against useless content.
+
+Example bad extracted text:
+
+```text
+Page 3 of 14
+Support Manual
+Back to top | Contact us | Download PDF
+
+Battery issue warranty applies for 12 months from purchase date.
+```
+
+The useful sentence is present, but it is surrounded by repeated layout noise.
+
+A cleaner chunk should look like:
+
+```text
+Battery issue warranty applies for 12 months from the purchase date.
+```
+
+Cleaning affects accuracy in a direct way:
+
+| Cleaning Problem | Accuracy Damage |
+| --- | --- |
+| Repeated headers and footers | Creates noisy chunks that look similar |
+| Broken PDF line extraction | Makes meaning harder to embed |
+| Navigation text from web pages | Causes irrelevant retrieval |
+| Duplicate policy sections | Creates conflicting candidates |
+| Tables flattened badly | Loses conditions and relationships |
+| Missing titles | Makes chunks harder to interpret |
+
+Cleaning is not about making text pretty. It is about preserving the meaning that retrieval and generation need.
+
+For customer-support documents, keep these items:
+
+- Policy title.
+- Section heading.
+- Rule text.
+- Conditions.
+- Exceptions.
+- Product or region identifiers.
+- Effective date.
+- Source URL or file reference.
+
+Remove or reduce these items:
+
+- Page numbers.
+- Navigation menus.
+- Repeated footers.
+- Cookie banners.
+- Empty sections.
+- Decorative text.
+- Broken extraction artifacts.
+
+## Strategy 3: Chunking Controls Precision and Context
+
+Chunking is the most visible indexing strategy. It decides how large documents are sliced into smaller searchable units.
+
+The retriever usually does not return an entire manual. It returns chunks. Therefore, the chunk is the real unit of evidence in many RAG systems.
+
+A bad chunk can damage accuracy in two opposite ways:
+
+| Chunk Problem | Result |
+| --- | --- |
+| Too small | The chunk may lose necessary context |
+| Too large | The chunk may contain too much unrelated text |
+| Bad boundary | The rule and exception may be separated |
+| No heading | The chunk may be hard to understand |
+| No overlap | Important transition text may be lost |
+| Too much overlap | Duplicate chunks may crowd retrieval results |
+
+The simplest chunking strategy is fixed-size slicing.
+
+```text
+Document text
+  -> every 500 tokens becomes one chunk
+```
+
+This is easy to implement, but it ignores document structure. For policy documents, structure usually matters more than raw size.
+
+A better customer-support chunk should preserve the natural section:
+
+```text
+Heading: Warranty Coverage
+Product: A12 Headphone
+Region: Malaysia
+
+Battery charging failure is covered for 12 months from the purchase date.
+Coverage does not apply when there is water damage, physical damage, or unauthorized repair.
+```
+
+This chunk is useful because the rule and its exceptions stay together.
+
+## Strategy 4: Different Chunking Strategies Affect Accuracy Differently
+
+There is no universal best chunk size. The correct strategy depends on document type and question type.
+
+| Chunking Strategy | Good For | Accuracy Effect | Main Risk |
+| --- | --- | --- | --- |
+| Small fixed chunks | Short facts and definitions | Improves precision | Loses surrounding conditions |
+| Large fixed chunks | Long explanations | Preserves context | Adds noise |
+| Overlapping chunks | Boundary-sensitive text | Reduces missing edge information | Creates duplicates |
+| Heading-based chunks | Policies and manuals | Preserves document meaning | Requires clean structure |
+| FAQ-pair chunks | Help-center Q&A | Strong for direct support questions | Weak for broad policy synthesis |
+| Parent-child chunks | Long documents | Balances precise search and larger context | More complex storage |
+| Table-aware chunks | Pricing, warranty, eligibility tables | Preserves structured relationships | Harder extraction logic |
+
+For a customer-support RAG system, a good default is:
+
+```text
+Use heading-based chunks when the document has clear sections.
+Use FAQ-pair chunks for FAQ pages.
+Use table-aware chunks for policy tables.
+Use overlap only when boundary loss is a real problem.
+```
+
+### Example: Chunking Changes the Final Answer
+
+Original text:
+
+```text
+Opened items can be returned within 7 days only if the product is defective.
+Non-defective opened items are not eligible for return.
+Refund processing usually takes 5 to 10 business days after inspection.
+```
+
+Bad chunking:
+
+```text
+Chunk 1:
+Opened items can be returned within 7 days.
+
+Chunk 2:
+Only if the product is defective. Non-defective opened items are not eligible for return.
+```
+
+If the retriever only returns Chunk 1, the LLM may answer incorrectly.
+
+Better chunking:
+
+```text
+Chunk:
+Opened items can be returned within 7 days only if the product is defective.
+Non-defective opened items are not eligible for return.
+Refund processing usually takes 5 to 10 business days after inspection.
+```
+
+The better chunk keeps the condition attached to the rule. This improves answer accuracy before retrieval or prompt design even begins.
+
+## Strategy 5: Metadata Controls Filtering and Trust
+
+Metadata is structured information attached to each chunk.
+
+Without metadata, all chunks compete only through text similarity. This is risky because the most semantically similar chunk may not be the correct business source.
+
+Useful metadata for customer-support RAG includes:
+
+| Metadata Field | Example | Why It Matters |
+| --- | --- | --- |
+| `document_type` | `warranty_policy` | Filters by question intent |
+| `product_id` | `A12_HEADPHONE` | Avoids wrong product answers |
+| `region` | `MY` | Avoids wrong country policy |
+| `language` | `en` | Matches user language |
+| `version` | `2026-02` | Controls document freshness |
+| `status` | `active` | Excludes draft or deprecated content |
+| `effective_from` | `2026-02-01` | Helps policy transition |
+| `source` | `support/warranty-a12.md` | Enables traceability |
+
+Metadata changes accuracy because it allows retrieval to apply hard constraints.
+
+For example:
+
+```text
+User question:
+Can I return an opened product in Malaysia?
+```
+
+A vector search may find a Singapore policy because the text is similar. Metadata filtering can prevent that:
+
+```text
+region = "MY"
+document_type = "return_policy"
+status = "active"
+```
+
+This is more reliable than asking the LLM to decide which country policy is valid after retrieval. The wrong document should not enter the prompt in the first place.
+
+<CardGrid columns={2}>
+  <InfoCard title="Good Metadata">
+    Small, consistent, and useful for filtering. Product, region, document type, version, and status are usually more important than decorative labels.
+  </InfoCard>
+
+  <InfoCard title="Bad Metadata">
+    Inconsistent values such as `Malaysia`, `MY`, `malaysia`, and `msia` make filtering unreliable and create hidden retrieval bugs.
+  </InfoCard>
+</CardGrid>
+
+Metadata should be designed before large-scale indexing. Fixing inconsistent metadata after thousands of chunks are stored is painful.
+
+## Strategy 6: Embedding Strategy Controls Semantic Matching
+
+After chunking, each chunk is converted into an embedding. The embedding is the vector representation used for semantic search.
+
+Embedding strategy affects whether user questions match the right chunks.
+
+Several choices matter:
+
+| Embedding Decision | Accuracy Effect |
+| --- | --- |
+| Embedding model | Controls semantic representation quality |
+| Embedding language support | Affects multilingual retrieval |
+| Text included in embedding | Determines what meaning is searchable |
+| Chunk title included or excluded | Affects topic clarity |
+| Metadata embedded or only stored separately | Changes matching behavior |
+| Re-embedding schedule | Keeps vectors aligned with updated content |
+
+A common mistake is embedding only the body text and excluding the heading.
+
+Weak embedding text:
+
+```text
+Battery charging failure is covered for 12 months from purchase date.
+```
+
+Better embedding text:
+
+```text
+Warranty Coverage - A12 Headphone - Malaysia
+
+Battery charging failure is covered for 12 months from purchase date.
+```
+
+The second version gives the embedding model more context. It is easier for the retriever to match questions about warranty, A12 headphone, and Malaysia.
+
+However, do not blindly embed every metadata field. Some metadata is better used as a filter instead of semantic text.
+
+| Information | Better Use |
+| --- | --- |
+| Product name | Embed and store as metadata |
+| Region | Store as metadata, optionally include in title |
+| Status active/deprecated | Metadata filter only |
+| Document type | Embed in title and store as metadata |
+| Effective date | Metadata filter, not usually semantic text |
+| Source path | Metadata only |
+
+The embedding text should represent meaning. The metadata should represent control.
+
+## Strategy 7: Versioning Prevents Outdated Answers
+
+RAG systems often fail because old documents remain searchable.
+
+This is especially dangerous in customer support because policies change. Return windows, warranty conditions, region-specific rules, and escalation processes may be updated.
+
+If the index contains multiple active versions of the same policy, retrieval becomes unstable.
+
+Example problem:
+
+| Version | Status | Rule |
+| --- | --- | --- |
+| 2024 policy | Accidentally active | Opened items returnable within 14 days |
+| 2026 policy | Active | Opened items returnable only if defective |
+
+A user asks:
+
+```text
+Can I return an opened item?
+```
+
+Both policies are semantically relevant. If the old one is retrieved, the final answer is wrong.
+
+A safer versioning model:
+
+```text
+Only one active version per policy scope.
+Old versions are marked deprecated.
+Deprecated chunks are excluded from customer-facing retrieval.
+Source and effective date are preserved for audit.
+```
+
+Versioning metadata should include:
+
+- `version`
+- `status`
+- `effective_from`
+- `effective_to`
+- `document_owner`
+- `last_reviewed_at`
+
+This does not make retrieval smarter by itself. It prevents the retriever from selecting documents that should not be candidates.
+
+## Strategy 8: Index Evaluation Finds Problems Early
+
+Index evaluation means checking the indexed knowledge base before blaming retrieval or the LLM.
+
+A useful evaluation process starts with test questions.
+
+| Test Question | Expected Evidence |
+| --- | --- |
+| Can I return an opened product? | Return policy, opened item condition |
+| How long is battery warranty? | Warranty policy, battery section |
+| What does error E104 mean? | Error-code troubleshooting guide |
+| Is water damage covered? | Warranty exclusion section |
+| How long does refund processing take? | Refund timeline section |
+
+For each question, inspect whether the index contains a clean chunk that can answer it.
+
+The check should ask:
+
+| Check | What It Reveals |
+| --- | --- |
+| Does the source document exist? | Source coverage |
+| Is the relevant text extracted correctly? | Cleaning quality |
+| Is the answer contained in one chunk? | Chunking quality |
+| Does the chunk include heading and source? | Interpretability |
+| Does the chunk have correct metadata? | Filtering reliability |
+| Is the chunk active and current? | Version control |
+
+This is an indexing test, not a retrieval test. The goal is to confirm that the correct evidence is available and well-shaped before the online search layer uses it.
+
+If the correct evidence does not exist as a clean chunk, retrieval cannot reliably return it.
+
+## A Practical Indexing Workflow
+
+A practical indexing workflow should be boring and inspectable.
+
+<CardGrid columns={2}>
+  <InfoCard title="1. Select Sources">
+    Start with approved, current, customer-relevant documents. Exclude drafts, obsolete policies, and uncontrolled notes.
+  </InfoCard>
+
+  <InfoCard title="2. Extract and Clean Text">
+    Remove layout noise while preserving headings, rules, exceptions, tables, and source references.
+  </InfoCard>
+
+  <InfoCard title="3. Choose Chunk Strategy">
+    Use section-based chunks for policies, FAQ-pair chunks for FAQs, and table-aware chunks for structured rules.
+  </InfoCard>
+
+  <InfoCard title="4. Attach Metadata">
+    Add product, region, language, document type, version, status, source, and effective date before embedding.
+  </InfoCard>
+
+  <InfoCard title="5. Generate Embeddings">
+    Embed text that includes enough semantic context, usually heading plus body, not body alone.
+  </InfoCard>
+
+  <InfoCard title="6. Validate the Index">
+    Use known support questions to check whether the index contains clean, complete, current chunks.
+  </InfoCard>
+</CardGrid>
+
+Do not optimize retrieval before this workflow is stable. Retrieval tuning becomes confusing when the indexed data itself is inconsistent.
+
+## The Main Principle
+
+Indexing is where RAG accuracy gets its upper limit.
+
+A retriever can only search what exists in the index. An LLM can only answer from what retrieval passes into the prompt. If documents are stale, chunks are broken, metadata is inconsistent, or embeddings are generated from poor text, the final answer will be unstable.
+
+The practical rule is:
+
+```text
+First make the knowledge base clean, current, structured, and searchable.
+Then improve retrieval.
+Then tune the LLM prompt.
+```
+
+For this series, log 2 focuses only on indexing. Log 3 should focus on retrieval strategies. Log 4 should focus on the LLM layer, prompt design, answer grounding, and guardrails.
+
+</Lang>
+
+<Lang lang="zh">
+
+Indexing 是 RAG 系统的资料准备阶段。用户还没有提问之前，系统就必须先决定哪些文档可以进入知识库、文档要怎样清理、怎样切成 chunks、每个 chunk 要附上什么 metadata、使用什么 embedding model，以及旧版本资料要怎样处理。如果这一层做得不好，后面的 retrieval 和 LLM 都是在处理坏材料。
+
+## 简短答案
+
+Indexing 决定 **RAG 系统之后能不能找到正确知识**。
+
+如果 indexing 做得差，正确答案可能根本无法被检索出来。Retriever 找不到没有被放入知识库的政策。LLM 也无法从一个被切坏、缺少例外条件的 chunk 里生成准确答案。Prompt design 无法修复一个过期、重复、结构混乱的知识库。
+
+| Indexing 策略 | 控制什么 | 对准确率的影响 |
+| --- | --- | --- |
+| 资料来源选择 | 哪些文档进入系统 | 控制知识覆盖范围 |
+| 文本清理 | 内容是否可读、可用 | 减少垃圾内容被检索 |
+| Chunking 切片 | 文档如何被切开 | 控制 precision 和上下文完整度 |
+| Metadata 设计 | 每个 chunk 附带什么结构化资料 | 支持过滤和版本控制 |
+| Embedding 策略 | chunk 如何被转换成语义向量 | 影响语义匹配质量 |
+| 版本管理 | 哪个文档版本是有效的 | 避免旧政策影响答案 |
+| Index 检查 | 如何验证知识库质量 | 在 retrieval 前发现问题 |
+
+实用规则是：
+
+```text
+Indexing 质量决定 RAG 准确率的上限。
+Retrieval 和 prompt 可以改善使用方式，但不能救回没有被正确索引的知识。
+```
+
+## RAG 里的 Indexing 是什么
+
+在 RAG 里，indexing 是把原始知识转换成可搜索结构的过程。
+
+原始知识可能来自：
+
+- PDF 政策文件。
+- Markdown 技术文档。
+- Help center 页面。
+- 产品说明书。
+- 内部客服手册。
+- 已解决的客服 tickets。
+- 数据库导出的产品资料。
+- FAQ 文件。
+
+被索引后的知识通常包含：
+
+| 储存项目 | 用途 |
+| --- | --- |
+| Chunk text | 最后提供给 LLM 的证据原文 |
+| Embedding vector | 用于语义搜索的向量表示 |
+| Metadata | 产品、地区、版本、文档类型等过滤字段 |
+| Source reference | chunk 来自哪里 |
+| Status | chunk 是 active、deprecated 还是 draft |
+
+Indexing 流程可以简化成：
+
+```text
+原始文档
+  -> 选择文档
+  -> 提取文字
+  -> 清理内容
+  -> 切成 chunks
+  -> 添加 metadata
+  -> 生成 embeddings
+  -> 存入向量数据库或搜索数据库
+```
+
+这一步发生在线上用户请求之前。用户提问时，不应该重新索引所有文档。用户问题只应该触发对现有 index 的 retrieval。
+
+## 策略一：资料来源选择决定知识覆盖
+
+第一个 indexing 决策不是技术问题，而是决定什么文档可以进入系统。
+
+客服 RAG 不能盲目索引公司里所有文件。有些文件已经过期。有些只是草稿。有些是内部备注，不应该直接影响给客户的答案。有些描述的是已经停售的产品。
+
+| 资料来源选择 | 对准确率的影响 |
+| --- | --- |
+| 收录正式政策文件 | 提高事实可靠性 |
+| 收录产品说明书 | 改善故障处理回答 |
+| 收录已解决 tickets | 增加真实案例，但可能带入不一致 |
+| 收录草稿 | 增加错误答案风险 |
+| 收录旧政策 | 造成过时答案 |
+| 收录重复文件 | 造成互相冲突的检索结果 |
+
+错误的资料选择会制造一种危险情况：系统检索到的文档看起来相关，但实际上不应该被使用。
+
+例如，2024 和 2026 的退款政策都被标记为 active。用户问退货规则时，retriever 可能因为旧政策 wording 更接近问题，就把旧政策返回给 LLM。最后答案就会根据旧资料生成。
+
+更安全的资料策略是：
+
+<CardGrid columns={2}>
+  <InfoCard title="优先使用正式来源">
+    从已批准的客服政策、当前产品说明书、维护中的 FAQ 开始。这类资料有明确 owner，可靠性较高。
+  </InfoCard>
+
+  <InfoCard title="谨慎使用 Tickets">
+    历史客服 tickets 可以提供真实用户表达，但也可能包含旧处理方式、特殊例外或客服人员错误。
+  </InfoCard>
+
+  <InfoCard title="默认排除草稿">
+    Draft 文件不应该进入生产知识库，除非它们被清楚标记，并且不会被客户回答流程检索到。
+  </InfoCard>
+
+  <InfoCard title="移除过期资料">
+    旧政策应该被排除，或标记为 deprecated，避免 retrieval 把它当成当前事实。
+  </InfoCard>
+</CardGrid>
+
+第一个 indexing 问题永远应该是：
+
+```text
+这份文档是否允许影响最终答案？
+```
+
+如果答案不清楚，它暂时不应该进入 production index。
+
+## 策略二：文本清理决定内容是否可用
+
+原始文档通常有很多噪音。PDF 提取可能会把文字切坏。网页可能带有导航栏。导出的文件可能包含页码、页眉、页脚、法律模板或重复段落。
+
+如果这些噪音也被 embedding 并储存起来，retriever 之后可能匹配到无用内容。
+
+错误提取例子：
+
+```text
+Page 3 of 14
+Support Manual
+Back to top | Contact us | Download PDF
+
+Battery issue warranty applies for 12 months from purchase date.
+```
+
+真正有用的是最后一句，但它被重复页面噪音包围。
+
+更好的 chunk 应该是：
+
+```text
+Battery issue warranty applies for 12 months from the purchase date.
+```
+
+文本清理会直接影响准确率：
+
+| 清理问题 | 对准确率的破坏 |
+| --- | --- |
+| 重复页眉页脚 | 产生很多相似但无用的 chunks |
+| PDF 断行错误 | 让语义变难理解 |
+| 网页导航文字 | 导致检索到无关内容 |
+| 重复政策段落 | 产生冲突候选结果 |
+| 表格被错误拉平成文字 | 丢失条件关系 |
+| 缺少标题 | chunk 难以解释 |
+
+清理不是为了让文字好看，而是为了保留 retrieval 和 generation 真正需要的含义。
+
+客服文档应该保留：
+
+- 政策标题。
+- Section heading。
+- 规则正文。
+- 条件。
+- 例外。
+- 产品或地区识别。
+- 生效日期。
+- 来源链接或文件路径。
+
+应该删除或减少：
+
+- 页码。
+- 导航菜单。
+- 重复页脚。
+- Cookie banner。
+- 空白 section。
+- 装饰性文字。
+- 提取错误符号。
+
+## 策略三：Chunking 决定精准率和上下文
+
+Chunking 是最明显的 indexing 策略。它决定一份大文档怎样被切成较小的可搜索单位。
+
+Retriever 通常不会返回整份手册，而是返回 chunks。因此，在很多 RAG 系统里，chunk 才是真正的证据单位。
+
+坏 chunk 会用两种相反方式伤害准确率：
+
+| Chunk 问题 | 结果 |
+| --- | --- |
+| 太小 | 可能丢失必要上下文 |
+| 太大 | 可能带入太多无关内容 |
+| 边界切错 | 规则和例外被拆开 |
+| 没有标题 | chunk 难以理解 |
+| 没有 overlap | 边界附近的重要信息丢失 |
+| overlap 太多 | 重复 chunks 挤占检索结果 |
+
+最简单的切片方式是固定长度切分：
+
+```text
+文档文字
+  -> 每 500 tokens 切成一个 chunk
+```
+
+这个方法容易实现，但它不理解文档结构。对于政策文件来说，结构通常比原始长度更重要。
+
+更适合客服文档的 chunk 应该保留自然 section：
+
+```text
+Heading: Warranty Coverage
+Product: A12 Headphone
+Region: Malaysia
+
+Battery charging failure is covered for 12 months from the purchase date.
+Coverage does not apply when there is water damage, physical damage, or unauthorized repair.
+```
+
+这个 chunk 有用，因为规则和例外条件被放在一起。
+
+## 策略四：不同 Chunking 策略会不同地影响准确率
+
+没有一个通用的最佳 chunk size。正确策略取决于文档类型和问题类型。
+
+| Chunking 策略 | 适合什么 | 准确率影响 | 主要风险 |
+| --- | --- | --- | --- |
+| 小型固定 chunk | 短事实和定义 | 提高 precision | 丢失周围条件 |
+| 大型固定 chunk | 长解释 | 保留上下文 | 噪音变多 |
+| Overlapping chunk | 边界敏感文本 | 减少边界信息丢失 | 制造重复内容 |
+| Heading-based chunk | 政策和手册 | 保留文档语义 | 依赖干净结构 |
+| FAQ-pair chunk | Help center 问答 | 很适合直接客服问题 | 不适合综合型政策问题 |
+| Parent-child chunk | 长文档 | 平衡精确搜索和大上下文 | 储存逻辑较复杂 |
+| Table-aware chunk | 价格、保修、资格表 | 保留结构关系 | 提取逻辑较难 |
+
+对于客服 RAG，一个比较安全的默认策略是：
+
+```text
+文档有清楚标题时，用 heading-based chunks。
+FAQ 页面用 FAQ-pair chunks。
+政策表格用 table-aware chunks。
+只有当边界信息真的容易丢失时，才加入 overlap。
+```
+
+### Chunking 改变最终答案的例子
+
+原始文字：
+
+```text
+Opened items can be returned within 7 days only if the product is defective.
+Non-defective opened items are not eligible for return.
+Refund processing usually takes 5 to 10 business days after inspection.
+```
+
+错误切片：
+
+```text
+Chunk 1:
+Opened items can be returned within 7 days.
+
+Chunk 2:
+Only if the product is defective. Non-defective opened items are not eligible for return.
+```
+
+如果 retriever 只返回 Chunk 1，LLM 可能会生成错误答案。
+
+更好的切片：
+
+```text
+Chunk:
+Opened items can be returned within 7 days only if the product is defective.
+Non-defective opened items are not eligible for return.
+Refund processing usually takes 5 to 10 business days after inspection.
+```
+
+更好的 chunk 会把条件和规则绑在一起。这是在 retrieval 和 prompt design 之前就已经提升准确率。
+
+## 策略五：Metadata 控制过滤和可信度
+
+Metadata 是附在每个 chunk 上的结构化资料。
+
+如果没有 metadata，所有 chunks 只能靠文字相似度竞争。这很危险，因为语义上最相似的 chunk，不一定是业务上正确的来源。
+
+客服 RAG 常用 metadata：
+
+| Metadata 字段 | 例子 | 为什么重要 |
+| --- | --- | --- |
+| `document_type` | `warranty_policy` | 根据问题意图过滤 |
+| `product_id` | `A12_HEADPHONE` | 避免答错产品 |
+| `region` | `MY` | 避免使用错误国家政策 |
+| `language` | `zh` | 匹配用户语言 |
+| `version` | `2026-02` | 控制文件新旧 |
+| `status` | `active` | 排除草稿和过期资料 |
+| `effective_from` | `2026-02-01` | 处理政策切换 |
+| `source` | `support/warranty-a12.md` | 方便追踪来源 |
+
+Metadata 会影响准确率，因为它可以让 retrieval 使用硬性限制。
+
+例如：
+
+```text
+用户问题：
+在马来西亚，拆封商品还可以退货吗？
+```
+
+纯向量搜索可能找到新加坡政策，因为文字很相似。Metadata filtering 可以避免这种情况：
+
+```text
+region = "MY"
+document_type = "return_policy"
+status = "active"
+```
+
+这比把错误文件交给 LLM，再要求 LLM 自己判断哪个国家有效更可靠。错误文档最好一开始就不要进入 prompt。
+
+<CardGrid columns={2}>
+  <InfoCard title="好的 Metadata">
+    小而稳定，并且真的可以用于过滤。产品、地区、文档类型、版本和状态通常比装饰性标签更重要。
+  </InfoCard>
+
+  <InfoCard title="坏的 Metadata">
+    `Malaysia`、`MY`、`malaysia`、`msia` 混用，会让过滤不可靠，并制造隐藏 retrieval bug。
+  </InfoCard>
+</CardGrid>
+
+Metadata 应该在大规模 indexing 之前设计好。等几千个 chunks 都存进去后，再修正不一致 metadata 会很麻烦。
+
+## 策略六：Embedding 策略控制语义匹配
+
+Chunking 完成后，每个 chunk 会被转换成 embedding。Embedding 是语义搜索使用的向量表示。
+
+Embedding 策略会影响用户问题是否能匹配到正确 chunks。
+
+几个选择会影响准确率：
+
+| Embedding 决策 | 对准确率的影响 |
+| --- | --- |
+| Embedding model | 控制语义表示质量 |
+| 是否支持多语言 | 影响中英文混合检索 |
+| 哪些文本进入 embedding | 决定什么含义可以被搜索 |
+| 是否加入标题 | 影响主题清晰度 |
+| Metadata 是否一起 embedding | 改变匹配行为 |
+| 是否重新 embedding | 让向量跟上内容更新 |
+
+常见错误是只 embed 正文，不 embed 标题。
+
+较弱的 embedding text：
+
+```text
+Battery charging failure is covered for 12 months from purchase date.
+```
+
+较好的 embedding text：
+
+```text
+Warranty Coverage - A12 Headphone - Malaysia
+
+Battery charging failure is covered for 12 months from purchase date.
+```
+
+第二种写法给 embedding model 更多上下文。用户问 warranty、A12 headphone、Malaysia 时，更容易匹配到正确 chunk。
+
+但是，不要把所有 metadata 都盲目塞进 embedding。有些 metadata 更适合作为 filter，而不是语义文本。
+
+| 信息 | 更适合的用途 |
+| --- | --- |
+| 产品名称 | embed，同时存入 metadata |
+| 地区 | 存入 metadata，可选择放进标题 |
+| active/deprecated 状态 | 只作为 metadata filter |
+| 文档类型 | 放进标题，也存入 metadata |
+| 生效日期 | metadata filter，不一定适合语义搜索 |
+| 来源路径 | 只作为 metadata |
+
+Embedding text 应该表达含义。Metadata 应该负责控制。
+
+## 策略七：版本管理避免过时答案
+
+RAG 系统常见失败原因之一，是旧文档还留在可检索范围内。
+
+客服系统尤其危险，因为政策会变化。退货期限、保修条件、地区规则和升级流程都可能更新。
+
+如果 index 里同时存在多个 active 版本，retrieval 就会不稳定。
+
+问题例子：
+
+| 版本 | 状态 | 规则 |
+| --- | --- | --- |
+| 2024 policy | 错误地保持 active | 拆封商品十四天内可退 |
+| 2026 policy | active | 拆封商品只有缺陷时可退 |
+
+用户问：
+
+```text
+拆封商品可以退货吗？
+```
+
+两个政策在语义上都相关。如果旧版本被检索出来，最终答案就会错。
+
+更安全的版本模型：
+
+```text
+同一个 policy scope 只能有一个 active 版本。
+旧版本标记为 deprecated。
+Deprecated chunks 不允许进入客户回答 retrieval。
+保留 source 和 effective date 方便 audit。
+```
+
+版本 metadata 应该包含：
+
+- `version`
+- `status`
+- `effective_from`
+- `effective_to`
+- `document_owner`
+- `last_reviewed_at`
+
+这不会让检索本身变聪明，但它会阻止 retriever 选择不应该作为候选的文件。
+
+## 策略八：Index Evaluation 提前发现问题
+
+Index evaluation 是在责怪 retrieval 或 LLM 之前，先检查知识库本身有没有被正确建立。
+
+一个实用的检查方式，是准备一组测试问题。
+
+| 测试问题 | 期望证据 |
+| --- | --- |
+| 拆封商品可以退货吗？ | 退货政策、拆封商品条件 |
+| 电池保修多久？ | 保修政策、电池条款 |
+| E104 错误是什么意思？ | 错误码故障排查手册 |
+| 进水损坏保修吗？ | 保修排除条款 |
+| 退款处理需要多久？ | 退款时间条款 |
+
+对每个问题，先检查 index 里是否存在一个干净、完整、当前有效的 chunk 可以回答它。
+
+检查时应该问：
+
+| 检查项目 | 揭示什么问题 |
+| --- | --- |
+| 来源文档是否存在 | 资料覆盖问题 |
+| 相关文字是否正确提取 | 文本清理质量 |
+| 答案是否在同一个 chunk 内 | chunking 质量 |
+| chunk 是否包含标题和来源 | 可解释性 |
+| metadata 是否正确 | 过滤可靠性 |
+| chunk 是否 active 且当前有效 | 版本控制 |
+
+这是 indexing test，不是 retrieval test。目标是在在线搜索层使用它之前，先确认正确证据已经存在，而且形状是可用的。
+
+如果正确证据根本不是一个干净的 chunk，retrieval 就很难稳定返回它。
+
+## 实际 Indexing 工作流
+
+一个实用的 indexing 流程应该简单、可检查。
+
+<CardGrid columns={2}>
+  <InfoCard title="1. 选择资料来源">
+    从已批准、当前有效、和客户问题有关的文档开始。排除草稿、旧政策和没有控制的内部笔记。
+  </InfoCard>
+
+  <InfoCard title="2. 提取并清理文字">
+    去掉页面噪音，同时保留标题、规则、例外、表格和来源信息。
+  </InfoCard>
+
+  <InfoCard title="3. 选择 Chunk 策略">
+    政策文件用 section-based chunks，FAQ 用问答对 chunks，结构表格用 table-aware chunks。
+  </InfoCard>
+
+  <InfoCard title="4. 添加 Metadata">
+    在 embedding 前加入产品、地区、语言、文档类型、版本、状态、来源和生效日期。
+  </InfoCard>
+
+  <InfoCard title="5. 生成 Embeddings">
+    Embedding 的文本要包含足够语义上下文。通常标题加正文比只有正文更好。
+  </InfoCard>
+
+  <InfoCard title="6. 验证 Index">
+    用已知客服问题检查 index 是否包含干净、完整、当前有效的 chunks。
+  </InfoCard>
+</CardGrid>
+
+不要在这个流程稳定之前优化 retrieval。因为当 indexed data 本身不一致时，retrieval tuning 会很难判断问题到底在哪里。
+
+## 核心原则
+
+Indexing 决定 RAG 准确率的上限。
+
+Retriever 只能搜索 index 里已经存在的内容。LLM 只能根据 retrieval 放进 prompt 的资料回答。如果文档过期、chunk 被切坏、metadata 不一致，或者 embedding 文本质量差，最终答案就会不稳定。
+
+实用规则是：
+
+```text
+先让知识库干净、当前有效、有结构、可搜索。
+然后再优化 retrieval。
+最后才调整 LLM prompt。
+```
+
+在这个系列里，log 2 只关注 indexing。Log 3 应该专门关注 retrieval 策略。Log 4 再专门关注 LLM 层、prompt design、answer grounding 和 guardrails。
+
+</Lang>

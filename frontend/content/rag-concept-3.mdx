@@ -1,0 +1,1139 @@
+---
+title: "RAG Retrieval Strategies: How Search Quality Controls Answer Accuracy"
+category: "Software Development"
+createdAt: "2026-06-05"
+summary: "A practical explanation of how retrieval strategies such as filtering, hybrid search, reranking, callback retrieval, and query decomposition affect RAG accuracy."
+readTime: "11 min read"
+tags:
+  - "AI"
+  - "RAG"
+  - "Retrieval"
+  - "System Design"
+featured: false
+series:
+  title: "Building a RAG Customer Support System"
+  slug: "building-rag-customer-support-system"
+  order: 3
+---
+
+<Lang lang="en">
+
+Retrieval is the online search phase of a RAG system. Indexing prepares the knowledge base, but retrieval decides which pieces of that knowledge are actually sent to the LLM for one user question. If retrieval returns weak evidence, the LLM may still write a fluent answer, but the answer will not be grounded in the right support material.
+
+## Short Answer
+
+Retrieval controls **which indexed chunks reach the LLM**.
+
+Indexing decides what can be searched. Retrieval decides what is selected. In a customer-support RAG system, this layer is responsible for finding the most relevant policy, manual section, FAQ answer, troubleshooting step, or ticket reference for the user's question.
+
+| Retrieval Strategy | What It Controls | Accuracy Effect |
+| --- | --- | --- |
+| Vector search | Matches semantic meaning | Finds related content even when wording differs |
+| Metadata filtering | Limits the search scope | Prevents wrong product, region, version, or language |
+| Keyword search | Matches exact terms | Handles error codes, SKU, policy names, and IDs |
+| Hybrid search | Combines vector and keyword search | Improves both semantic and exact matching |
+| Top-k control | Decides how many chunks are returned | Balances evidence coverage and noise |
+| Reranking | Reorders candidate chunks | Improves the quality of final context |
+| Callback retrieval | Retries weak searches | Recovers from poor first queries |
+| Query decomposition | Splits complex questions | Improves multi-condition answers |
+
+The practical rule is:
+
+```text
+Retrieval is not just search.
+Retrieval is evidence selection.
+```
+
+If the right evidence does not reach the prompt, the LLM layer cannot reliably fix the answer.
+
+## What Retrieval Means in RAG
+
+Retrieval happens after indexing and before generation.
+
+The system already has indexed chunks. Each chunk may include text, embeddings, metadata, source reference, version, and status. When the user asks a question, retrieval searches this indexed knowledge base and selects the best candidate chunks.
+
+A simplified retrieval flow looks like this:
+
+```text
+User question
+  -> understand query intent
+  -> apply metadata filters
+  -> run vector, keyword, or hybrid search
+  -> collect candidate chunks
+  -> rerank candidates
+  -> send final context to LLM
+```
+
+For example, the user asks:
+
+```text
+My A12 headphone shows E104 and cannot charge. Is this covered by warranty?
+```
+
+A good retrieval result should include:
+
+- The A12 headphone warranty policy.
+- The E104 troubleshooting section.
+- The battery or charging failure rule.
+- The warranty exclusion conditions.
+- The active policy for the user's region.
+
+The retriever should not return:
+
+- A policy for a different product.
+- A policy for a different country.
+- An archived warranty document.
+- A generic charging article without warranty conditions.
+- A chunk about a similar but unrelated error code.
+
+This is why retrieval is part of correctness, not just performance.
+
+## Strategy 1: Metadata Filtering Controls Search Scope
+
+Metadata filtering should usually happen before or during search. It prevents obviously wrong documents from competing with correct ones.
+
+Useful filters in customer-support RAG include:
+
+| Filter | Example | Why It Matters |
+| --- | --- | --- |
+| `product_id` | `A12_HEADPHONE` | Avoids wrong product answers |
+| `region` | `MY` | Avoids wrong country policy |
+| `language` | `en` | Matches user language |
+| `document_type` | `warranty_policy` | Matches question intent |
+| `status` | `active` | Excludes drafts and deprecated documents |
+| `version` | `2026-02` | Controls policy freshness |
+
+Without filtering, semantic search may retrieve text that looks similar but should not be used.
+
+Example user question:
+
+```text
+Can I return an opened item in Malaysia?
+```
+
+Bad retrieval candidate:
+
+```text
+Singapore return policy, deprecated version.
+Opened items can be returned within fourteen days.
+```
+
+Better retrieval candidate:
+
+```text
+Malaysia return policy, active version.
+Opened items are returnable only if defective.
+```
+
+Both chunks are semantically related to opened-item returns. Metadata decides which one is valid.
+
+<CardGrid columns={2}>
+  <InfoCard title="Accuracy Benefit">
+    Filtering improves precision because it removes chunks that are not allowed to answer the question.
+  </InfoCard>
+
+  <InfoCard title="Main Risk">
+    If metadata is missing or inconsistent, filtering may remove the correct document or allow the wrong one.
+  </InfoCard>
+</CardGrid>
+
+A good retrieval system does not ask the LLM to choose between active and deprecated policies. It prevents deprecated policies from entering the prompt.
+
+## Strategy 2: Vector Search Handles Semantic Meaning
+
+Vector search matches meaning instead of exact wording.
+
+This matters because users often describe problems differently from how documentation is written.
+
+User wording:
+
+```text
+My device keeps turning off by itself.
+```
+
+Document wording:
+
+```text
+Unexpected shutdown may occur when the battery protection circuit is triggered.
+```
+
+A keyword search may miss this because the words are different. Vector search can still retrieve the relevant troubleshooting section because the meaning is close.
+
+Vector search is useful for:
+
+- Symptom descriptions.
+- Natural language questions.
+- Policy questions using different wording.
+- Broad troubleshooting requests.
+- User messages with informal language.
+
+However, vector search is not perfect.
+
+| Vector Search Strength | Vector Search Weakness |
+| --- | --- |
+| Finds semantically similar text | May miss exact codes or IDs |
+| Works with natural language | Can retrieve similar but wrong policy |
+| Handles paraphrasing | Needs strong metadata filtering |
+| Useful for broad questions | Can be noisy when documents overlap |
+
+For customer-support RAG, vector search should usually be combined with filters. Semantic similarity alone is not enough when business rules depend on region, product, status, or version.
+
+## Strategy 3: Keyword Search Handles Exact Terms
+
+Keyword search matches exact words, codes, and identifiers.
+
+This is important because customer-support questions often contain values where exact matching matters:
+
+- Error codes.
+- Product SKUs.
+- Order IDs.
+- Policy names.
+- Feature names.
+- Model numbers.
+- Warranty codes.
+
+Example:
+
+```text
+Why does my device show E104?
+```
+
+The term `E104` should be matched exactly. A pure embedding search may not understand that `E104` is a critical identifier. It may return a general error article instead of the exact error-code section.
+
+Keyword search is useful for:
+
+| User Input | Why Keyword Search Helps |
+| --- | --- |
+| `E104` | Exact error-code match |
+| `A12 Pro Max` | Exact model match |
+| `refund exception clause` | Exact policy phrase |
+| `ORDER-9912` | Exact record identifier |
+| `battery calibration mode` | Exact feature name |
+
+Keyword search alone is also limited. If the user says "cannot charge" and the document says "charging failure", keyword matching may not find the best result.
+
+The practical rule:
+
+```text
+Use vector search for meaning.
+Use keyword search for exact identifiers.
+```
+
+## Strategy 4: Hybrid Search Combines Meaning and Exact Matching
+
+Hybrid search combines vector search and keyword search.
+
+This is often better for customer support because user questions usually contain both natural language and exact terms.
+
+Example question:
+
+```text
+My A12 headphone shows E104 and cannot charge.
+```
+
+This question contains:
+
+- `A12 headphone`: product identifier.
+- `E104`: exact error code.
+- `cannot charge`: symptom meaning.
+
+Vector search helps with the symptom. Keyword search helps with the product and error code.
+
+A simplified hybrid flow:
+
+```text
+User question
+  -> run vector search
+  -> run keyword search
+  -> merge candidates
+  -> score or rerank candidates
+  -> return final context
+```
+
+| Search Type | Best At | Weak At |
+| --- | --- | --- |
+| Vector search | Meaning and paraphrase | Exact IDs and codes |
+| Keyword search | Exact terms | Different wording |
+| Hybrid search | Mixed questions | Requires scoring logic |
+
+Hybrid search improves retrieval accuracy when the question contains both semantic intent and exact identifiers.
+
+<CardGrid columns={2}>
+  <InfoCard title="Good Hybrid Use Case">
+    A user asks about a product model, an error code, and a natural-language symptom in the same question.
+  </InfoCard>
+
+  <InfoCard title="Bad Hybrid Setup">
+    If merge scoring is poor, keyword results may dominate semantic results, or vector results may bury exact matches.
+  </InfoCard>
+</CardGrid>
+
+Hybrid search is not automatically better. It needs a clear scoring or reranking step so the final context is not just a larger pile of candidates.
+
+## Strategy 5: Top-k Controls Coverage and Noise
+
+Top-k means how many chunks the retriever returns.
+
+If `top_k` is too small, the system may miss important evidence. If `top_k` is too large, the LLM prompt may contain too much noise.
+
+Example:
+
+```text
+top_k = 2
+```
+
+This may be fast and focused, but it may miss warranty exceptions.
+
+```text
+top_k = 12
+```
+
+This may include more evidence, but it may also add unrelated FAQ content that distracts the LLM.
+
+| Top-k Choice | Accuracy Effect | Risk |
+| --- | --- | --- |
+| Very small | High focus | Missing required context |
+| Medium | Balanced | Needs good ranking |
+| Very large | Better coverage | More noise and higher token cost |
+
+A useful pattern is to retrieve more candidates first, then rerank and keep fewer final chunks:
+
+```text
+Retrieve top 20 candidates
+  -> rerank
+  -> keep top 4 final chunks
+  -> send final chunks to LLM
+```
+
+This separates candidate discovery from final context selection.
+
+For customer support, top-k should depend on question type:
+
+| Question Type | Suggested Retrieval Shape |
+| --- | --- |
+| Direct FAQ question | Small top-k |
+| Warranty or return policy | Medium top-k with metadata filters |
+| Troubleshooting question | Medium top-k, possibly hybrid search |
+| Multi-condition case | Larger candidate pool, then rerank |
+| Broad comparison | Query decomposition plus controlled final context |
+
+Top-k is not only a performance setting. It changes what the LLM sees.
+
+## Strategy 6: Reranking Improves Final Context Quality
+
+First-stage retrieval is usually rough. It finds candidate chunks that might be relevant. Reranking evaluates those candidates again and places the strongest evidence at the top.
+
+A reranking flow:
+
+```text
+User question
+  -> retrieve top 20 candidate chunks
+  -> rerank candidates by relevance
+  -> keep top 4 chunks
+  -> build LLM prompt
+```
+
+Reranking helps when the correct chunk exists in the candidate list but is not ranked high enough.
+
+Example failure without reranking:
+
+| Rank | Retrieved Chunk |
+| --- | --- |
+| 1 | General warranty overview |
+| 2 | Product marketing description |
+| 3 | Generic charging FAQ |
+| 4 | Accessory compatibility note |
+| 5 | Exact A12 battery warranty exclusion |
+
+If only the top four chunks enter the prompt, the exact warranty exclusion is missed.
+
+After reranking:
+
+| Rank | Retrieved Chunk |
+| --- | --- |
+| 1 | Exact A12 battery warranty exclusion |
+| 2 | A12 warranty coverage duration |
+| 3 | E104 charging troubleshooting |
+| 4 | Proof-of-purchase requirement |
+
+Reranking improves top-k quality. It does not replace indexing. It cannot rank a correct chunk that was never retrieved in the candidate set.
+
+<CardGrid columns={2}>
+  <InfoCard title="Accuracy Benefit">
+    Reranking improves the chance that the most useful evidence reaches the LLM prompt.
+  </InfoCard>
+
+  <InfoCard title="Cost Trade-off">
+    Reranking adds latency and may add model cost, especially if reranking many candidates.
+  </InfoCard>
+</CardGrid>
+
+Use reranking when raw retrieval can find the right candidates but often orders them badly.
+
+## Strategy 7: Callback Retrieval Recovers From Weak Search
+
+Callback retrieval means the system tries again when the first retrieval attempt is weak.
+
+The first search may fail because:
+
+- The user's wording is vague.
+- The question uses slang.
+- The query contains multiple topics.
+- The wrong filter was inferred.
+- The search result score is too low.
+- The retrieved chunks are too generic.
+
+A callback retrieval flow:
+
+```text
+User question
+  -> first retrieval
+  -> evaluate retrieval quality
+  -> if weak, rewrite query or broaden filters
+  -> retrieve again
+  -> merge or replace result set
+```
+
+Callback triggers can include:
+
+| Trigger | Meaning |
+| --- | --- |
+| No result above threshold | Search likely failed |
+| Top result is too generic | Need more specific query |
+| Results conflict | Need stricter metadata filters |
+| Results are from wrong document type | Intent detection may be wrong |
+| User asks a multi-part question | Need decomposition |
+
+Example:
+
+```text
+Original query:
+opened product refund
+```
+
+Callback rewrite:
+
+```text
+return policy opened item defective product eligibility refund timeline
+```
+
+This gives the retriever more policy-related terms and may find a better chunk.
+
+However, callback retrieval needs stop rules:
+
+- Maximum retry count.
+- Similarity score threshold.
+- Duplicate-result detection.
+- Maximum latency budget.
+- Fallback response when evidence is still missing.
+
+The fallback should not be a guessed answer. If retrieval fails, the system should say that the available knowledge base does not contain enough evidence.
+
+## Strategy 8: Query Decomposition Handles Multi-Part Questions
+
+Some customer questions contain multiple conditions. One search may not retrieve enough evidence.
+
+Example:
+
+```text
+My item arrived damaged, but I already opened it and used it once. Can I return it or should I claim warranty?
+```
+
+This question requires several evidence points:
+
+- Damaged item policy.
+- Opened item return policy.
+- Used item restriction.
+- Warranty eligibility.
+- Required evidence.
+- Time window.
+
+Query decomposition breaks one complex question into smaller searches:
+
+```text
+Original question
+  -> damaged item return policy
+  -> opened item return restriction
+  -> used item eligibility
+  -> warranty claim condition
+  -> evidence requirement
+```
+
+Then the system merges the evidence and passes the final selected context to the LLM.
+
+| Without Decomposition | With Decomposition |
+| --- | --- |
+| May retrieve only one policy area | Retrieves multiple required evidence areas |
+| Faster | Slower |
+| Simpler to debug | More complex |
+| Good for direct questions | Better for conditional questions |
+
+Query decomposition is not needed for every question. It is useful when the answer depends on several policies or conditions.
+
+Good triggers:
+
+- The user asks "A or B?"
+- The question includes "but", "also", "unless", "after", or "before".
+- The question combines product issue and policy eligibility.
+- The first retrieval returns only partial evidence.
+- The answer requires comparison or decision logic.
+
+The risk is over-retrieval. Too many sub-queries can create too much context and confuse the generation layer. Decomposition should produce focused sub-questions, not a broad research dump.
+
+## How to Evaluate Retrieval Quality
+
+Retrieval should be evaluated before prompt design.
+
+A practical evaluation set contains real or realistic customer questions, plus expected evidence.
+
+| Test Question | Expected Evidence |
+| --- | --- |
+| Can I return an opened item? | Opened-item return policy and exception |
+| What does E104 mean? | E104 troubleshooting section |
+| Is water damage covered? | Warranty exclusion section |
+| How long does refund processing take? | Refund timeline |
+| My A12 cannot charge after ten months. | A12 warranty and charging failure rules |
+
+For each test question, inspect the retrieved chunks.
+
+The checks are:
+
+| Check | What It Reveals |
+| --- | --- |
+| Did the expected chunk appear? | Recall |
+| Was it near the top? | Ranking quality |
+| Were irrelevant chunks included? | Precision |
+| Did metadata filters work? | Scope control |
+| Was the result current? | Version control |
+| Did the result contain enough context? | Context completeness |
+
+A simple retrieval evaluation can be done manually at first.
+
+Example retrieval log:
+
+```text
+Question:
+Can I return an opened item?
+
+Expected:
+Active Malaysia return policy, opened-item section.
+
+Retrieved:
+1. Active Malaysia return policy, opened-item section.
+2. Active Malaysia refund timeline.
+3. Deprecated Singapore return policy.
+4. Generic customer satisfaction FAQ.
+```
+
+This result is partially good. The correct chunk appears at rank 1, but deprecated Singapore policy should not appear at all. That suggests a metadata filtering issue.
+
+## A Practical Retrieval Workflow
+
+A stable retrieval workflow should be built in layers.
+
+<CardGrid columns={2}>
+  <InfoCard title="1. Start With Filtered Vector Search">
+    Use metadata filters for product, region, language, status, and document type before trusting semantic similarity.
+  </InfoCard>
+
+  <InfoCard title="2. Add Keyword Matching">
+    Add exact matching for error codes, product IDs, model names, policy terms, and other identifiers.
+  </InfoCard>
+
+  <InfoCard title="3. Combine Into Hybrid Search">
+    Merge semantic and keyword candidates when questions contain both natural language and exact terms.
+  </InfoCard>
+
+  <InfoCard title="4. Tune Top-k">
+    Retrieve enough candidates to avoid missing evidence, but keep final context small enough to avoid noise.
+  </InfoCard>
+
+  <InfoCard title="5. Add Reranking">
+    Use reranking when correct chunks exist in candidates but do not reliably appear in the final top results.
+  </InfoCard>
+
+  <InfoCard title="6. Add Callback Retrieval">
+    Retry only when first retrieval is weak, incomplete, or below a confidence threshold.
+  </InfoCard>
+</CardGrid>
+
+Do not start with agentic search or complex decomposition. First make the basic retrieval path measurable and inspectable.
+
+## The Main Principle
+
+Retrieval is the evidence selection layer of RAG.
+
+Indexing makes knowledge searchable. Retrieval chooses which knowledge reaches the LLM. The LLM then writes from whatever retrieval provides. If retrieval selects the wrong policy, wrong product, wrong region, or incomplete evidence, the final answer becomes unstable even when the prompt is well written.
+
+The practical rule is:
+
+```text
+First retrieve the right candidate evidence.
+Then rank the best evidence near the top.
+Then send only clean, relevant, current context to the LLM.
+```
+
+For this series, log 3 focuses only on retrieval. Log 4 should focus on the LLM layer: prompt design, context formatting, answer grounding, refusal behavior, and guardrails.
+
+</Lang>
+
+<Lang lang="zh">
+
+Retrieval 是 RAG 系统的线上搜索阶段。Indexing 负责把知识库准备好，但 retrieval 决定某一次用户提问时，哪些知识片段会真正被送进 LLM。如果 retrieval 返回的是弱证据，LLM 依然可以写出流畅答案，但这个答案不会稳定地基于正确客服资料。
+
+## 简短答案
+
+Retrieval 控制 **哪些 indexed chunks 会进入 LLM**。
+
+Indexing 决定什么内容可以被搜索。Retrieval 决定什么内容会被选中。在客服 RAG 系统中，这一层负责根据用户问题找到最相关的政策、说明书章节、FAQ 答案、故障处理步骤或 ticket 参考。
+
+| Retrieval 策略 | 控制什么 | 对准确率的影响 |
+| --- | --- | --- |
+| Vector search | 匹配语义相似度 | 用户表达不同也能找到相关内容 |
+| Metadata filtering | 限制搜索范围 | 避免错产品、错地区、错版本、错语言 |
+| Keyword search | 匹配精确词 | 处理错误码、SKU、政策名和 ID |
+| Hybrid search | 结合向量和关键词搜索 | 同时改善语义匹配和精确匹配 |
+| Top-k control | 决定返回多少 chunks | 平衡证据覆盖和噪音 |
+| Reranking | 重新排序候选 chunks | 提高最终上下文质量 |
+| Callback retrieval | 搜索结果弱时重试 | 救回第一次失败的查询 |
+| Query decomposition | 拆解复杂问题 | 改善多条件问题回答 |
+
+实用规则是：
+
+```text
+Retrieval 不只是搜索。
+Retrieval 是证据选择。
+```
+
+如果正确证据没有进入 prompt，LLM 层很难稳定修复答案。
+
+## RAG 里的 Retrieval 是什么
+
+Retrieval 发生在 indexing 之后、generation 之前。
+
+系统已经有 indexed chunks。每个 chunk 可能包含正文、embedding、metadata、来源、版本和状态。用户提问后，retrieval 会搜索这个知识库，并选择最适合的候选 chunks。
+
+简化流程如下：
+
+```text
+用户问题
+  -> 理解查询意图
+  -> 应用 metadata filters
+  -> 执行 vector、keyword 或 hybrid search
+  -> 收集候选 chunks
+  -> rerank 候选结果
+  -> 把最终上下文送给 LLM
+```
+
+例如用户问：
+
+```text
+我的 A12 耳机出现 E104，而且不能充电。这个可以保修吗？
+```
+
+好的 retrieval 应该找出：
+
+- A12 耳机保修政策。
+- E104 故障处理章节。
+- 电池或充电故障规则。
+- 保修排除条件。
+- 用户所在地区的有效政策。
+
+Retriever 不应该返回：
+
+- 其他产品的政策。
+- 其他国家的政策。
+- 已归档的保修文件。
+- 没有保修条件的泛用充电文章。
+- 相似但无关的错误码说明。
+
+所以 retrieval 是 correctness 的一部分，不只是 performance 优化。
+
+## 策略一：Metadata Filtering 控制搜索范围
+
+Metadata filtering 通常应该发生在搜索前或搜索过程中。它可以防止明显错误的文档和正确文档竞争。
+
+客服 RAG 常见 filters：
+
+| Filter | 例子 | 为什么重要 |
+| --- | --- | --- |
+| `product_id` | `A12_HEADPHONE` | 避免回答错产品 |
+| `region` | `MY` | 避免使用错误国家政策 |
+| `language` | `zh` | 匹配用户语言 |
+| `document_type` | `warranty_policy` | 匹配问题意图 |
+| `status` | `active` | 排除草稿和过期文件 |
+| `version` | `2026-02` | 控制政策新旧 |
+
+如果没有 filtering，语义搜索可能返回文字上很像、但业务上不能用的内容。
+
+用户问题例子：
+
+```text
+在马来西亚，拆封商品可以退货吗？
+```
+
+错误候选结果：
+
+```text
+新加坡退货政策，deprecated version。
+拆封商品十四天内可以退货。
+```
+
+更好的候选结果：
+
+```text
+马来西亚退货政策，active version。
+拆封商品只有在有缺陷时才可退货。
+```
+
+两个 chunks 都和拆封退货语义相关。Metadata 决定哪个才有效。
+
+<CardGrid columns={2}>
+  <InfoCard title="准确率收益">
+    Filtering 会提高 precision，因为它先移除不应该回答这个问题的 chunks。
+  </InfoCard>
+
+  <InfoCard title="主要风险">
+    如果 metadata 缺失或不一致，filter 可能误删正确文档，也可能放进错误文档。
+  </InfoCard>
+</CardGrid>
+
+好的 retrieval 系统不应该让 LLM 自己判断 active 和 deprecated 政策。它应该阻止 deprecated 政策进入 prompt。
+
+## 策略二：Vector Search 处理语义相似
+
+Vector search 匹配的是意思，而不是完全相同的字。
+
+这很重要，因为用户描述问题的方式，常常和文档写法不同。
+
+用户写法：
+
+```text
+我的设备一直自己关机。
+```
+
+文档写法：
+
+```text
+当电池保护电路被触发时，设备可能发生异常断电。
+```
+
+关键词搜索可能找不到，因为用词不同。Vector search 则可能根据语义找到相关故障处理章节。
+
+Vector search 适合：
+
+- 症状描述。
+- 自然语言问题。
+- 用不同词表达的政策问题。
+- 比较宽泛的故障排查。
+- 用户使用口语化表达的消息。
+
+但是 vector search 不完美。
+
+| Vector Search 优点 | Vector Search 弱点 |
+| --- | --- |
+| 可以找到语义相近文本 | 可能漏掉精确代码或 ID |
+| 适合自然语言 | 可能找到相似但错误的政策 |
+| 能处理 paraphrase | 需要 metadata filtering 配合 |
+| 适合宽泛问题 | 文档重叠时容易产生噪音 |
+
+对于客服 RAG，vector search 通常应该和 filters 一起使用。当业务规则依赖地区、产品、状态或版本时，单靠语义相似度不够。
+
+## 策略三：Keyword Search 处理精确词
+
+Keyword search 匹配精确词、代码和标识符。
+
+客服问题经常包含一些必须精确匹配的值：
+
+- 错误码。
+- 产品 SKU。
+- 订单 ID。
+- 政策名称。
+- 功能名称。
+- 型号。
+- 保修代码。
+
+例子：
+
+```text
+为什么我的设备显示 E104？
+```
+
+`E104` 应该被精确匹配。纯 embedding search 不一定知道 `E104` 是关键标识符，可能返回一般错误文章，而不是精确错误码章节。
+
+Keyword search 适合：
+
+| 用户输入 | 为什么 keyword search 有用 |
+| --- | --- |
+| `E104` | 精确错误码匹配 |
+| `A12 Pro Max` | 精确型号匹配 |
+| `refund exception clause` | 精确政策短语 |
+| `ORDER-9912` | 精确记录 ID |
+| `battery calibration mode` | 精确功能名 |
+
+Keyword search 本身也有限制。如果用户说 `不能充电`，文档写的是 `charging failure`，纯关键词匹配可能找不到最好结果。
+
+实用规则：
+
+```text
+用 vector search 找意思。
+用 keyword search 找精确标识符。
+```
+
+## 策略四：Hybrid Search 结合语义和精确匹配
+
+Hybrid search 是把 vector search 和 keyword search 结合起来。
+
+这通常更适合客服系统，因为用户问题经常同时包含自然语言和精确词。
+
+例子：
+
+```text
+我的 A12 耳机出现 E104，而且不能充电。
+```
+
+这个问题包含：
+
+- `A12 耳机`：产品标识。
+- `E104`：精确错误码。
+- `不能充电`：症状语义。
+
+Vector search 帮助理解症状。Keyword search 帮助匹配产品和错误码。
+
+简化 hybrid flow：
+
+```text
+用户问题
+  -> 执行 vector search
+  -> 执行 keyword search
+  -> 合并候选结果
+  -> 重新评分或 rerank
+  -> 返回最终上下文
+```
+
+| Search 类型 | 擅长 | 不擅长 |
+| --- | --- | --- |
+| Vector search | 意思和 paraphrase | 精确 ID 和代码 |
+| Keyword search | 精确词 | 不同表达方式 |
+| Hybrid search | 混合型问题 | 需要评分逻辑 |
+
+当问题同时包含语义意图和精确标识符时，hybrid search 能提升 retrieval 准确率。
+
+<CardGrid columns={2}>
+  <InfoCard title="适合 Hybrid 的场景">
+    用户在同一个问题里提到产品型号、错误码，以及自然语言描述的症状。
+  </InfoCard>
+
+  <InfoCard title="错误 Hybrid 设置">
+    如果合并评分做得不好，keyword 结果可能压过语义结果，或者 vector 结果可能埋掉精确匹配。
+  </InfoCard>
+</CardGrid>
+
+Hybrid search 不会自动更好。它需要清楚的 scoring 或 reranking，否则最终上下文只是更大堆的候选资料。
+
+## 策略五：Top-k 控制覆盖范围和噪音
+
+Top-k 指 retriever 返回多少个 chunks。
+
+如果 `top_k` 太小，系统可能漏掉重要证据。如果 `top_k` 太大，LLM prompt 里可能塞进太多噪音。
+
+例子：
+
+```text
+top_k = 2
+```
+
+这可能很快、很集中，但可能漏掉保修例外条件。
+
+```text
+top_k = 12
+```
+
+这可能包含更多证据，但也可能带入无关 FAQ，干扰 LLM。
+
+| Top-k 选择 | 准确率影响 | 风险 |
+| --- | --- | --- |
+| 很小 | 很集中 | 漏掉必要上下文 |
+| 中等 | 较平衡 | 依赖排序质量 |
+| 很大 | 覆盖更广 | 噪音和 token 成本增加 |
+
+一个实用模式是先取更多候选，再 rerank 并保留少量最终 chunks：
+
+```text
+Retrieve top 20 candidates
+  -> rerank
+  -> keep top 4 final chunks
+  -> send final chunks to LLM
+```
+
+这会把候选发现和最终上下文选择分开。
+
+客服系统中，top-k 应该根据问题类型调整：
+
+| 问题类型 | 建议 retrieval 形态 |
+| --- | --- |
+| 直接 FAQ 问题 | 较小 top-k |
+| 保修或退货政策 | 中等 top-k 加 metadata filters |
+| 故障排查问题 | 中等 top-k，可能使用 hybrid search |
+| 多条件案例 | 较大候选池，然后 rerank |
+| 宽泛比较问题 | Query decomposition 加受控最终上下文 |
+
+Top-k 不只是性能参数。它会改变 LLM 最后看见什么。
+
+## 策略六：Reranking 提高最终上下文质量
+
+第一阶段 retrieval 通常比较粗。它负责找出可能相关的候选 chunks。Reranking 会再次评估这些候选 chunks，并把最强证据排到前面。
+
+Reranking flow：
+
+```text
+用户问题
+  -> retrieve top 20 candidate chunks
+  -> 根据相关度 rerank candidates
+  -> 保留 top 4 chunks
+  -> 构建 LLM prompt
+```
+
+当正确 chunk 已经存在于候选列表中，但排名不够高时，reranking 很有用。
+
+没有 reranking 的失败例子：
+
+| 排名 | Retrieved Chunk |
+| --- | --- |
+| 1 | 一般保修简介 |
+| 2 | 产品营销描述 |
+| 3 | 泛用充电 FAQ |
+| 4 | 配件兼容说明 |
+| 5 | 精确 A12 电池保修排除条款 |
+
+如果只有前四个 chunks 进入 prompt，真正重要的保修排除条款就被漏掉。
+
+Reranking 后：
+
+| 排名 | Retrieved Chunk |
+| --- | --- |
+| 1 | 精确 A12 电池保修排除条款 |
+| 2 | A12 保修期限 |
+| 3 | E104 充电故障处理 |
+| 4 | 购买证明要求 |
+
+Reranking 改善的是 top-k 质量。它不能取代 indexing，也不能排序一个根本没有被检索出来的正确 chunk。
+
+<CardGrid columns={2}>
+  <InfoCard title="准确率收益">
+    Reranking 提高最有用证据进入 LLM prompt 的机会。
+  </InfoCard>
+
+  <InfoCard title="成本取舍">
+    Reranking 会增加延迟。如果 rerank 很多候选，也可能增加模型成本。
+  </InfoCard>
+</CardGrid>
+
+当 raw retrieval 能找到正确候选，但排序经常不稳定时，就适合加入 reranking。
+
+## 策略七：Callback Retrieval 救回弱搜索
+
+Callback retrieval 的意思是，当第一次 retrieval 结果很弱时，系统会再试一次。
+
+第一次搜索可能失败的原因包括：
+
+- 用户表达很模糊。
+- 用户使用口语或 slang。
+- 问题包含多个主题。
+- 系统推断了错误 filter。
+- 搜索结果分数太低。
+- 返回的 chunks 太泛。
+
+Callback retrieval flow：
+
+```text
+用户问题
+  -> 第一次 retrieval
+  -> 评估 retrieval 质量
+  -> 如果结果弱，改写查询或放宽 filters
+  -> 再 retrieval 一次
+  -> 合并或替换结果集
+```
+
+Callback triggers 可以包括：
+
+| Trigger | 意思 |
+| --- | --- |
+| 没有结果超过 threshold | 搜索可能失败 |
+| Top result 太泛 | 需要更具体 query |
+| 结果互相冲突 | 需要更严格 metadata filters |
+| 结果来自错误 document type | 意图识别可能错了 |
+| 用户问多部分问题 | 需要 decomposition |
+
+例子：
+
+```text
+Original query:
+opened product refund
+```
+
+Callback rewrite：
+
+```text
+return policy opened item defective product eligibility refund timeline
+```
+
+这个查询加入更多政策相关词，可能找到更好的 chunk。
+
+但是 callback retrieval 需要停止规则：
+
+- 最大 retry 次数。
+- 相似度分数 threshold。
+- 重复结果检测。
+- 最大延迟预算。
+- 仍然找不到证据时 fallback。
+
+Fallback 不应该是猜答案。如果 retrieval 失败，系统应该说明当前知识库没有足够证据。
+
+## 策略八：Query Decomposition 处理多部分问题
+
+有些客服问题包含多个条件。一次搜索不一定能找出足够证据。
+
+例子：
+
+```text
+我的商品送到时已经损坏，但我已经拆封并使用过一次。现在可以退货，还是应该申请保修？
+```
+
+这个问题需要多个证据点：
+
+- 损坏商品退货政策。
+- 拆封商品退货限制。
+- 已使用商品限制。
+- 保修资格。
+- 需要提供的证据。
+- 时间窗口。
+
+Query decomposition 会把一个复杂问题拆成几个小搜索：
+
+```text
+原始问题
+  -> 损坏商品退货政策
+  -> 拆封商品退货限制
+  -> 已使用商品资格
+  -> 保修申请条件
+  -> 证据要求
+```
+
+然后系统合并证据，再把最终选中的上下文交给 LLM。
+
+| 不拆解 | 拆解后 |
+| --- | --- |
+| 可能只检索到一个政策区域 | 可以检索多个必要证据区域 |
+| 更快 | 更慢 |
+| 更简单 | 更复杂 |
+| 适合直接问题 | 更适合条件型问题 |
+
+Query decomposition 不需要用于所有问题。它适合答案依赖多个政策或条件的情况。
+
+适合触发的信号：
+
+- 用户问 “A or B?”
+- 问题包含 “但是”“也”“除非”“之后”“之前”。
+- 问题同时包含产品故障和政策资格。
+- 第一次 retrieval 只返回部分证据。
+- 答案需要比较或决策逻辑。
+
+风险是过度检索。太多 sub-queries 会制造太多上下文，反而干扰 generation 层。Decomposition 应该产生聚焦的子问题，而不是把系统变成宽泛 research dump。
+
+## 如何评估 Retrieval 质量
+
+Retrieval 应该在 prompt design 之前先被评估。
+
+一个实用 evaluation set 应该包含真实或接近真实的客服问题，以及预期证据。
+
+| 测试问题 | 预期证据 |
+| --- | --- |
+| 拆封商品可以退货吗？ | 拆封商品退货政策和例外 |
+| E104 是什么意思？ | E104 故障处理章节 |
+| 进水损坏保修吗？ | 保修排除条款 |
+| 退款处理需要多久？ | 退款时间说明 |
+| 我的 A12 十个月后不能充电。 | A12 保修和充电故障规则 |
+
+对每个测试问题，检查实际 retrieved chunks。
+
+检查项目：
+
+| 检查 | 揭示什么 |
+| --- | --- |
+| 预期 chunk 有没有出现 | Recall |
+| 是否排在前面 | Ranking quality |
+| 是否包含无关 chunks | Precision |
+| Metadata filters 是否生效 | Scope control |
+| 结果是否当前有效 | Version control |
+| 结果是否包含足够上下文 | Context completeness |
+
+早期可以手动做 retrieval evaluation。
+
+Example retrieval log：
+
+```text
+Question:
+Can I return an opened item?
+
+Expected:
+Active Malaysia return policy, opened-item section.
+
+Retrieved:
+1. Active Malaysia return policy, opened-item section.
+2. Active Malaysia refund timeline.
+3. Deprecated Singapore return policy.
+4. Generic customer satisfaction FAQ.
+```
+
+这个结果部分正确。正确 chunk 排在第一，但 deprecated Singapore policy 不应该出现。这说明 metadata filtering 有问题。
+
+## 实际 Retrieval 工作流
+
+稳定的 retrieval workflow 应该分层建立。
+
+<CardGrid columns={2}>
+  <InfoCard title="1. 从 Filtered Vector Search 开始">
+    先根据产品、地区、语言、状态和文档类型过滤，再使用语义相似度。
+  </InfoCard>
+
+  <InfoCard title="2. 加入 Keyword Matching">
+    为错误码、产品 ID、型号、政策词和其他标识符加入精确匹配。
+  </InfoCard>
+
+  <InfoCard title="3. 组合成 Hybrid Search">
+    当问题同时包含自然语言和精确词时，合并语义候选和关键词候选。
+  </InfoCard>
+
+  <InfoCard title="4. 调整 Top-k">
+    候选数量要足够避免漏证据，但最终上下文要小到不会制造噪音。
+  </InfoCard>
+
+  <InfoCard title="5. 加入 Reranking">
+    当正确 chunks 已经在候选结果里，但不能稳定排进最终 top 结果时，加入 reranking。
+  </InfoCard>
+
+  <InfoCard title="6. 加入 Callback Retrieval">
+    只有当第一次 retrieval 弱、不完整或低于 confidence threshold 时才重试。
+  </InfoCard>
+</CardGrid>
+
+不要一开始就做 agentic search 或复杂 decomposition。先让基础 retrieval path 可以被测量、可以被检查。
+
+## 核心原则
+
+Retrieval 是 RAG 的证据选择层。
+
+Indexing 让知识变得可搜索。Retrieval 决定哪些知识会进入 LLM。LLM 之后只能根据 retrieval 给它的内容来写。如果 retrieval 选了错误政策、错误产品、错误地区或不完整证据，就算 prompt 写得不错，最终答案也会不稳定。
+
+实用规则是：
+
+```text
+先检索到正确候选证据。
+再让最好证据排在前面。
+最后只把干净、相关、当前有效的上下文交给 LLM。
+```
+
+在这个系列里，log 3 只关注 retrieval。Log 4 应该专门关注 LLM 层：prompt design、context formatting、answer grounding、拒答行为和 guardrails。
+
+</Lang>

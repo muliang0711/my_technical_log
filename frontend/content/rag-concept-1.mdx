@@ -1,0 +1,597 @@
+---
+title: "RAG System Fundamentals: The Three Phases Behind Grounded Answers"
+category: "Software Development"
+createdAt: "2026-06-05"
+summary: "A pract:contentReference[oaicite:1]{index=1} documents into retrievable context and grounded LLM answers."
+readTime: "10 min read"
+tags:
+  - "AI"
+  - "RAG"
+  - "LLM"
+  - "System Design"
+featured: false
+series:
+  title: "Building a RAG Customer Support System"
+  slug: "building-rag-customer-support-system"
+  order: 1
+---
+
+<Lang lang="en">
+
+A Retrieval-Augmented Generation system, usually called **RAG**, allows an LLM to answer using external documents instead of depending only on what the model learned during training. For a customer-support project, this means the model can answer from product manuals, refund policies, troubleshooting guides, and historical support documents without training a new LLM from scratch.
+
+## Short Answer
+
+A basic RAG system has **three core phases**:
+
+| Phase | What It Does | Simple Example |
+| --- | --- | --- |
+| 1. Indexing | Converts source documents into searchable knowledge | Turn refund policy PDFs into vector records |
+| 2. Retrieval | Finds the most relevant pieces of knowledge for a question | Find the paragraph about cancelling an order |
+| 3. Generation | Gives retrieved context to an LLM to produce an answer | Generate a response grounded in the policy |
+
+The important point is that RAG is not mainly about teaching a model new knowledge through training. It is about building a reliable search layer in front of an existing LLM.
+
+A user asks:
+
+> Can I return an opened product after seven days?
+
+The RAG system does not immediately ask the LLM to guess. It first searches the support knowledge base, retrieves the relevant return-policy chunks, and then asks the LLM to answer using those chunks.
+
+## Why a Normal LLM Is Not Enough
+
+An existing LLM can explain general concepts, but it does not automatically know your private or changing business information.
+
+For a customer-support system, the model may not know:
+
+- Your company's latest refund policy.
+- Product-specific warranty periods.
+- Internal troubleshooting procedures.
+- Updated shipping rules.
+- Which version of a policy is currently valid.
+
+Without retrieval, the model may produce an answer that sounds reasonable but is not supported by your actual documentation.
+
+RAG changes the responsibility of the system:
+
+| Responsibility | Without RAG | With RAG |
+| --- | --- | --- |
+| Find company-specific facts | LLM guesses from prior training | Retriever searches your documents |
+| Update business knowledge | May require model changes | Update the indexed documents |
+| Show supporting evidence | Difficult | Retrieved chunks can be attached as sources |
+| Control answer scope | Weak | Prompt can require answers only from context |
+
+RAG does not guarantee correct answers. If retrieval finds the wrong document, or the correct policy was never indexed, generation can still fail. The system is only as reliable as its documents, retrieval quality, and answer constraints.
+
+## Phase 1: Indexing the Knowledge Base
+
+Indexing is the offline preparation phase. It happens before a customer asks a question.
+
+The input may be:
+
+- FAQ pages.
+- Product documentation.
+- Customer-support manuals.
+- Refund and warranty policies.
+- Historical solved tickets.
+- Structured product data exported from a database.
+
+A document is usually too large to retrieve as one complete object. The system therefore splits it into smaller pieces called **chunks**.
+
+For example, one return-policy document may become:
+
+| Chunk | Content Purpose |
+| --- | --- |
+| Chunk A | General return eligibility |
+| Chunk B | Opened-product restrictions |
+| Chunk C | Refund processing time |
+| Chunk D | Damaged-product exceptions |
+
+Each chunk is then converted into an **embedding**. An embedding is a numerical representation of meaning. Texts with similar meanings should be located close together in the vector search space.
+
+The simplified indexing pipeline looks like this:
+
+```text
+Documents
+  -> clean text
+  -> split into chunks
+  -> create embeddings
+  -> store chunks and vectors in a searchable database
+```
+
+<CardGrid columns={2}>
+  <InfoCard title="Document Loading">
+    Read the source knowledge from PDFs, Markdown files, HTML pages, database exports, or support records.
+  </InfoCard>
+
+  <InfoCard title="Chunking">
+    Split large documents into smaller sections so retrieval can return the exact part relevant to the question.
+  </InfoCard>
+
+  <InfoCard title="Embedding">
+    Convert each chunk into a vector that represents its semantic meaning.
+  </InfoCard>
+
+  <InfoCard title="Storage">
+    Save the original text, metadata, and vector in a vector database or vector-capable search system.
+  </InfoCard>
+</CardGrid>
+
+The indexing phase decides what the system is able to know later. Poorly cleaned documents, chunks without titles, or obsolete policies will directly damage answer quality.
+
+## Phase 2: Retrieving Relevant Context
+
+Retrieval happens when the user asks a question.
+
+Suppose the user asks:
+
+> My headphones stopped charging after two months. Can I claim warranty?
+
+The system converts that question into an embedding and searches the indexed knowledge base for semantically similar chunks. It may retrieve:
+
+1. The product warranty duration.
+2. The hardware-failure eligibility rule.
+3. The required proof-of-purchase process.
+
+The retrieval flow is:
+
+```text
+User question
+  -> convert question into an embedding
+  -> search similar document chunks
+  -> rank the results
+  -> return the best context
+```
+
+Retrieval is usually the most important part of a practical RAG system. A powerful LLM cannot answer correctly from documentation it never receives.
+
+| Retrieval Result | Consequence |
+| --- | --- |
+| Correct chunk retrieved | The LLM has evidence for a correct answer |
+| Irrelevant chunk retrieved | The LLM may answer the wrong policy question |
+| Too many chunks retrieved | Important evidence may be buried in noise |
+| No chunk retrieved | The system should refuse or request more information |
+| Outdated chunk retrieved | The answer may be confidently obsolete |
+
+For an early prototype, vector similarity search is enough to prove that the pipeline works. Later improvements may include metadata filtering, keyword plus vector hybrid search, reranking, document versioning, and confidence thresholds.
+
+## Phase 3: Generating a Grounded Answer
+
+Generation is the phase where the LLM finally becomes involved.
+
+The LLM receives:
+
+- The user's question.
+- The retrieved chunks.
+- Instructions describing how it should answer.
+
+A basic augmented prompt may contain:
+
+```text
+System instruction:
+Answer only from the supplied support context.
+If the answer is not present, say that the available documents do not provide enough information.
+
+Retrieved context:
+Warranty coverage lasts twelve months from the purchase date.
+Battery charging failure is covered unless caused by physical damage.
+
+User question:
+My headphones stopped charging after two months. Can I claim warranty?
+```
+
+The LLM can now generate an answer based on retrieved evidence rather than guessing from general knowledge.
+
+In a real customer-support application, the answer should normally include:
+
+- A direct answer.
+- Any important conditions or exceptions.
+- The source document or policy section used.
+- A safe fallback when evidence is missing.
+
+For example:
+
+```text
+Your charging failure appears to fall within the twelve-month warranty period, provided there is no physical damage. Please provide your proof of purchase so the claim can be checked against the warranty policy.
+```
+
+The generation phase should not be treated as permission for the LLM to answer anything. Its purpose is to turn retrieved evidence into a readable response.
+
+## What Happens During One User Request
+
+The three phases are easier to understand when separated into offline work and online work.
+
+| Timing | Phase | Happens When | Cost Pattern |
+| --- | --- | --- | --- |
+| Offline | Indexing | Documents are added or updated | More expensive, not repeated for every question |
+| Online | Retrieval | Every user question arrives | Must be fast and accurate |
+| Online | Generation | After context is retrieved | Usually the highest per-answer API cost |
+
+The complete flow for one customer question is:
+
+```text
+Before users ask questions:
+Support documents -> chunks -> embeddings -> vector database
+
+When a user asks:
+Question -> retrieval -> relevant chunks -> LLM prompt -> grounded answer
+```
+
+This distinction matters because you should not rebuild embeddings every time a user asks a question. Documents are indexed when knowledge changes; questions only trigger retrieval and generation.
+
+## A Minimal Implementation Shape
+
+You do not need to train an LLM to create the first working version. You can use:
+
+- An existing embedding model to convert text into vectors.
+- A vector database or vector-capable storage layer.
+- An existing LLM API or local model for answer generation.
+- Your own backend logic to connect the phases.
+
+In a Node.js application, the request path can conceptually look like this:
+
+```typescript
+async function answerSupportQuestion(question: string) {
+  const queryVector = await embed(question);
+
+  const relevantChunks = await vectorStore.search(queryVector, {
+    limit: 4
+  });
+
+  const prompt = buildGroundedPrompt(question, relevantChunks);
+
+  return llm.generate(prompt);
+}
+```
+
+This code hides implementation details, but it exposes the system boundary correctly:
+
+| Function | Responsibility |
+| --- | --- |
+| `embed(question)` | Represents the question for search |
+| `vectorStore.search(...)` | Retrieves relevant support knowledge |
+| `buildGroundedPrompt(...)` | Combines evidence with answer rules |
+| `llm.generate(...)` | Produces a readable final response |
+
+The first version should be small enough that you can inspect every retrieved chunk and every generated answer manually.
+
+## How to Judge Whether the RAG System Works
+
+A RAG prototype should not be evaluated only by whether the final answer looks convincing. You need to check each phase independently.
+
+| Check | Question to Ask | Failure Meaning |
+| --- | --- | --- |
+| Document coverage | Was the correct policy included in the knowledge base? | Data problem |
+| Chunk quality | Does the relevant rule appear clearly in one or more chunks? | Chunking problem |
+| Retrieval accuracy | Did the correct chunk appear in the top results? | Search problem |
+| Answer grounding | Did the answer stay within the retrieved evidence? | Prompt or LLM problem |
+| Source freshness | Was the retrieved document still current? | Versioning problem |
+
+For example, when an answer is wrong, do not immediately blame the LLM. First inspect whether the correct supporting chunk was retrieved. If the model never received the right policy, changing prompts alone will not solve the real problem.
+
+<CardGrid columns={2}>
+  <InfoCard title="Bad Retrieval">
+    The correct document exists, but the system returns irrelevant chunks. Improve chunking, embeddings, filters, or ranking.
+  </InfoCard>
+
+  <InfoCard title="Bad Generation">
+    The correct chunk is retrieved, but the model ignores it or invents extra rules. Improve prompt constraints and answer validation.
+  </InfoCard>
+</CardGrid>
+
+## This Series Roadmap
+
+This article defines the whole system before implementation. The following posts can build one usable customer-support RAG project step by step.
+
+| Order | Article Topic | What It Solves |
+| --- | --- | --- |
+| 1 | RAG System Fundamentals | Understand the three core phases |
+| 2 | Preparing Customer-Support Documents | Clean data and design useful chunks |
+| 3 | Embeddings and Vector Storage | Store knowledge for semantic search |
+| 4 | Retrieval Quality and Evaluation | Measure whether correct evidence is found |
+| 5 | Grounded Generation and Guardrails | Produce answers without unsupported claims |
+| 6 | Building the End-to-End API | Connect ingestion, search, and chat endpoints |
+
+The order is intentional. Starting with an agent framework before understanding indexing and retrieval makes failures harder to diagnose. A RAG application becomes manageable when each phase has a clear responsibility and can be tested separately.
+
+## The Main Principle
+
+A RAG system is not an LLM that magically knows your documents. It is a pipeline:
+
+```text
+Index the knowledge -> retrieve the evidence -> generate from the evidence
+```
+
+For your first customer-support project, start with a small, inspectable dataset and an existing LLM. Do not train a model first. Build the retrieval pipeline, confirm that the correct support passages are returned, and only then evaluate the quality of generated answers.
+
+</Lang>
+
+<Lang lang="zh">
+
+Retrieval-Augmented Generation，通常简称 **RAG**，是一种让大型语言模型先查找外部资料，再根据资料回答问题的系统设计。对于客服项目来说，这代表模型不需要重新训练，就可以根据产品说明、退货政策、保修规则和客服文档回答用户问题。
+
+## 简短答案
+
+一个基础 RAG 系统可以拆成 **三个核心阶段**：
+
+| 阶段 | 负责什么 | 简单例子 |
+| --- | --- | --- |
+| 1. Indexing 索引建立 | 把原始文档处理成可以搜索的知识库 | 把退货政策 PDF 存进向量数据库 |
+| 2. Retrieval 检索 | 根据用户问题找到最相关的资料片段 | 找到“拆封商品能否退货”的条款 |
+| 3. Generation 生成 | 把找到的资料交给 LLM 组织成答案 | 根据政策生成客服回复 |
+
+关键点是：RAG 的重点不是训练一个新的模型，让模型记住所有资料；而是在现有 LLM 前面增加一个可靠的知识搜索层。
+
+例如用户问：
+
+> 商品拆封七天后还可以退货吗？
+
+系统不应该直接让 LLM 猜答案。它应该先从客服知识库中找出相关退货条款，再让 LLM 根据这些条款组织回复。
+
+## 为什么不能只使用普通 LLM
+
+现有 LLM 可以解释一般知识，但它不会天然知道你公司的内部资料，也不一定知道最新政策。
+
+在客服系统中，模型通常不知道：
+
+- 你目前采用的退货规则。
+- 不同产品的保修期限。
+- 公司内部的故障处理流程。
+- 最新的运费或配送政策。
+- 某份政策是否已经被新版替代。
+
+如果没有检索步骤，模型可能生成一个听起来合理、实际上却不符合你公司规定的答案。
+
+RAG 把系统职责重新分配：
+
+| 责任 | 没有 RAG | 使用 RAG |
+| --- | --- | --- |
+| 找公司专属资料 | 模型根据旧知识推测 | 检索器搜索你的文档 |
+| 更新业务知识 | 可能需要调整模型 | 更新知识库中的文档 |
+| 显示答案依据 | 较困难 | 可以附带检索到的来源 |
+| 限制回答范围 | 较弱 | 可以要求只根据资料回答 |
+
+但是，RAG 并不代表答案一定正确。如果系统找错文档，或者正确政策根本没有放入知识库，最终回答一样会失败。
+
+## 阶段一：建立可以搜索的知识库
+
+Indexing 是准备资料的阶段。它通常发生在用户提问之前，而不是每次提问时重新执行。
+
+客服系统的数据来源可能包括：
+
+- FAQ 页面。
+- 产品使用说明。
+- 退货与退款政策。
+- 保修规则。
+- 已解决的客服案例。
+- 从数据库导出的商品资料。
+
+一份完整文档通常太大，不适合直接当作一次搜索结果返回。因此，系统需要把文档切成多个较小的片段，也就是 **chunks**。
+
+例如，一份退货政策可以切成：
+
+| 片段 | 负责表达的内容 |
+| --- | --- |
+| Chunk A | 一般退货资格 |
+| Chunk B | 已拆封商品限制 |
+| Chunk C | 退款处理时间 |
+| Chunk D | 损坏商品例外情况 |
+
+接着，系统会把每个 chunk 转换成 **embedding**。Embedding 可以理解成一组代表文字语义的数字。意思相近的文字，在向量搜索空间中的距离应该更接近。
+
+基础索引流程如下：
+
+```text
+原始文档
+  -> 清理文字
+  -> 切成 chunks
+  -> 生成 embeddings
+  -> 把文字、metadata 和向量存入可搜索数据库
+```
+
+<CardGrid columns={2}>
+  <InfoCard title="读取文档">
+    从 PDF、Markdown、网页、数据库导出文件或客服记录中取得原始知识。
+  </InfoCard>
+
+  <InfoCard title="切分内容">
+    把大型文档拆成较小片段，让系统可以返回真正对应问题的条款。
+  </InfoCard>
+
+  <InfoCard title="转换向量">
+    为每个片段生成 embedding，让系统可以根据语义进行搜索。
+  </InfoCard>
+
+  <InfoCard title="储存资料">
+    保存原文、metadata 与向量，供之后的用户查询使用。
+  </InfoCard>
+</CardGrid>
+
+这一阶段决定了系统以后能够找到什么知识。如果文档没有清理好、chunk 没有保留标题与来源，或者旧政策没有移除，后续生成答案时就会受到影响。
+
+## 阶段二：根据问题检索证据
+
+Retrieval 发生在用户真正发送问题的时候。
+
+例如用户问：
+
+> 我的耳机买了两个月，现在不能充电，可以申请保修吗？
+
+系统会先把这个问题转换成 embedding，然后到已经建立好的知识库中搜索语义相近的资料片段。理想情况下，它会找出：
+
+1. 产品保修期限。
+2. 硬件故障是否属于保修范围。
+3. 申请保修需要提供什么证明。
+
+检索流程可以表示为：
+
+```text
+用户问题
+  -> 把问题转换成 embedding
+  -> 搜索相似的文档片段
+  -> 根据相关度排序
+  -> 返回最适合的资料
+```
+
+对于实际 RAG 项目来说，检索质量通常比生成模型本身更重要。因为就算使用很强的 LLM，如果它从来没有收到正确政策内容，它也无法稳定地回答正确。
+
+| 检索结果 | 可能造成的后果 |
+| --- | --- |
+| 找到正确条款 | LLM 有依据生成正确答案 |
+| 找到不相关片段 | 模型可能回答错问题 |
+| 返回过多资料 | 关键证据被大量杂讯盖住 |
+| 完全找不到资料 | 系统应该拒答或要求更多信息 |
+| 找到旧版政策 | 回答可能过时却看起来很确定 |
+
+在早期原型中，向量相似度搜索已经足以验证整体流程。之后再逐步加入 metadata 筛选、关键词与向量混合检索、reranking、政策版本管理和置信度门槛。
+
+## 阶段三：根据证据生成答案
+
+Generation 是 LLM 真正参与回答的阶段。
+
+模型收到的内容通常包括：
+
+- 用户原始问题。
+- 检索回来的资料片段。
+- 告诉模型应该如何回答的规则。
+
+一个简单的增强 prompt 可能如下：
+
+```text
+系统规则：
+只允许根据提供的客服资料回答。
+如果资料中找不到答案，请明确说明当前文件不足以回答。
+
+检索资料：
+产品保修期为购买日期起十二个月。
+充电故障属于保修范围，除非存在人为或物理损坏。
+
+用户问题：
+我的耳机买了两个月，现在不能充电，可以申请保修吗？
+```
+
+此时，LLM 不是依赖一般常识进行推测，而是根据刚刚取得的证据组织可读答案。
+
+在真实客服系统中，最终回复最好包含：
+
+- 直接回答用户的问题。
+- 必要条件和例外情况。
+- 使用了哪一份政策或文件。
+- 当证据不足时的安全回应方式。
+
+例如：
+
+```text
+根据目前的保修政策，您的耳机仍在十二个月保修期内。如果产品没有人为或物理损坏，充电故障通常可以申请保修。请提供购买证明，以便进一步确认资格。
+```
+
+生成阶段的职责不是让模型自由发挥，而是把已经找到的证据整理成用户可以理解的回复。
+
+## 一次用户请求实际经过什么流程
+
+理解 RAG 时，需要把离线准备工作和线上回答流程分开。
+
+| 时间点 | 阶段 | 什么时候发生 | 成本特点 |
+| --- | --- | --- | --- |
+| 离线 | Indexing | 新增或更新资料时 | 较重，但不需要每个问题重复执行 |
+| 线上 | Retrieval | 每次用户提问时 | 需要快速且准确 |
+| 线上 | Generation | 找到资料以后 | 通常是每次回答中 API 成本最高的步骤 |
+
+完整流程如下：
+
+```text
+用户提问之前：
+客服文档 -> chunks -> embeddings -> 向量数据库
+
+用户提问之后：
+问题 -> 检索相关资料 -> 把资料交给 LLM -> 根据资料生成答案
+```
+
+这个区别非常重要。你不应该在每一次用户提问时重新为所有文档生成 embedding。只有当知识资料新增或更新时，才需要重新处理对应文档；用户查询时只需要执行检索与生成。
+
+## 最小可行版本需要什么
+
+建立第一版 RAG 项目时，你不需要先训练一个 LLM。你可以直接使用：
+
+- 现成的 embedding model，把文字转换成向量。
+- 向量数据库，或支持向量检索的储存方案。
+- 现成的 LLM API 或本地模型，负责生成答案。
+- 自己编写的后端逻辑，把各阶段接起来。
+
+在 Node.js 项目中，一次请求的结构可以简单表示为：
+
+```typescript
+async function answerSupportQuestion(question: string) {
+  const queryVector = await embed(question);
+
+  const relevantChunks = await vectorStore.search(queryVector, {
+    limit: 4
+  });
+
+  const prompt = buildGroundedPrompt(question, relevantChunks);
+
+  return llm.generate(prompt);
+}
+```
+
+这段代码没有展示所有细节，但它准确表达了系统职责的边界：
+
+| 函数 | 负责什么 |
+| --- | --- |
+| `embed(question)` | 把用户问题转换成适合搜索的形式 |
+| `vectorStore.search(...)` | 找出相关客服资料 |
+| `buildGroundedPrompt(...)` | 把证据和回答规则组合起来 |
+| `llm.generate(...)` | 生成最终用户可读回复 |
+
+第一版系统应该尽量简单，让你可以手动检查每次返回了哪些 chunks，以及模型最终如何使用这些资料。
+
+## 怎么判断 RAG 是否真的有效
+
+评估 RAG 系统时，不能只看最终答案是否听起来像真的。你需要分别检查每一个阶段。
+
+| 检查项目 | 应该问什么 | 如果失败代表什么 |
+| --- | --- | --- |
+| 文档覆盖率 | 正确政策是否已经放进知识库？ | 数据问题 |
+| Chunk 质量 | 关键规则是否清楚存在于某个片段中？ | 切分问题 |
+| 检索准确率 | 正确片段是否排在搜索结果前面？ | 检索问题 |
+| 回答依据性 | 模型是否只根据返回资料回答？ | Prompt 或模型约束问题 |
+| 文件时效性 | 检索到的政策是否仍然有效？ | 版本管理问题 |
+
+例如，当答案错误时，不应该第一时间认定是 LLM 不够强。首先需要检查正确的政策片段有没有被检索出来。如果模型根本没有收到正确内容，那么单纯调整 prompt 通常无法解决真正的问题。
+
+<CardGrid columns={2}>
+  <InfoCard title="检索失败">
+    正确文件存在，但系统返回了不相关内容。应该改善 chunk 设计、embedding、筛选规则或排序方法。
+  </InfoCard>
+
+  <InfoCard title="生成失败">
+    系统已经找到正确资料，但模型仍然忽略证据或增加不存在的规则。应该改善 prompt 限制与回答验证机制。
+  </InfoCard>
+</CardGrid>
+
+## 这个系列会怎么展开
+
+这一篇先把整个 RAG 系统的结构讲清楚。接下来的文章可以按照实际开发顺序，逐步完成一个客服 RAG 项目。
+
+| 顺序 | 文章主题 | 解决的问题 |
+| --- | --- | --- |
+| 1 | RAG System Fundamentals | 理解三个核心阶段 |
+| 2 | Preparing Customer-Support Documents | 清理资料并设计可用 chunks |
+| 3 | Embeddings and Vector Storage | 让知识支持语义搜索 |
+| 4 | Retrieval Quality and Evaluation | 测量是否真的找到正确证据 |
+| 5 | Grounded Generation and Guardrails | 控制模型不要生成无依据答案 |
+| 6 | Building the End-to-End API | 把资料导入、检索和聊天接口连接起来 |
+
+这个顺序不是随意安排的。如果一开始就引入复杂 agent framework，却不理解 indexing 和 retrieval，那么系统出错时会很难判断问题发生在哪里。只有把每个阶段的责任分开，RAG 项目才容易测试和改善。
+
+## 核心原则
+
+RAG 不是一个自动知道你所有资料的神奇 LLM。它本质上是一条清楚的系统流程：
+
+```text
+建立知识索引 -> 找出相关证据 -> 根据证据生成回答
+```
+
+对于第一个客服 RAG 项目，应该先使用小规模、可以手动检查的数据集，再接入现成 LLM。不要一开始就训练模型。先确保系统能够稳定找出正确的客服资料，再评估模型生成答案的质量。
+
+</Lang>

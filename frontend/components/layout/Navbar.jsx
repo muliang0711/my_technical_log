@@ -20,8 +20,8 @@ export default function Navbar() {
       <div className="container site-header__inner">
         <div className="header-left">
           <Link className="brand" href="/">
-            <span className="logo">K</span>
-            <span>Knowledge Log</span>
+            <span className="logo">X</span>
+            <span>XY Knowledge Log</span>
           </Link>
           <nav className="nav" aria-label="Primary navigation">
             <NavLink href="/">Home</NavLink>
