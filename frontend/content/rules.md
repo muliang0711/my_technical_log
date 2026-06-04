@@ -40,6 +40,7 @@ Rules:
 - Use `###` headings only for subsections.
 - Use fenced code blocks with language labels where useful.
 - Keep all text as normal Markdown/MDX. Do not wrap the article in a React component.
+- Use custom MDX components only where they improve scanning: Markdown tables for comparisons, `<CardGrid>` and `<InfoCard>` for compact strategy summaries.
 
 ## Allowed Categories
 
@@ -159,6 +160,7 @@ When writing technical posts:
 - After every example output, explain what signals matter.
 - Prefer bullet lists for symptoms, causes, and fixes.
 - Use tables for comparisons.
+- Use cards for strategy lists when five or more strategies would otherwise create too much vertical text.
 - Do not claim a tool or command proves more than it actually proves.
 - Make diagnosis come before solution.
 
@@ -182,6 +184,75 @@ all   84.1  10.4      0.3    4.5
 
 This suggests CPU pressure because `%usr` is high, `%idle` is low, and `%iowait` is not the dominant value.
 ````
+
+## Table Style
+
+Use normal Markdown tables. The frontend automatically renders them with the project table style.
+
+Use tables for:
+
+- CPU vs I/O comparisons.
+- Symptom-to-cause mappings.
+- Command output interpretation.
+- Trade-off summaries.
+- Decision matrices.
+
+Example:
+
+```mdx
+| Observation | Likely Direction | Next Check |
+| --- | --- | --- |
+| High `%usr`, low `%idle` | CPU-bound work | Profile the application process |
+| High `%iowait`, high disk latency | I/O-bound work | Inspect database queries and storage |
+| Low CPU, slow requests | External wait or locks | Check downstream calls and lock waits |
+```
+
+Rules:
+
+- Keep table cells short.
+- Do not put long paragraphs inside table cells.
+- Use a paragraph after the table to explain the important interpretation.
+
+## Card Style
+
+Use cards when a section has several related strategies, principles, or checks and the reader should scan them quickly.
+
+Available components:
+
+- `<CardGrid columns={2}>`
+- `<CardGrid columns={3}>`
+- `<InfoCard title="...">...</InfoCard>`
+
+Preferred pattern for strategy summaries:
+
+````mdx
+<CardGrid columns={2}>
+  <InfoCard title="1. Measure First">
+    Identify the process, endpoint, query, or job responsible before changing code.
+  </InfoCard>
+
+  <InfoCard title="2. Remove Waste">
+    Eliminate duplicate loops, unnecessary transformations, oversized responses, and noisy logging.
+  </InfoCard>
+
+  <InfoCard title="3. Bound Work">
+    Add pagination, request limits, timeouts, and queue controls so one request cannot consume unlimited resources.
+  </InfoCard>
+
+  <InfoCard title="4. Reuse Results">
+    Cache or precompute only when freshness, invalidation, and ownership are understood.
+  </InfoCard>
+</CardGrid>
+````
+
+Rules:
+
+- Use two columns for most technical articles.
+- Use three columns only when card text is very short.
+- Each card should have a clear title.
+- Keep each card body to one to three sentences.
+- Do not put large code blocks inside cards.
+- Use cards to summarize; put detailed explanation in normal sections before or after the card grid.
 
 ## Article Length
 
