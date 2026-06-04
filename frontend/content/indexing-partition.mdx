@@ -1,0 +1,461 @@
+---
+title: "Two cheapest way to increase db searching performance "
+category: "Software Development"
+createdAt: "2026-06-04"
+summary: "A practical explanation of how indexes and partitions reduce unnecessary database reads before more expensive scaling strategies are needed."
+readTime: "10 min read"
+tags:
+  - "Backend"
+  - "Database"
+  - "PostgreSQL"
+  - "Performance"
+featured: false
+series:
+  title: "Database Performance"
+  slug: "database-performance"
+  order: 2
+---
+
+<Lang lang="en">
+
+When a database search becomes slow, the first question should not be how to add more servers. The first question is whether the database is reading far more data than the result actually requires. Indexing and partitioning improve search performance by reducing unnecessary reads inside the existing database. That is why they are usually cheaper than caching layers, replicas, sharding, or larger hardware.
+
+The examples below use PostgreSQL syntax, but the operating principle applies to relational databases in general.
+
+## Short Answer
+
+An index helps the database locate matching rows without scanning the entire table. Partitioning divides a very large table into smaller physical sections, allowing the database to ignore partitions that cannot contain the requested rows.
+
+<CardGrid columns={2}>
+  <InfoCard title="Indexing">
+    Best first step for repeated filters, joins, sorting, and lookups. It usually requires a small schema change and no application architecture change.
+  </InfoCard>
+
+  <InfoCard title="Partitioning">
+    Useful after a table becomes large and queries consistently filter by a partition key such as date, tenant, or region.
+  </InfoCard>
+
+  <InfoCard title="Why They Are Cheap">
+    They improve the database access path without introducing another service, network hop, deployment model, or cache consistency problem.
+  </InfoCard>
+
+  <InfoCard title="Important Boundary">
+    Indexing is commonly a first optimisation. Partitioning is cheap only when partition pruning matches the real query pattern.
+  </InfoCard>
+</CardGrid>
+
+A slow search is often not slow because the database cannot calculate the answer. It is slow because the database must inspect too many rows before it can find the answer.
+
+## Start with the Query, Not the Table
+
+Assume an `orders` table contains millions of rows. A customer opens an order-history page that requests only the latest twenty orders for one customer.
+
+Run this query in PostgreSQL to represent the search pattern that the application performs repeatedly:
+
+```sql
+SELECT
+  id,
+  total_amount,
+  created_at
+FROM orders
+WHERE customer_id = 4201
+  AND created_at >= DATE '2026-01-01'
+ORDER BY created_at DESC
+LIMIT 20;
+```
+
+Without a suitable access path, the database may need to read a large number of rows, test whether each row belongs to `customer_id = 4201`, discard older records, sort the remaining result, and finally return only twenty rows.
+
+That is wasted work. The result is small, but the path used to find it is expensive.
+
+| Query Requirement | Waste Without Optimisation | Better Access Path |
+| --- | --- | --- |
+| Find one customer's rows | Inspect unrelated customers | Index on `customer_id` |
+| Read recent rows first | Sort matching rows later | Index ordered by `created_at` |
+| Search one time range in a huge history table | Open old data ranges | Partition by date |
+
+The correct optimisation begins from the `WHERE`, `JOIN`, and `ORDER BY` clauses that are actually used, not from adding random indexes to every column.
+
+## Indexing: Stop Reading Rows You Never Needed
+
+An index is an additional data structure that keeps searchable values in an order that is cheaper to navigate than reading the full table. For ordinary equality and range searches, a B-tree index is usually the default starting point.
+
+For the order-history query, the application filters by one customer and then needs recent rows ordered by date. A composite index should follow that access pattern.
+
+Run this in PostgreSQL after confirming that the order-history query is frequent and expensive, so the database can find one customer's newest orders through an indexed path:
+
+```sql
+CREATE INDEX idx_orders_customer_created_at
+ON orders (customer_id, created_at DESC);
+```
+
+The order of columns matters. `customer_id` is used for equality filtering first. Inside that customer's rows, `created_at DESC` supports the date range and the newest-first ordering.
+
+Run this read-only statement in PostgreSQL before and after creating the index to compare the real execution plan and the number of database pages touched:
+
+```sql
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT
+  id,
+  total_amount,
+  created_at
+FROM orders
+WHERE customer_id = 4201
+  AND created_at >= DATE '2026-01-01'
+ORDER BY created_at DESC
+LIMIT 20;
+```
+
+Because `EXPLAIN ANALYZE` actually executes the query, use it carefully on write operations. For this `SELECT` example, it reveals whether the database used the new index and whether the amount of data read became smaller.
+
+| Plan Signal | Interpretation |
+| --- | --- |
+| `Seq Scan on orders` | The database read through the table instead of using an index path |
+| `Index Scan using idx_orders_customer_created_at` | The index matches the access pattern |
+| High rows removed by filter | Too much data was inspected and discarded |
+| Lower buffer reads after the index | Less storage work was required to return the same result |
+
+Indexes are cheap because the application query may remain unchanged. The database receives the same SQL, but it gains a better route to the requested rows.
+
+However, an index is not free. Every `INSERT`, `UPDATE`, and `DELETE` may also need to update index entries. An unused index consumes storage and increases write cost. The objective is not to create as many indexes as possible. The objective is to create indexes that match frequent, expensive searches.
+
+## Partitioning: Stop Opening Data Outside the Search Range
+
+Indexing helps the database search within a table. Partitioning changes the table itself by dividing it into smaller physical tables under one logical table name.
+
+A common example is a continuously growing event table. Suppose `order_events` stores order history for many years, while most application queries examine only recent weeks or months.
+
+Run this in PostgreSQL when event data is naturally accessed by date ranges and the table is expected to grow large enough that historical data becomes unnecessary work for recent searches:
+
+```sql
+CREATE TABLE order_events (
+  id bigint GENERATED ALWAYS AS IDENTITY,
+  order_id bigint NOT NULL,
+  event_type text NOT NULL,
+  created_at timestamptz NOT NULL
+) PARTITION BY RANGE (created_at);
+
+CREATE TABLE order_events_2026_01
+PARTITION OF order_events
+FOR VALUES FROM ('2026-01-01') TO ('2026-02-01');
+
+CREATE TABLE order_events_2026_02
+PARTITION OF order_events
+FOR VALUES FROM ('2026-02-01') TO ('2026-03-01');
+```
+
+The application still queries `order_events` as one logical table. Internally, rows from January and February are stored in different partitions.
+
+Run this in PostgreSQL after the partitions exist so searches within each retained partition can still use an efficient lookup path for a specific order:
+
+```sql
+CREATE INDEX idx_order_events_order_created_at
+ON order_events (order_id, created_at DESC);
+```
+
+Partitioning becomes useful only when the query includes the partition key. In this design, the partition key is `created_at`.
+
+Run this in PostgreSQL to verify whether a seven-day search touches only the January partition instead of examining every historical partition:
+
+```sql
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT
+  order_id,
+  event_type,
+  created_at
+FROM order_events
+WHERE created_at >= TIMESTAMPTZ '2026-01-10 00:00:00+00'
+  AND created_at < TIMESTAMPTZ '2026-01-17 00:00:00+00'
+ORDER BY created_at DESC;
+```
+
+When partition pruning works, the execution plan should show access to the relevant January partition and avoid the February partition or older historical partitions.
+
+| Query Shape | Will Date Partitioning Help? | Reason |
+| --- | --- | --- |
+| `WHERE created_at >= ... AND created_at < ...` | Usually yes | The database can prune unrelated date partitions |
+| `WHERE order_id = 9001 AND created_at >= ...` | Often yes | Partition pruning and indexing can work together |
+| `WHERE order_id = 9001` only | Not necessarily | The database may need to inspect many partitions |
+| Small table with a few thousand rows | Usually no | Partition overhead may be larger than the saved work |
+
+This is why partitioning must not be treated as a default first step. A poorly selected partition key produces more operational complexity without reducing the search area.
+
+## Why These Changes Are Cheaper Than Larger Architecture Changes
+
+The word cheap does not mean zero cost. It means the improvement is usually limited to the database schema and query plan rather than requiring a new distributed system.
+
+| Strategy | What It Changes | New Operational Cost | When It Is Reasonable |
+| --- | --- | --- | --- |
+| Indexing | Search path inside one table | Extra storage and write maintenance | First response to repeated selective searches |
+| Partitioning | Physical organisation of one large table | Partition creation and maintenance | Large tables with predictable range filters |
+| Application cache | Adds another data source | Expiry and stale-data handling | Repeated reads with acceptable staleness |
+| Read replica | Adds another database node | Replication delay and routing | Read volume exceeds one primary |
+| Sharding | Splits data across databases | Routing, joins, migrations, recovery | One database cannot handle data or traffic |
+| Larger hardware | Increases server capacity | Higher recurring cost | Useful after waste has been measured |
+
+Indexes and partitions can reduce the amount of work performed for each search before the system has to introduce infrastructure-level complexity.
+
+There is also a practical debugging advantage: their effect is measurable through execution plans. You can compare rows scanned, partitions touched, buffer reads, and execution time before deciding whether the change should remain.
+
+## A Practical Implementation Order
+
+Use this order when an API endpoint or page is slow because of database search time:
+
+1. Capture the exact slow SQL query, including its filters, joins, sorting, and limit.
+2. Run `EXPLAIN (ANALYZE, BUFFERS)` on a safe read query to see whether it scans too many rows.
+3. Add the smallest index that matches the repeated search pattern.
+4. Measure again and remove indexes that are not used or do not reduce work.
+5. Consider partitioning only when the table is large, continuously growing, and frequently searched by a stable key such as date.
+6. Confirm partition pruning with the actual production-style query.
+7. Move to caching, replicas, hardware expansion, or sharding only when database-level reductions are no longer sufficient.
+
+A useful mental model is:
+
+| Situation | First Action |
+| --- | --- |
+| One query scans many unrelated rows | Add or adjust an index |
+| A huge time-series table repeatedly searches recent ranges | Consider date partitioning |
+| Searches remain expensive after correct indexes and pruning | Investigate query design, caching, replicas, or architecture |
+| Writes slow down after many indexes | Remove unnecessary indexes or narrow them |
+
+## Common Mistakes
+
+| Mistake | Why It Fails | Better Rule |
+| --- | --- | --- |
+| Index every column | Writes and storage become more expensive | Index frequent search paths |
+| Put composite index columns in random order | The index may not support the real filter order | Match equality, range, and sorting needs |
+| Partition a small table | Extra structure provides little benefit | Partition only after scale and pattern justify it |
+| Partition by a field not used in filters | Queries cannot prune partitions | Choose a key present in common searches |
+| Assume faster performance without measurement | A change may not alter the plan | Verify using execution plans and buffers |
+
+## The Main Principle
+
+Database search performance improves when the engine reads less unnecessary data.
+
+Indexing is usually the cheapest first improvement because it gives existing queries a faster route to matching rows with limited application change. Partitioning is the next low-cost structural tool when a large table has a clear search boundary, such as time ranges, that allows irrelevant partitions to be excluded.
+
+Do not begin with replicas or sharding while a query is still scanning rows it should never have opened. First reduce the work inside one database. Then scale only the remaining necessary work.
+
+</Lang>
+
+<Lang lang="zh">
+
+当数据库查询开始变慢时，第一反应不应该是马上加服务器，而是先确认：数据库是不是为了返回很少的数据，却读取了大量无关记录。索引和分区的价值，就在于它们可以让数据库少读数据，并且通常不需要先改变整个系统架构。
+
+下面的 SQL 示例使用 PostgreSQL 语法，但背后的判断方式同样适用于大多数关系型数据库。
+
+## 简短答案
+
+索引让数据库可以沿着已经整理好的查找路径定位数据，而不是从表头一路扫描到表尾。分区则是把一张非常大的逻辑表拆成多个物理区间，让数据库在查询时直接排除不可能包含结果的部分。
+
+<CardGrid columns={2}>
+  <InfoCard title="索引">
+    最适合优先处理重复出现的筛选、关联、排序和单笔查找问题。通常只需要调整数据库结构，不需要改变应用架构。
+  </InfoCard>
+
+  <InfoCard title="分区">
+    适合数据量已经很大，并且查询长期稳定地按照日期、租户或地区等分区键筛选的表。
+  </InfoCard>
+
+  <InfoCard title="为什么便宜">
+    它们改善的是数据库内部的读取路径，不需要先增加缓存服务、网络调用、数据同步或分布式部署问题。
+  </InfoCard>
+
+  <InfoCard title="边界条件">
+    索引通常是最先考虑的优化；分区只有在查询能够触发分区裁剪时，才属于低成本收益。
+  </InfoCard>
+</CardGrid>
+
+很多查询慢，并不是数据库算不出答案，而是它必须检查太多行，最后才留下用户真正需要的少量结果。
+
+## 先观察查询，而不是先修改表
+
+假设 `orders` 表已经保存了数百万笔订单。用户打开订单历史页面时，系统只需要查询某一个客户最近的二十笔订单。
+
+在 PostgreSQL 中运行下面的查询，用来代表应用程序反复执行的搜索模式：
+
+```sql
+SELECT
+  id,
+  total_amount,
+  created_at
+FROM orders
+WHERE customer_id = 4201
+  AND created_at >= DATE '2026-01-01'
+ORDER BY created_at DESC
+LIMIT 20;
+```
+
+如果没有合适的读取路径，数据库可能需要读取大量订单，逐行判断是否属于 `customer_id = 4201`，排除过旧的数据，对剩余结果排序，最后却只返回二十行。
+
+这就是浪费。返回结果很小，不代表查找过程便宜。
+
+| 查询需求 | 没有优化时的浪费 | 更合适的路径 |
+| --- | --- | --- |
+| 找一个客户的订单 | 扫描其他客户的数据 | 对 `customer_id` 建索引 |
+| 优先读取最新订单 | 查询后再排序 | 使用包含 `created_at` 的有序索引 |
+| 在巨大历史表中查一个时间段 | 打开大量旧数据 | 按日期分区 |
+
+正确做法不是看到表很大就乱加索引，而是先观察真正高频的 `WHERE`、`JOIN` 和 `ORDER BY` 条件。
+
+## 索引：不要读取本来就不需要的行
+
+索引是一种额外的数据结构。它会把适合查找的字段组织成更容易定位的路径，让数据库不用每次都读取整张表。对于常见的等值条件和范围条件，B-tree 索引通常是第一选择。
+
+在订单历史查询中，系统先筛选一个客户，然后需要按照时间取得最新订单。因此，组合索引应该直接对应这个访问模式。
+
+在确认订单历史查询确实高频并且消耗较大后，在 PostgreSQL 中运行下面的语句，让数据库可以沿着索引定位某个客户最新的订单：
+
+```sql
+CREATE INDEX idx_orders_customer_created_at
+ON orders (customer_id, created_at DESC);
+```
+
+字段顺序不是随意的。`customer_id` 负责先缩小到一个客户的数据范围，`created_at DESC` 则继续支持时间筛选和最新记录优先返回。
+
+在 PostgreSQL 中运行下面的只读分析语句，对比创建索引前后的真实执行计划和读取页面数量：
+
+```sql
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT
+  id,
+  total_amount,
+  created_at
+FROM orders
+WHERE customer_id = 4201
+  AND created_at >= DATE '2026-01-01'
+ORDER BY created_at DESC
+LIMIT 20;
+```
+
+`EXPLAIN ANALYZE` 会真正执行查询，因此不要随意对写入语句使用。对于这个 `SELECT` 示例，它可以告诉我们数据库是否真的使用了索引，以及为了返回相同结果，读取的数据量是否减少。
+
+| 执行计划信号 | 代表的意思 |
+| --- | --- |
+| `Seq Scan on orders` | 数据库仍然正在扫描表，而不是使用合适索引 |
+| `Index Scan using idx_orders_customer_created_at` | 索引与查询路径匹配 |
+| 被过滤掉的行数很多 | 查询过程中检查了大量无关数据 |
+| 创建索引后 buffer reads 下降 | 为返回同样结果而执行的存储读取减少 |
+
+索引便宜的原因，在于应用程序可能完全不需要修改原本的 SQL。查询还是同一个查询，但数据库获得了一条更短的寻找路径。
+
+不过，索引并不是免费的。每次 `INSERT`、`UPDATE` 和 `DELETE` 都可能需要同步维护索引。没有被查询使用的索引不仅占用空间，也会增加写入成本。因此目标不是索引越多越好，而是让高频且昂贵的查询拥有合适的索引。
+
+## 分区：不要打开查询范围之外的数据
+
+索引解决的是如何在一张表里更快找到记录。分区解决的是一张表已经非常大时，是否可以直接把某些数据范围排除在本次查询之外。
+
+一个典型场景是持续增长的事件记录表。假设 `order_events` 已经保存多年订单状态变化，但应用程序的大部分查询只会查看最近几周或几个月。
+
+当事件数据天然按照时间范围被读取，并且数据规模会持续扩大时，在 PostgreSQL 中运行下面的结构定义，将记录按月份拆分到不同分区：
+
+```sql
+CREATE TABLE order_events (
+  id bigint GENERATED ALWAYS AS IDENTITY,
+  order_id bigint NOT NULL,
+  event_type text NOT NULL,
+  created_at timestamptz NOT NULL
+) PARTITION BY RANGE (created_at);
+
+CREATE TABLE order_events_2026_01
+PARTITION OF order_events
+FOR VALUES FROM ('2026-01-01') TO ('2026-02-01');
+
+CREATE TABLE order_events_2026_02
+PARTITION OF order_events
+FOR VALUES FROM ('2026-02-01') TO ('2026-03-01');
+```
+
+应用程序仍然查询同一个逻辑表 `order_events`。但在数据库内部，一月数据和二月数据已经位于不同的物理分区。
+
+在分区建立后，在 PostgreSQL 中运行下面的索引定义，让每个被保留的数据分区仍然可以高效处理某个订单的时间排序查询：
+
+```sql
+CREATE INDEX idx_order_events_order_created_at
+ON order_events (order_id, created_at DESC);
+```
+
+分区是否有效，关键取决于查询是否包含分区键。在这个设计里，分区键就是 `created_at`。
+
+在 PostgreSQL 中运行下面的分析语句，检查七天范围的查询是否只访问一月分区，而不是检查所有历史分区：
+
+```sql
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT
+  order_id,
+  event_type,
+  created_at
+FROM order_events
+WHERE created_at >= TIMESTAMPTZ '2026-01-10 00:00:00+00'
+  AND created_at < TIMESTAMPTZ '2026-01-17 00:00:00+00'
+ORDER BY created_at DESC;
+```
+
+如果分区裁剪生效，执行计划应该只显示访问与一月相关的分区，而不会打开二月或更早的历史分区。
+
+| 查询形式 | 日期分区是否有帮助 | 原因 |
+| --- | --- | --- |
+| `WHERE created_at >= ... AND created_at < ...` | 通常有帮助 | 数据库可以裁剪无关日期分区 |
+| `WHERE order_id = 9001 AND created_at >= ...` | 通常有帮助 | 分区裁剪和索引可以一起工作 |
+| 只有 `WHERE order_id = 9001` | 不一定 | 数据库可能仍然需要检查多个分区 |
+| 只有几千行的小表 | 通常没有必要 | 分区管理成本可能高于节省的读取成本 |
+
+因此，分区不能当作所有查询问题的默认解法。如果选择了一个查询根本不会使用的分区键，系统只会多出维护复杂度，却不会真正缩小搜索范围。
+
+## 为什么它们比大型架构改动便宜
+
+这里的便宜，并不代表完全没有代价，而是代表优化范围通常仍然停留在数据库结构和执行计划内部，还没有引入新的分布式系统问题。
+
+| 策略 | 改变了什么 | 新增成本 | 适合什么时候使用 |
+| --- | --- | --- | --- |
+| 索引 | 单表内部的查找路径 | 额外空间和写入维护 | 重复出现的选择性查询开始变慢 |
+| 分区 | 大表的物理组织方式 | 分区创建和维护 | 大表长期按照固定范围搜索 |
+| 应用缓存 | 增加另一份数据来源 | 过期策略和脏数据处理 | 可接受一定数据延迟的重复读取 |
+| 只读副本 | 增加数据库节点 | 复制延迟和请求路由 | 单一主库读压力过高 |
+| 分片 | 数据分散到多个数据库 | 路由、跨库查询、迁移和恢复 | 单库已经无法承受规模 |
+| 升级硬件 | 增加服务器容量 | 持续增加的基础设施费用 | 已经确认主要工作无法继续减少 |
+
+索引和分区可以在系统进入缓存、副本或分片之前，先减少每一次搜索实际执行的工作量。
+
+它们还有一个很重要的工程优势：效果可以直接测量。通过执行计划，可以比较扫描了多少行、打开了哪些分区、读取了多少 buffer，以及执行时间是否下降。这样优化不会停留在感觉上。
+
+## 实际执行顺序
+
+当某个 API 或页面因为数据库搜索而变慢时，可以按照下面的顺序处理：
+
+1. 找到真正缓慢的 SQL，包括筛选条件、关联条件、排序和限制数量。
+2. 对安全的读取查询执行 `EXPLAIN (ANALYZE, BUFFERS)`，确认它是否读取了过多无关数据。
+3. 添加最小而且直接匹配查询模式的索引。
+4. 再次测量，并删除没有被使用或没有减少读取工作的索引。
+5. 只有在表已经很大、持续增长，而且查询稳定使用日期等明确边界时，才考虑分区。
+6. 使用真实查询确认分区裁剪是否发生。
+7. 只有在数据库内部已经无法继续明显减少读取工作后，才进入缓存、副本、升级硬件或分片等方案。
+
+可以把判断方式压缩成下面这张表：
+
+| 情况 | 优先动作 |
+| --- | --- |
+| 一个查询扫描大量无关行 | 新增或调整索引 |
+| 巨大的时间序列表反复查询最近范围 | 考虑按日期分区 |
+| 正确索引和分区裁剪后仍然很慢 | 继续检查查询设计、缓存、副本或架构 |
+| 索引过多导致写入变慢 | 删除无效索引或缩小索引范围 |
+
+## 常见错误
+
+| 错误做法 | 为什么失败 | 更好的规则 |
+| --- | --- | --- |
+| 每个字段都建立索引 | 写入和空间成本不断增加 | 只为高频查询路径建立索引 |
+| 组合索引字段顺序随便放 | 索引可能无法支持真实筛选过程 | 按等值条件、范围条件和排序需求设计 |
+| 小表也立即分区 | 多出的结构没有明显收益 | 等数据规模和访问模式证明需要时再分区 |
+| 按查询不会筛选的字段分区 | 无法触发分区裁剪 | 选择高频查询真正包含的分区键 |
+| 没有测量就认定性能改善 | 优化可能根本没有改变执行计划 | 使用执行计划和读取量验证 |
+
+## 核心原则
+
+数据库查询优化的核心，不是让数据库拥有更多资源，而是先让它少读取不必要的数据。
+
+索引通常是最便宜的第一步，因为它能在应用程序几乎不变的情况下，为现有查询提供更短的查找路径。分区则是在大表具有明确搜索边界时，进一步排除整段无关数据的低成本结构化方法。
+
+当一个查询还在读取本来不应该打开的数据时，不要急着引入副本或分片。先在单一数据库内部减少浪费，再决定真正需要扩展的部分。
+
+</Lang>
