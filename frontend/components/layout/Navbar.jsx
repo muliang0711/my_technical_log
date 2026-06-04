@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Search, Sun } from "lucide-react";
 
 function NavLink({ href, children }) {
   const pathname = usePathname();
@@ -30,16 +29,6 @@ export default function Navbar() {
             <NavLink href="/series">Series</NavLink>
             <NavLink href="/about">About</NavLink>
           </nav>
-        </div>
-        <div className="header-tools">
-          <label className="search-wrap">
-            <span className="sr-only">Search</span>
-            <Search size={18} />
-            <input className="search" placeholder="Search..." />
-          </label>
-          <span className="icon-button" title="Theme">
-            <Sun size={18} />
-          </span>
         </div>
       </div>
     </header>
