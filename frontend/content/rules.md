@@ -409,6 +409,57 @@ Rules:
 - Prefer short examples that teach the point.
 - Do not put command output in a `bash` block; use `text`.
 
+## Tabbed Code and Log Examples
+
+Use tabbed examples when the same concept needs to be shown in multiple programming languages, such as Java, Go, and Node.js. This keeps the article compact while still giving readers language-specific examples.
+
+Available tab components:
+
+- `<CodeTabs>...</CodeTabs>`
+- `<CodeTab label="Java">...</CodeTab>`
+- `<CodeTab label="Go">...</CodeTab>`
+- `<CodeTab label="Node.js">...</CodeTab>`
+
+Preferred pattern:
+
+````mdx
+<CodeTabs>
+  <CodeTab label="Java">
+
+```java
+logger.info("orderId={} status={}", orderId, status);
+```
+
+  </CodeTab>
+
+  <CodeTab label="Go">
+
+```go
+log.Printf("orderId=%s status=%s", orderID, status)
+```
+
+  </CodeTab>
+
+  <CodeTab label="Node.js">
+
+```javascript
+console.log({ orderId, status });
+```
+
+  </CodeTab>
+</CodeTabs>
+````
+
+Tabbed example rules:
+
+- Use tabs only when the examples teach the same idea in different languages or frameworks.
+- Keep every tab short and equivalent in purpose.
+- Do not use tabs for unrelated examples.
+- Put only one code fence inside each `<CodeTab>` unless the comparison genuinely needs more.
+- Use accurate code fence labels, for example `java`, `go`, `javascript`, `typescript`, or `text`.
+- If the example is log output rather than source code, use `text` inside every tab.
+- Do not duplicate a long explanation inside every tab. Explain the principle before or after the tabbed block.
+
 ## Table Style
 
 Use normal Markdown tables. The frontend renders them with a styled table component automatically.
@@ -449,6 +500,8 @@ Available MDX components:
 - `<CardGrid columns={2}>`
 - `<CardGrid columns={3}>`
 - `<InfoCard title="...">...</InfoCard>`
+- `<CodeTabs>...</CodeTabs>`
+- `<CodeTab label="Java">...</CodeTab>`
 
 Preferred strategy pattern:
 
@@ -660,6 +713,7 @@ Before returning the MDX, verify:
 - Main sections use `##`.
 - Commands have context sentences before them.
 - Code fences have language labels and are closed.
+- Multi-language examples use `CodeTabs` when tabs save space.
 - Tables are short and readable.
 - Cards use only `CardGrid` and `InfoCard`.
 - The article ends with a practical takeaway.
