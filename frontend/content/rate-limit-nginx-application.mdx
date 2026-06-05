@@ -1,0 +1,889 @@
+---
+title: "Nginx vs Application Rate Limiting"
+category: "Software Development"
+createdAt: "2026-06-05"
+summary: "A practical guide for deciding whether rate limiting should happen in Nginx, inside application code, or both."
+readTime: "9 min read"
+tags:
+  - "Backend"
+  - "HTTP"
+  - "Node.js"
+  - "System Design"
+featured: false
+series:
+  title: "Traffic Control"
+  slug: "traffic-control"
+  order: 3
+---
+
+<Lang lang="en">
+
+Rate limiting should not be treated as one feature that belongs in one place. Nginx and application code solve different parts of the problem. Nginx is good at cheap traffic-level protection before the request enters the application. Application code is better when the limit depends on user identity, API keys, subscription plans, tenants, or business rules.
+
+## Short Answer
+
+Do not put all rate limiting in Nginx.
+
+Do not put all rate limiting only in the application either.
+
+A practical backend usually uses both:
+
+```text
+Nginx = coarse traffic control
+Application = precise business control
+```
+
+The basic structure looks like this:
+
+```text
+Client
+  ↓
+Nginx
+  - IP-based limit
+  - route-based limit
+  - request size limit
+  - timeout
+  ↓
+Application
+  - user-based limit
+  - API-key-based limit
+  - tenant-based limit
+  - plan-based limit
+  - action-specific limit
+  ↓
+Redis / Database
+```
+
+Nginx answers:
+
+```text
+Is this traffic too noisy before entering the app?
+```
+
+Application code answers:
+
+```text
+Is this user, account, tenant, or API key allowed to perform this action?
+```
+
+That separation is the core decision rule.
+
+## What Nginx Rate Limiting Is Good For
+
+Nginx is useful when the rule can be applied before the application knows anything about the user.
+
+Common Nginx rate limit rules are based on:
+
+- IP address
+- Request path
+- Request method
+- Basic endpoint category
+- Request body size
+- Connection behavior
+
+For example:
+
+```text
+Limit each IP to 20 requests per second.
+Limit /api/login to 5 requests per minute per IP.
+Limit /api/upload to fewer requests than normal API routes.
+Reject large request bodies before they reach the application.
+```
+
+The strength of Nginx is that it acts early.
+
+A rejected request does not need to enter Node.js, Java, Go, Python, PHP, or any application runtime. It does not need to run middleware, parse JSON, check authentication, call Redis, or touch the database.
+
+That makes Nginx a good first gate.
+
+<CardGrid columns={2}>
+  <InfoCard title="Cheap Protection">
+    Nginx can reject obvious excess traffic before the request consumes application resources.
+  </InfoCard>
+
+  <InfoCard title="Simple Keys">
+    Nginx works well when the limit key is simple, such as IP address or route path.
+  </InfoCard>
+
+  <InfoCard title="Good for Public Endpoints">
+    Login, search, upload, and public API routes can receive basic protection before application logic starts.
+  </InfoCard>
+
+  <InfoCard title="Not Business-Aware">
+    Nginx does not naturally understand users, plans, tenants, billing cycles, or product rules.
+  </InfoCard>
+</CardGrid>
+
+Nginx should usually handle the first layer, not the whole policy.
+
+## What Application Rate Limiting Is Good For
+
+Application rate limiting is needed when the rule depends on business context.
+
+Examples:
+
+```text
+Free user can call this API 100 times per day.
+Paid user can call this API 10,000 times per day.
+One user can request OTP only 5 times per hour.
+One tenant can create 1,000 records per day.
+One API key can call the AI endpoint 50 times per hour.
+```
+
+Nginx cannot easily make these decisions because it usually does not know the authenticated user, subscription plan, tenant relationship, account status, or action-specific cost.
+
+The application already knows this context.
+
+Application code can check:
+
+- User ID
+- Tenant ID
+- API key
+- Subscription plan
+- Role and permission
+- Billing cycle
+- Feature entitlement
+- Whether the action succeeded
+- Whether the request should count toward quota
+
+This is why application-level rate limiting is more precise.
+
+The trade-off is cost. The request must enter the application before it can be rejected.
+
+## Core Difference
+
+The difference is not only technical. It is about what information each layer has when it makes the decision.
+
+| Decision Type | Better Place | Reason |
+| --- | --- | --- |
+| Per-IP request frequency | Nginx | Does not need business context |
+| Per-route basic protection | Nginx | Can be applied before app code runs |
+| Request body size | Nginx | Rejects large requests early |
+| Login abuse by IP | Nginx and application | Needs both traffic and account protection |
+| Per-user quota | Application | Requires authenticated user identity |
+| Per-API-key quota | Application | Requires API key ownership and policy |
+| Per-plan limit | Application | Requires subscription data |
+| Per-tenant limit | Application | Requires business ownership model |
+| Per-action limit | Application | Requires business rules |
+| Cost-based limit | Application | Requires knowing how expensive the action is |
+
+A useful design does not ask, “Which one is better?”
+
+It asks:
+
+```text
+Can this rule be safely applied before the application knows the user?
+```
+
+If yes, Nginx is a good place.
+
+If no, the application should own the rule.
+
+## Why Not Only Use Nginx
+
+Only using Nginx is tempting because it is fast and simple.
+
+But it becomes weak when the system needs precise control.
+
+For example, imagine this rule:
+
+```text
+Free users can generate 20 AI reports per month.
+Pro users can generate 500 AI reports per month.
+Enterprise users have custom limits.
+```
+
+This cannot be cleanly solved with basic Nginx IP rate limiting.
+
+The limit is not about IP traffic. It is about:
+
+- authenticated user
+- subscription plan
+- monthly quota
+- billing period
+- report generation action
+- possibly organization-level ownership
+
+Nginx does not naturally own that data.
+
+If you force this into Nginx, the configuration becomes fragile, duplicated, or dependent on external systems in a way that defeats the purpose of simple edge protection.
+
+Nginx should protect the door. It should not become your billing and permission engine.
+
+## Why Not Only Use Application Code
+
+Only using application rate limiting is also common, especially in early projects.
+
+The problem is that every request must enter the application before it can be rejected.
+
+That creates unnecessary cost.
+
+A bot hitting `/api/login` thousands of times per minute may cause the application to:
+
+- accept the connection
+- run middleware
+- parse headers
+- parse JSON
+- check routing
+- call Redis
+- check user state
+- write logs
+- possibly touch the database
+
+Even if the application rejects the request, the request already consumed application resources.
+
+Nginx can reject some of this traffic earlier.
+
+The goal is not to remove application limits. The goal is to stop obvious waste before it reaches the expensive part of the system.
+
+## A Layered Design
+
+A strong rate limiting design usually has at least two layers.
+
+<CardGrid columns={2}>
+  <InfoCard title="Layer 1: Nginx">
+    Apply coarse limits based on IP, route, request size, and connection behavior.
+  </InfoCard>
+
+  <InfoCard title="Layer 2: Application">
+    Apply precise limits based on user, tenant, API key, plan, and action.
+  </InfoCard>
+
+  <InfoCard title="Layer 3: Redis">
+    Store shared counters so multiple application instances use the same limit state.
+  </InfoCard>
+
+  <InfoCard title="Layer 4: Monitoring">
+    Track rejected requests, false positives, endpoint pressure, and user complaints.
+  </InfoCard>
+</CardGrid>
+
+A typical request path may look like this:
+
+```text
+Client
+  ↓
+Nginx checks:
+  - Is this IP sending too many requests?
+  - Is this endpoint being hit too frequently?
+  - Is the request body too large?
+  ↓
+Application checks:
+  - Who is the user?
+  - Which tenant owns this action?
+  - What plan does the account have?
+  - Has the quota been exceeded?
+  ↓
+Redis stores:
+  - user counters
+  - API key counters
+  - tenant counters
+  - reset time
+```
+
+This design gives both cheap protection and precise control.
+
+## Where Redis Usually Fits
+
+For application-level rate limiting, Redis is commonly used to store counters.
+
+The reason is simple: application memory is not shared across servers.
+
+Bad design:
+
+```text
+App Server A has its own counter.
+App Server B has its own counter.
+App Server C has its own counter.
+```
+
+If a user sends requests that are distributed across three servers, each server may think the user is still under the limit.
+
+That makes the real limit inaccurate.
+
+Better design:
+
+```text
+App Server A
+App Server B  → Redis shared counter
+App Server C
+```
+
+All application instances check the same counter.
+
+A simple key structure may look like this:
+
+```text
+rate_limit:user:123:report_generation:2026-06
+rate_limit:api_key:abc123:search:2026-06-05
+rate_limit:tenant:company_99:upload:2026-06-05-10
+```
+
+The exact key depends on the rule.
+
+The important point is that the counter should match the thing being limited.
+
+| Limit Type | Possible Key |
+| --- | --- |
+| Per user per day | `rate_limit:user:{userId}:daily:{date}` |
+| Per API key per hour | `rate_limit:api_key:{key}:hour:{hour}` |
+| Per tenant per month | `rate_limit:tenant:{tenantId}:month:{month}` |
+| Per action per user | `rate_limit:user:{userId}:action:{action}:{window}` |
+
+Use Redis for shared rate-limit state. Use the database for durable business records, billing, and audit history.
+
+## Practical Examples
+
+A login endpoint usually needs both Nginx and application limits.
+
+Nginx can limit repeated traffic from the same IP:
+
+```text
+/api/login → 5 requests per minute per IP
+```
+
+The application can limit repeated attempts against the same account:
+
+```text
+user@example.com → 5 failed attempts per 15 minutes
+```
+
+These protect different things.
+
+Nginx protects the application from noisy source traffic. The application protects the account from targeted abuse.
+
+A public AI generation endpoint also needs both layers.
+
+Nginx can limit raw request frequency:
+
+```text
+/api/generate → 10 requests per minute per IP
+```
+
+The application can enforce quota:
+
+```text
+Free plan → 20 generations per month
+Pro plan → 500 generations per month
+```
+
+Again, these are not duplicate rules. They solve different problems.
+
+## How to Decide Where a Limit Belongs
+
+Use this decision table.
+
+| Question | Put It In |
+| --- | --- |
+| Is the limit based only on IP? | Nginx |
+| Is the limit based only on route path? | Nginx |
+| Is it basic abuse protection? | Nginx |
+| Should the request be blocked before app code runs? | Nginx |
+| Is the limit based on authenticated user? | Application |
+| Is the limit based on API key? | Application |
+| Is the limit based on tenant or organization? | Application |
+| Is the limit based on subscription plan? | Application |
+| Does the limit need billing or quota state? | Application |
+| Does the action only count after success? | Application |
+| Does the rule need a long-term audit trail? | Application and database |
+
+The most reliable rule is:
+
+```text
+If the rule needs business context, put it in the application.
+If the rule only needs traffic context, put it in Nginx.
+```
+
+## Common Mistakes
+
+| Mistake | Why It Is a Problem |
+| --- | --- |
+| Putting every limit in Nginx | Nginx lacks business context |
+| Putting every limit in application code | Obvious waste reaches the app before rejection |
+| Using only IP limits | Shared networks can cause false positives |
+| Using only user limits | Unauthenticated abuse can still hit the app |
+| Using app memory counters | Limits break when multiple app instances exist |
+| Not monitoring rejected traffic | You cannot tell whether the limit is correct |
+| Treating rate limit as security only | It is also resource and cost control |
+
+Most real mistakes come from using one layer to solve every problem.
+
+Nginx and application code should cooperate instead of competing.
+
+## A Practical Implementation Order
+
+When adding rate limiting to a system, start from the cheapest and clearest protection.
+
+<CardGrid columns={2}>
+  <InfoCard title="1. Add Nginx Route Limits">
+    Protect login, search, upload, and public API routes with conservative IP-based limits.
+  </InfoCard>
+
+  <InfoCard title="2. Return Clear Status Codes">
+    Use `429 Too Many Requests` for rejected API traffic so clients understand the failure reason.
+  </InfoCard>
+
+  <InfoCard title="3. Add Redis-Based App Limits">
+    Add user, API-key, tenant, and plan limits using a shared Redis counter.
+  </InfoCard>
+
+  <InfoCard title="4. Split Expensive Actions">
+    Do not use one global quota for everything. Separate search, upload, generation, and write-heavy actions.
+  </InfoCard>
+
+  <InfoCard title="5. Monitor False Positives">
+    Check whether limits block abuse, broken clients, or valid users behind shared networks.
+  </InfoCard>
+
+  <InfoCard title="6. Adjust by Cost">
+    Expensive endpoints should usually have stricter limits than cheap read endpoints.
+  </InfoCard>
+</CardGrid>
+
+The goal is not to create the strictest possible system. The goal is to stop waste without breaking normal usage.
+
+## The Main Principle
+
+Rate limiting belongs in both Nginx and the application, but not for the same reason.
+
+Use Nginx for coarse traffic control before the application spends resources. Use application rate limiting for precise business rules after the system knows the user, account, API key, tenant, or plan.
+
+The correct design is layered, not either-or.
+
+</Lang>
+
+<Lang lang="zh">
+
+限流不应该被理解成一个只能放在某个地方的功能。Nginx 和应用代码解决的是不同层级的问题。Nginx 适合在请求进入应用之前做便宜的流量级保护；应用代码适合处理用户、API key、套餐、租户和业务规则相关的精确限制。
+
+## 简短答案
+
+不要把所有限流都放在 Nginx。
+
+也不要只把所有限流都放在应用代码里。
+
+一个实用的后端系统通常两边都需要：
+
+```text
+Nginx = 粗粒度流量控制
+Application = 精确业务控制
+```
+
+基本结构像这样：
+
+```text
+Client
+  ↓
+Nginx
+  - IP 限制
+  - 路由限制
+  - 请求大小限制
+  - timeout
+  ↓
+Application
+  - 用户限制
+  - API key 限制
+  - 租户限制
+  - 套餐限制
+  - 行为级限制
+  ↓
+Redis / Database
+```
+
+Nginx 回答的问题是：
+
+```text
+这个流量在进入应用之前是不是太吵了？
+```
+
+应用代码回答的问题是：
+
+```text
+这个用户、账号、租户或 API key 有没有资格执行这个动作？
+```
+
+这个分工就是核心判断规则。
+
+## Nginx 限流适合做什么
+
+当规则不需要应用知道用户是谁时，Nginx 很适合处理。
+
+常见的 Nginx 限流规则基于：
+
+- IP 地址
+- 请求路径
+- 请求方法
+- 基础接口类型
+- 请求体大小
+- 连接行为
+
+例如：
+
+```text
+每个 IP 每秒最多 20 个请求。
+/api/login 每个 IP 每分钟最多 5 个请求。
+/api/upload 比普通 API 更严格。
+大请求体在进入应用前直接拒绝。
+```
+
+Nginx 的强项是它发生得很早。
+
+被拒绝的请求不需要进入 Node.js、Java、Go、Python、PHP 或任何应用运行时。它不需要执行 middleware、不需要解析 JSON、不需要检查 authentication、不需要调用 Redis，也不需要访问数据库。
+
+所以 Nginx 很适合做第一道门。
+
+<CardGrid columns={2}>
+  <InfoCard title="便宜的保护">
+    Nginx 可以在请求消耗应用资源之前，先拒绝明显过量的流量。
+  </InfoCard>
+
+  <InfoCard title="简单的 Key">
+    当限流 key 是 IP 地址或路径时，Nginx 很适合处理。
+  </InfoCard>
+
+  <InfoCard title="适合公开接口">
+    登录、搜索、上传和公开 API，可以先在应用逻辑之前获得基础保护。
+  </InfoCard>
+
+  <InfoCard title="不理解业务">
+    Nginx 本身不自然理解用户、套餐、租户、账单周期或产品规则。
+  </InfoCard>
+</CardGrid>
+
+Nginx 通常应该负责第一层，而不是负责整个限流策略。
+
+## 应用限流适合做什么
+
+当规则依赖业务上下文时，就需要应用层限流。
+
+例如：
+
+```text
+免费用户每天最多调用 100 次 API。
+付费用户每天最多调用 10,000 次 API。
+一个用户每小时最多请求 5 次 OTP。
+一个租户每天最多创建 1,000 条记录。
+一个 API key 每小时最多调用 AI endpoint 50 次。
+```
+
+Nginx 很难干净地做这些判断，因为它通常不知道当前认证用户、订阅套餐、租户关系、账号状态或具体动作成本。
+
+应用本身已经拥有这些上下文。
+
+应用代码可以检查：
+
+- User ID
+- Tenant ID
+- API key
+- Subscription plan
+- Role and permission
+- Billing cycle
+- Feature entitlement
+- 行为是否成功
+- 这个请求是否应该计入 quota
+
+所以应用层限流更精确。
+
+代价是，请求必须先进入应用，应用才能做出这个判断。
+
+## 核心区别
+
+区别不只是技术位置不同，而是每一层在做判断时拥有的信息不同。
+
+| 判断类型 | 更适合的位置 | 原因 |
+| --- | --- | --- |
+| 每个 IP 的请求频率 | Nginx | 不需要业务上下文 |
+| 每个 route 的基础保护 | Nginx | 可以在应用代码运行前执行 |
+| 请求体大小限制 | Nginx | 可以提前拒绝大请求 |
+| 登录 IP 滥用 | Nginx 和应用 | 既需要流量保护，也需要账号保护 |
+| 每个用户的 quota | 应用 | 需要认证后的用户身份 |
+| 每个 API key 的 quota | 应用 | 需要 API key 所属关系和策略 |
+| 每个套餐的限制 | 应用 | 需要订阅数据 |
+| 每个租户的限制 | 应用 | 需要业务归属模型 |
+| 每个动作的限制 | 应用 | 需要业务规则 |
+| 按成本限制 | 应用 | 需要知道动作有多贵 |
+
+一个好设计不会问：“哪个更好？”
+
+它会问：
+
+```text
+这个规则能不能在应用知道用户之前安全执行？
+```
+
+如果可以，Nginx 是好位置。
+
+如果不可以，应该让应用拥有这个规则。
+
+## 为什么不要只用 Nginx
+
+只用 Nginx 很有吸引力，因为它快、简单、便宜。
+
+但当系统需要精确控制时，它会变弱。
+
+例如这个规则：
+
+```text
+免费用户每月可以生成 20 份 AI 报告。
+Pro 用户每月可以生成 500 份 AI 报告。
+Enterprise 用户有自定义限制。
+```
+
+这个规则不能用基础 Nginx IP 限流干净解决。
+
+因为限制对象不是 IP 流量，而是：
+
+- 认证用户
+- 订阅套餐
+- 月度额度
+- 账单周期
+- 报告生成行为
+- 可能还有组织级归属
+
+Nginx 不自然拥有这些数据。
+
+如果强行放进 Nginx，配置会变得脆弱、重复，或者依赖外部系统，最后失去边界层简单保护的意义。
+
+Nginx 应该保护门口。它不应该变成你的账单和权限引擎。
+
+## 为什么不要只用应用代码
+
+早期项目很容易只在应用里做限流。
+
+问题是，每个请求都必须进入应用之后，才能被拒绝。
+
+这会造成不必要的成本。
+
+一个 bot 每分钟打几千次 `/api/login`，应用可能需要：
+
+- 接收连接
+- 执行 middleware
+- 解析 headers
+- 解析 JSON
+- 匹配路由
+- 调用 Redis
+- 检查用户状态
+- 写日志
+- 甚至访问数据库
+
+即使应用最终拒绝了请求，这个请求也已经消耗了应用资源。
+
+Nginx 可以更早拒绝一部分流量。
+
+目标不是移除应用限流。目标是不要让明显浪费进入系统里更昂贵的部分。
+
+## 分层设计
+
+强一点的限流设计通常至少有两层。
+
+<CardGrid columns={2}>
+  <InfoCard title="第一层：Nginx">
+    根据 IP、route、请求大小和连接行为做粗粒度限制。
+  </InfoCard>
+
+  <InfoCard title="第二层：应用">
+    根据用户、租户、API key、套餐和具体行为做精确限制。
+  </InfoCard>
+
+  <InfoCard title="第三层：Redis">
+    保存共享 counter，让多个应用实例使用同一份限流状态。
+  </InfoCard>
+
+  <InfoCard title="第四层：监控">
+    观察被拒绝请求、误伤、接口压力和用户投诉。
+  </InfoCard>
+</CardGrid>
+
+一个典型请求路径可能是：
+
+```text
+Client
+  ↓
+Nginx 检查：
+  - 这个 IP 请求是不是太频繁？
+  - 这个 endpoint 是不是被打太多次？
+  - 请求体是不是太大？
+  ↓
+Application 检查：
+  - 用户是谁？
+  - 这个动作属于哪个租户？
+  - 账号是什么套餐？
+  - quota 有没有超过？
+  ↓
+Redis 保存：
+  - user counters
+  - API key counters
+  - tenant counters
+  - reset time
+```
+
+这个设计同时拥有便宜保护和精确控制。
+
+## Redis 通常放在哪里
+
+应用层限流通常会用 Redis 保存 counter。
+
+原因很简单：应用内存不是跨服务器共享的。
+
+不好的设计：
+
+```text
+App Server A 有自己的 counter。
+App Server B 有自己的 counter。
+App Server C 有自己的 counter。
+```
+
+如果用户请求被分发到三台服务器，每台服务器都可能认为这个用户还没超过限制。
+
+这样真实限制就不准确。
+
+更好的设计：
+
+```text
+App Server A
+App Server B  → Redis shared counter
+App Server C
+```
+
+所有应用实例都检查同一份 counter。
+
+简单的 key 结构可以像这样：
+
+```text
+rate_limit:user:123:report_generation:2026-06
+rate_limit:api_key:abc123:search:2026-06-05
+rate_limit:tenant:company_99:upload:2026-06-05-10
+```
+
+具体 key 取决于规则。
+
+重点是：counter 应该对应真正被限制的对象。
+
+| 限制类型 | 可能的 Key |
+| --- | --- |
+| 每个用户每天 | `rate_limit:user:{userId}:daily:{date}` |
+| 每个 API key 每小时 | `rate_limit:api_key:{key}:hour:{hour}` |
+| 每个租户每月 | `rate_limit:tenant:{tenantId}:month:{month}` |
+| 每个用户每个行为 | `rate_limit:user:{userId}:action:{action}:{window}` |
+
+Redis 适合保存共享限流状态。数据库更适合保存持久业务记录、账单和审计历史。
+
+## 实际例子
+
+登录接口通常需要 Nginx 和应用两层限制。
+
+Nginx 可以限制同一个 IP 的重复流量：
+
+```text
+/api/login → 每个 IP 每分钟 5 次请求
+```
+
+应用可以限制针对同一个账号的重复尝试：
+
+```text
+user@example.com → 15 分钟内最多 5 次失败尝试
+```
+
+这两个保护的对象不同。
+
+Nginx 保护应用不要被吵闹的来源流量拖垮。应用保护账号不要被针对性攻击。
+
+公开 AI 生成接口也需要两层。
+
+Nginx 可以限制原始请求频率：
+
+```text
+/api/generate → 每个 IP 每分钟 10 次请求
+```
+
+应用可以执行 quota：
+
+```text
+免费套餐 → 每月 20 次生成
+Pro 套餐 → 每月 500 次生成
+```
+
+这不是重复规则。它们解决的是不同问题。
+
+## 如何判断限流应该放在哪里
+
+使用下面这个判断表。
+
+| 问题 | 放在哪里 |
+| --- | --- |
+| 限制是否只基于 IP？ | Nginx |
+| 限制是否只基于 route path？ | Nginx |
+| 这是基础滥用保护吗？ | Nginx |
+| 是否应该在应用代码运行前阻止？ | Nginx |
+| 限制是否基于认证用户？ | 应用 |
+| 限制是否基于 API key？ | 应用 |
+| 限制是否基于租户或组织？ | 应用 |
+| 限制是否基于订阅套餐？ | 应用 |
+| 限制是否需要账单或 quota 状态？ | 应用 |
+| 这个动作是否只有成功后才计数？ | 应用 |
+| 这个规则是否需要长期审计记录？ | 应用和数据库 |
+
+最可靠的规则是：
+
+```text
+如果规则需要业务上下文，放在应用。
+如果规则只需要流量上下文，放在 Nginx。
+```
+
+## 常见错误
+
+| 错误 | 为什么有问题 |
+| --- | --- |
+| 所有限流都放在 Nginx | Nginx 缺少业务上下文 |
+| 所有限流都放在应用 | 明显浪费会先进入应用才被拒绝 |
+| 只使用 IP 限制 | 共享网络可能导致误伤 |
+| 只使用用户限制 | 未认证滥用仍然会打到应用 |
+| 使用应用内存 counter | 多实例部署时限制会失准 |
+| 不监控被拒绝流量 | 无法判断限制是否正确 |
+| 把限流只当安全功能 | 它也是资源和成本控制 |
+
+真实系统的大多数错误，都来自于试图用一层解决所有问题。
+
+Nginx 和应用代码应该合作，而不是竞争。
+
+## 实用实现顺序
+
+给系统加入限流时，应该从最便宜、最清楚的保护开始。
+
+<CardGrid columns={2}>
+  <InfoCard title="1. 先加 Nginx Route 限制">
+    先保护登录、搜索、上传和公开 API，用保守的 IP 限制挡明显过量流量。
+  </InfoCard>
+
+  <InfoCard title="2. 返回清楚状态码">
+    API 被拒绝时使用 `429 Too Many Requests`，让客户端知道失败原因。
+  </InfoCard>
+
+  <InfoCard title="3. 加 Redis 应用限流">
+    使用共享 Redis counter 做用户、API key、租户和套餐限制。
+  </InfoCard>
+
+  <InfoCard title="4. 拆分昂贵行为">
+    不要所有行为共用一个 quota。搜索、上传、生成、写入型操作应该拆开。
+  </InfoCard>
+
+  <InfoCard title="5. 监控误伤">
+    观察限制挡住的是滥用、坏客户端，还是共享网络后的正常用户。
+  </InfoCard>
+
+  <InfoCard title="6. 根据成本调整">
+    昂贵 endpoint 通常应该比便宜读接口更严格。
+  </InfoCard>
+</CardGrid>
+
+目标不是创建最严格的系统。目标是在不破坏正常使用的前提下，减少浪费。
+
+## 核心原则
+
+限流应该同时存在于 Nginx 和应用里，但它们存在的原因不同。
+
+Nginx 负责在应用消耗资源之前做粗粒度流量控制。应用负责在系统知道用户、账号、API key、租户或套餐之后，执行精确业务规则。
+
+正确设计不是二选一，而是分层。
+
+</Lang>

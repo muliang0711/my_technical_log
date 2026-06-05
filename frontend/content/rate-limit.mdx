@@ -1,0 +1,781 @@
+---
+title: "Rate Limiting with Nginx"
+category: "Software Development"
+createdAt: "2026-06-05"
+summary: "A practical explanation of how Nginx rate limiting protects backend applications by controlling request frequency before traffic reaches application code."
+readTime: "9 min read"
+tags:
+  - "Backend"
+  - "HTTP"
+  - "Node.js"
+  - "System Design"
+featured: false
+series:
+  title: "Traffic Control"
+  slug: "traffic-control"
+  order: 2
+---
+
+<Lang lang="en">
+
+Rate limiting is one of the simplest ways to protect a backend system from excessive traffic. Instead of allowing every request to enter the application, Nginx can control request frequency at the traffic boundary and reject excessive requests before they consume application resources.
+
+## Short Answer
+
+Rate limiting means controlling how many requests a client can make within a specific period.
+
+For example:
+
+```text
+Allow each IP address to send 10 requests per second.
+Reject or delay requests that exceed that limit.
+```
+
+In Nginx, rate limiting is commonly done with two directives:
+
+```text
+limit_req_zone
+limit_req
+```
+
+The basic flow looks like this:
+
+```text
+Client
+  ↓
+Nginx rate limit check
+  ↓
+Allowed request enters application
+  ↓
+Excessive request is delayed or rejected
+```
+
+The main value is simple: the application does not need to spend CPU, memory, database connections, or external API calls on traffic that should have been rejected earlier.
+
+## What Rate Limiting Actually Solves
+
+Rate limiting does not directly make slow code faster.
+
+It solves a different problem: preventing one source of traffic from consuming too much system capacity.
+
+Common examples include:
+
+- A bot repeatedly hitting the login endpoint.
+- A frontend bug sending the same request in a loop.
+- A scraper loading product pages too aggressively.
+- A user refreshing a search endpoint too frequently.
+- A public API client exceeding reasonable usage.
+- A small attack trying to exhaust application workers.
+
+Without rate limiting, every request is treated as valid work.
+
+With rate limiting, the system can say:
+
+```text
+This request may be syntactically valid, but the request frequency is too high.
+```
+
+That distinction matters. Rate limiting is not only a security feature. It is also a resource management feature.
+
+## Why Nginx Is a Good Place to Apply It
+
+Rate limiting can be implemented inside application code.
+
+For example, a Node.js API can use middleware and Redis to track request counts per user or IP address.
+
+That works, but the request has already entered the application process.
+
+Nginx rate limiting is useful because it happens before the application starts doing work.
+
+| Limit Location | What Happens |
+| --- | --- |
+| Nginx | Request can be rejected before application code runs |
+| Application middleware | Request enters the application before being rejected |
+| Database-backed limit | Request may consume application and database resources |
+| External service limit | Request may already be expensive before rejection |
+
+This does not mean Nginx should handle every kind of limit.
+
+A practical system often uses layered limits:
+
+<CardGrid columns={2}>
+  <InfoCard title="Nginx Limit">
+    Good for cheap IP-based or route-based limits before the request reaches application code.
+  </InfoCard>
+
+  <InfoCard title="Application Limit">
+    Good for user-based, tenant-based, subscription-based, or API-key-based limits.
+  </InfoCard>
+
+  <InfoCard title="Database Constraint">
+    Good for protecting data integrity, but not ideal for general traffic control.
+  </InfoCard>
+
+  <InfoCard title="Queue Control">
+    Good for smoothing background jobs, async tasks, and expensive non-HTTP work.
+  </InfoCard>
+</CardGrid>
+
+Nginx is usually the first gate. The application handles limits that require business context.
+
+## Basic Nginx Rate Limit Configuration
+
+Nginx rate limiting usually has two parts.
+
+First, define a shared memory zone for tracking request state. Then apply that zone to a specific route.
+
+Place this inside the `http` block to create an IP-based rate limit zone:
+
+```text
+http {
+    limit_req_zone $binary_remote_addr zone=api_limit:10m rate=10r/s;
+
+    server {
+        listen 80;
+        server_name example.com;
+
+        location /api/ {
+            limit_req zone=api_limit burst=20 nodelay;
+
+            proxy_pass http://localhost:3000;
+        }
+    }
+}
+```
+
+This configuration means:
+
+- `$binary_remote_addr` uses the client IP as the limit key.
+- `zone=api_limit:10m` creates a shared memory zone named `api_limit`.
+- `rate=10r/s` allows an average of 10 requests per second per key.
+- `limit_req zone=api_limit` applies the rule to `/api/`.
+- `burst=20` allows short traffic spikes above the average rate.
+- `nodelay` rejects excessive requests immediately instead of silently queueing them.
+
+The backend application only receives requests that pass this Nginx rule.
+
+## Understanding Rate, Burst, and Nodelay
+
+The most important part of Nginx rate limiting is understanding the difference between `rate`, `burst`, and `nodelay`.
+
+| Setting | Meaning | Practical Effect |
+| --- | --- | --- |
+| `rate=10r/s` | Average allowed request rate | Controls normal flow |
+| `burst=20` | Temporary extra capacity | Allows short spikes |
+| `nodelay` | Do not slowly queue extra requests | Rejects excessive traffic faster |
+
+A common mistake is thinking `burst` means the client can always send extra requests freely.
+
+A better understanding is:
+
+```text
+rate = normal allowed speed
+burst = short-term tolerance
+nodelay = reject excess quickly instead of hiding it in a queue
+```
+
+Without `burst`, normal traffic spikes may be rejected too aggressively.
+
+With a very large `burst`, abusive clients may still push too much traffic into the backend.
+
+Without `nodelay`, Nginx may delay excessive requests instead of rejecting them immediately. That can hide pressure and make latency harder to understand.
+
+For most APIs, a practical starting point is:
+
+```text
+Set rate based on safe average traffic.
+Set burst based on acceptable short spikes.
+Use nodelay when you prefer clear rejection over hidden queueing.
+```
+
+The exact numbers should be based on endpoint cost, not only user experience.
+
+## Route-Level Rate Limiting Strategy
+
+Not every endpoint should have the same rate limit.
+
+A cheap endpoint and an expensive endpoint create different pressure on the system.
+
+| Endpoint Type | Example | Limit Direction |
+| --- | --- | --- |
+| Static content | `/docs` | Higher limit |
+| Product listing | `/api/products` | Medium limit |
+| Search endpoint | `/api/search` | Lower limit |
+| Login endpoint | `/api/login` | Strict limit |
+| Payment endpoint | `/api/payment` | Strict and business-aware |
+| File upload | `/api/upload` | Strict size and frequency limits |
+
+The more expensive or sensitive the endpoint is, the more careful the limit should be.
+
+For example, login should usually be stricter than a normal product listing endpoint.
+
+Place this inside the `http` block to apply different limits to general API traffic and login traffic:
+
+```text
+http {
+    limit_req_zone $binary_remote_addr zone=general_api:10m rate=20r/s;
+    limit_req_zone $binary_remote_addr zone=login_api:10m rate=5r/m;
+
+    server {
+        listen 80;
+        server_name example.com;
+
+        location /api/ {
+            limit_req zone=general_api burst=40 nodelay;
+            proxy_pass http://localhost:3000;
+        }
+
+        location /api/login {
+            limit_req zone=login_api burst=5 nodelay;
+            proxy_pass http://localhost:3000;
+        }
+    }
+}
+```
+
+This makes `/api/login` stricter than the general API.
+
+That is usually reasonable because login endpoints are commonly abused and often connected to authentication, password checks, session creation, and security monitoring.
+
+## How to Confirm the Limit Works
+
+After changing Nginx configuration, validate the syntax before reloading.
+
+Run this on the Nginx server to check whether the configuration is valid:
+
+```bash
+sudo nginx -t
+```
+
+This should reveal syntax errors, invalid directives, or missing configuration files.
+
+Run this on the Nginx server to reload the valid configuration without stopping the service:
+
+```bash
+sudo systemctl reload nginx
+```
+
+This applies the new rate limit rules.
+
+To test the rule, send repeated requests to a limited endpoint.
+
+Run this from your local terminal to send many requests quickly to the target endpoint:
+
+```bash
+for i in {1..30}; do curl -i http://example.com/api/login; done
+```
+
+If the limit is active, some responses may look like this:
+
+```text
+HTTP/1.1 503 Service Temporarily Unavailable
+```
+
+By default, Nginx may return `503` for rate-limited requests.
+
+For APIs, `429 Too Many Requests` is usually clearer.
+
+Place this in the relevant Nginx context to return `429` for rate-limited requests:
+
+```text
+limit_req_status 429;
+```
+
+After that, excessive requests should return:
+
+```text
+HTTP/1.1 429 Too Many Requests
+```
+
+This makes the rejection easier for API clients to understand.
+
+## Production Concerns
+
+Rate limiting looks simple, but production traffic has edge cases.
+
+<CardGrid columns={2}>
+  <InfoCard title="Real Client IP">
+    If Nginx is behind a load balancer, CDN, or reverse proxy, `$remote_addr` may be the proxy IP instead of the real client IP.
+  </InfoCard>
+
+  <InfoCard title="Shared Network NAT">
+    Many users may share one public IP address. A strict IP-based limit can accidentally punish normal users.
+  </InfoCard>
+
+  <InfoCard title="Endpoint Cost">
+    Search, upload, login, and payment endpoints should not blindly share the same limit.
+  </InfoCard>
+
+  <InfoCard title="Business Context">
+    Nginx is good for IP and route limits. User plan, tenant, subscription, or API-key limits usually belong in application logic.
+  </InfoCard>
+</CardGrid>
+
+The dangerous mistake is treating rate limiting as one global number.
+
+A useful limit should match the traffic risk, endpoint cost, and user behavior.
+
+## Common Mistakes
+
+| Mistake | Why It Is a Problem |
+| --- | --- |
+| One global limit for the whole site | Cheap and expensive endpoints need different policies |
+| Only limiting inside application code | Wasteful traffic still enters the application process |
+| Very strict IP limits | Shared networks may cause false positives |
+| Very large burst values | Abusive traffic may still reach the backend |
+| No monitoring | You cannot tell whether the rule is helping or hurting |
+| Returning only `503` for APIs | Clients may not understand that the request was rate limited |
+
+Rate limiting is not a one-time setup.
+
+It should be deployed carefully, monitored, and adjusted after observing real traffic.
+
+## What to Monitor
+
+A rate limit without monitoring can create silent problems.
+
+You need to know whether it is blocking abusive traffic, broken clients, or normal users.
+
+Useful signals include:
+
+- Count of `429` responses.
+- Top IPs hitting rate limits.
+- Top endpoints hitting rate limits.
+- Application CPU before and after enabling the limit.
+- Database load before and after enabling the limit.
+- Error rate after deployment.
+- User complaints after deployment.
+
+Run this on the Nginx server to inspect recent requests rejected with `429`:
+
+```bash
+sudo grep ' 429 ' /var/log/nginx/access.log | tail -n 20
+```
+
+This should reveal recent rate-limited requests.
+
+If the same IP appears repeatedly, it may be a bot, scraper, broken frontend, API misuse, or a shared network.
+
+The log does not prove abuse by itself. It gives a direction for investigation.
+
+## A Practical Rollout Workflow
+
+A good rollout avoids both extremes: no protection and overblocking.
+
+<CardGrid columns={2}>
+  <InfoCard title="1. Start with Expensive Routes">
+    Prioritize login, search, upload, checkout, report generation, and public API endpoints.
+  </InfoCard>
+
+  <InfoCard title="2. Use Conservative Limits First">
+    The first version should block obvious excess, not aggressively punish normal usage.
+  </InfoCard>
+
+  <InfoCard title="3. Return 429">
+    Use `429 Too Many Requests` for APIs so clients receive a clear signal.
+  </InfoCard>
+
+  <InfoCard title="4. Monitor Rejections">
+    Check whether rejected traffic is mostly abusive, accidental, or normal user traffic.
+  </InfoCard>
+
+  <InfoCard title="5. Split Policies">
+    Separate general API, login, search, upload, and payment limits instead of using one global rule.
+  </InfoCard>
+
+  <InfoCard title="6. Add Application-Level Limits">
+    Use application logic for user-based, tenant-based, plan-based, or API-key-based enforcement.
+  </InfoCard>
+</CardGrid>
+
+This workflow keeps the system safer because it adds protection without assuming the first number is correct.
+
+## The Main Principle
+
+Rate limiting is not mainly about blocking users. It is about bounding resource consumption.
+
+Nginx rate limiting is valuable because it rejects excessive traffic before the request reaches expensive application code. Use it as the first traffic-control layer, then add application-level limits when the rule needs business context.
+
+</Lang>
+
+<Lang lang="zh">
+
+限流是保护后端系统最简单的方式之一。它的重点不是让慢代码变快，而是在请求进入应用之前，先控制请求频率，避免每个请求都消耗应用资源。
+
+## 简短答案
+
+限流的意思是：控制一个客户端在指定时间内最多可以发送多少请求。
+
+例如：
+
+```text
+每个 IP 每秒最多允许 10 个请求。
+超过限制的请求会被拒绝或延迟。
+```
+
+在 Nginx 里，限流通常使用两个 directive：
+
+```text
+limit_req_zone
+limit_req
+```
+
+基本流程是：
+
+```text
+Client
+  ↓
+Nginx rate limit check
+  ↓
+允许的请求进入应用
+  ↓
+过量请求被延迟或拒绝
+```
+
+它的主要价值很直接：应用不需要为应该被提前拒绝的流量消耗 CPU、内存、数据库连接或外部 API 调用。
+
+## 限流实际解决什么问题
+
+限流不会直接让慢代码变快。
+
+它解决的是另一个问题：防止某个流量来源消耗过多系统容量。
+
+常见例子包括：
+
+- bot 一直打登录接口。
+- 前端 bug 导致同一个请求循环发送。
+- 爬虫过度访问商品页面。
+- 用户频繁刷新搜索接口。
+- 公开 API 客户端超过合理使用量。
+- 小规模攻击试图耗尽应用 worker。
+
+没有限流时，每个请求都会被当成正常工作处理。
+
+有限流时，系统可以做出更准确的判断：
+
+```text
+这个请求格式上可能是合法的，但请求频率太高。
+```
+
+这个区别很重要。限流不只是安全功能，它也是资源管理功能。
+
+## 为什么适合在 Nginx 做限流
+
+限流也可以写在应用代码里。
+
+例如，Node.js API 可以用 middleware 和 Redis 来记录每个用户或 IP 的请求次数。
+
+这个方法可行，但请求已经进入应用进程了。
+
+Nginx 限流的价值在于，它发生在应用开始工作之前。
+
+| 限流位置 | 发生了什么 |
+| --- | --- |
+| Nginx | 请求可以在应用代码运行前被拒绝 |
+| 应用 middleware | 请求进入应用后才被拒绝 |
+| 数据库型限流 | 可能已经消耗应用和数据库资源 |
+| 外部服务型限制 | 请求可能已经产生昂贵成本 |
+
+这不代表 Nginx 应该处理所有类型的限制。
+
+一个实用系统通常会使用分层限制：
+
+<CardGrid columns={2}>
+  <InfoCard title="Nginx 限流">
+    适合做便宜的 IP 级别或路由级别限制，让请求尽量不要进入应用代码。
+  </InfoCard>
+
+  <InfoCard title="应用限流">
+    适合处理用户、租户、套餐、API key 等需要业务上下文的限制。
+  </InfoCard>
+
+  <InfoCard title="数据库约束">
+    适合保护数据完整性，但不适合做通用流量控制。
+  </InfoCard>
+
+  <InfoCard title="队列控制">
+    适合平滑后台任务、异步任务和昂贵的非 HTTP 工作。
+  </InfoCard>
+</CardGrid>
+
+Nginx 通常负责第一道门。应用负责需要业务语义的限制。
+
+## 基础 Nginx 限流配置
+
+Nginx 限流通常分成两个部分。
+
+第一步是定义一个共享内存区，用来记录请求状态。第二步是把这个 zone 应用到具体路由。
+
+把下面配置放在 `http` block 中，可以创建一个基于 IP 的限流 zone：
+
+```text
+http {
+    limit_req_zone $binary_remote_addr zone=api_limit:10m rate=10r/s;
+
+    server {
+        listen 80;
+        server_name example.com;
+
+        location /api/ {
+            limit_req zone=api_limit burst=20 nodelay;
+
+            proxy_pass http://localhost:3000;
+        }
+    }
+}
+```
+
+这段配置的意思是：
+
+- `$binary_remote_addr` 使用客户端 IP 作为限流 key。
+- `zone=api_limit:10m` 创建一个名为 `api_limit` 的共享内存区。
+- `rate=10r/s` 表示每个 key 平均每秒允许 10 个请求。
+- `limit_req zone=api_limit` 把规则应用到 `/api/`。
+- `burst=20` 允许短时间超过平均速率的小流量尖峰。
+- `nodelay` 表示过量请求会立即被拒绝，而不是被静默排队。
+
+后端应用只会收到通过 Nginx 规则的请求。
+
+## 理解 Rate、Burst 和 Nodelay
+
+Nginx 限流里最重要的是理解 `rate`、`burst` 和 `nodelay` 的区别。
+
+| 设置 | 意思 | 实际效果 |
+| --- | --- | --- |
+| `rate=10r/s` | 平均允许请求速率 | 控制正常流量 |
+| `burst=20` | 临时额外容量 | 允许短时间尖峰 |
+| `nodelay` | 不把额外请求慢慢排队 | 更快拒绝过量流量 |
+
+常见误解是：以为 `burst` 代表客户端永远可以免费发送额外请求。
+
+更准确的理解是：
+
+```text
+rate = 正常允许速度
+burst = 短时间容忍度
+nodelay = 快速拒绝，而不是隐藏成排队
+```
+
+如果没有 `burst`，正常的小流量尖峰可能会被过度拒绝。
+
+如果 `burst` 太大，滥用客户端仍然可能把大量流量推到后端。
+
+如果没有 `nodelay`，Nginx 可能会延迟过量请求，而不是马上拒绝。这样会隐藏系统压力，让延迟更难分析。
+
+对大多数 API 来说，实用起点是：
+
+```text
+根据安全平均流量设置 rate。
+根据可接受的短时间尖峰设置 burst。
+如果你想要明确拒绝，而不是隐藏排队，就使用 nodelay。
+```
+
+具体数值应该根据接口成本来定，而不是只看用户体验。
+
+## 路由级限流策略
+
+不是所有接口都应该使用同一个限流规则。
+
+便宜接口和昂贵接口对系统造成的压力不同。
+
+| 接口类型 | 例子 | 限流方向 |
+| --- | --- | --- |
+| 静态内容 | `/docs` | 可以较宽 |
+| 商品列表 | `/api/products` | 中等限制 |
+| 搜索接口 | `/api/search` | 更低限制 |
+| 登录接口 | `/api/login` | 严格限制 |
+| 支付接口 | `/api/payment` | 严格且需要业务上下文 |
+| 文件上传 | `/api/upload` | 严格控制大小和频率 |
+
+越昂贵、越敏感的接口，越应该谨慎限制。
+
+例如，登录接口通常应该比普通商品列表接口更严格。
+
+把下面配置放在 `http` block 中，可以给普通 API 和登录接口设置不同限制：
+
+```text
+http {
+    limit_req_zone $binary_remote_addr zone=general_api:10m rate=20r/s;
+    limit_req_zone $binary_remote_addr zone=login_api:10m rate=5r/m;
+
+    server {
+        listen 80;
+        server_name example.com;
+
+        location /api/ {
+            limit_req zone=general_api burst=40 nodelay;
+            proxy_pass http://localhost:3000;
+        }
+
+        location /api/login {
+            limit_req zone=login_api burst=5 nodelay;
+            proxy_pass http://localhost:3000;
+        }
+    }
+}
+```
+
+这会让 `/api/login` 比普通 API 更严格。
+
+这通常是合理的，因为登录接口很容易被滥用，而且通常连接到身份验证、密码检查、session 创建和安全监控。
+
+## 如何确认限流生效
+
+修改 Nginx 配置后，应该先检查语法，再 reload。
+
+在 Nginx 服务器上执行下面命令，用来检查配置是否合法：
+
+```bash
+sudo nginx -t
+```
+
+这个命令会暴露语法错误、无效 directive 或缺失配置文件。
+
+在 Nginx 服务器上执行下面命令，用来在不中断服务的情况下重新加载配置：
+
+```bash
+sudo systemctl reload nginx
+```
+
+这个命令会应用新的限流规则。
+
+要测试规则，可以对被限制的 endpoint 连续发送多次请求。
+
+在本机 terminal 执行下面命令，用来快速请求目标接口多次：
+
+```bash
+for i in {1..30}; do curl -i http://example.com/api/login; done
+```
+
+如果限流生效，部分响应可能会像这样：
+
+```text
+HTTP/1.1 503 Service Temporarily Unavailable
+```
+
+默认情况下，Nginx 可能会用 `503` 表示被限流拒绝的请求。
+
+对 API 来说，`429 Too Many Requests` 通常更清楚。
+
+把下面配置放进相关 Nginx context，可以让被限流请求返回 `429`：
+
+```text
+limit_req_status 429;
+```
+
+之后，过量请求应该返回：
+
+```text
+HTTP/1.1 429 Too Many Requests
+```
+
+这样 API 客户端更容易理解拒绝原因。
+
+## 生产环境注意事项
+
+限流看起来简单，但生产流量有很多边界情况。
+
+<CardGrid columns={2}>
+  <InfoCard title="真实客户端 IP">
+    如果 Nginx 前面还有负载均衡、CDN 或反向代理，`$remote_addr` 可能是代理 IP，而不是真实用户 IP。
+  </InfoCard>
+
+  <InfoCard title="共享网络 NAT">
+    很多用户可能共享同一个公网 IP。过严的 IP 限流可能误伤正常用户。
+  </InfoCard>
+
+  <InfoCard title="接口成本">
+    搜索、上传、登录、支付接口不应该盲目共用同一个限制。
+  </InfoCard>
+
+  <InfoCard title="业务上下文">
+    Nginx 适合做 IP 和路由限制。用户套餐、租户、订阅、API key 限制通常应该放在应用逻辑里。
+  </InfoCard>
+</CardGrid>
+
+危险的做法是把限流当成一个全局数字。
+
+有用的限流应该匹配流量风险、接口成本和用户行为。
+
+## 常见错误
+
+| 错误 | 为什么有问题 |
+| --- | --- |
+| 整个网站只用一个全局限制 | 便宜接口和昂贵接口需要不同策略 |
+| 只在应用代码里限流 | 浪费流量仍然会进入应用进程 |
+| IP 限制过严 | 共享网络可能造成误伤 |
+| burst 设置太大 | 滥用流量仍然可能打到后端 |
+| 没有监控 | 无法判断规则是在保护系统还是影响正常用户 |
+| API 只返回 `503` | 客户端可能不理解这是限流问题 |
+
+限流不是一次性配置。
+
+它应该谨慎部署，观察真实流量后再调整。
+
+## 应该监控什么
+
+没有监控的限流可能制造隐性问题。
+
+你需要知道它挡住的是滥用流量、坏掉的客户端，还是正常用户。
+
+有用信号包括：
+
+- `429` 响应数量。
+- 最常触发限流的 IP。
+- 最常触发限流的 endpoint。
+- 启用限流前后的应用 CPU。
+- 启用限流前后的数据库负载。
+- 部署后的错误率。
+- 部署后的用户投诉。
+
+在 Nginx 服务器上执行下面命令，用来查看最近被 `429` 拒绝的请求：
+
+```bash
+sudo grep ' 429 ' /var/log/nginx/access.log | tail -n 20
+```
+
+这个命令会显示最近被限流的请求。
+
+如果同一个 IP 重复出现，它可能是 bot、爬虫、坏掉的前端、API 滥用，也可能只是共享网络。
+
+日志本身不能证明滥用。它只能给你调查方向。
+
+## 实用上线流程
+
+好的上线流程应该避免两个极端：完全没有保护，或者过度拦截。
+
+<CardGrid columns={2}>
+  <InfoCard title="1. 从昂贵接口开始">
+    优先处理登录、搜索、上传、结账、报告生成和公开 API。
+  </InfoCard>
+
+  <InfoCard title="2. 先使用保守限制">
+    第一版应该阻止明显过量流量，而不是激进惩罚正常使用。
+  </InfoCard>
+
+  <InfoCard title="3. 返回 429">
+    API 建议使用 `429 Too Many Requests`，让客户端获得清楚信号。
+  </InfoCard>
+
+  <InfoCard title="4. 监控拒绝情况">
+    检查被拒绝的流量主要是滥用、意外 bug，还是正常用户。
+  </InfoCard>
+
+  <InfoCard title="5. 拆分策略">
+    把普通 API、登录、搜索、上传、支付拆开限制，不要只用一个全局规则。
+  </InfoCard>
+
+  <InfoCard title="6. 加应用层限制">
+    用户、租户、套餐、API key 这类限制，需要应用根据业务上下文执行。
+  </InfoCard>
+</CardGrid>
+
+这个流程更安全，因为它增加了保护，但不假设第一个数字就是正确答案。
+
+## 核心原则
+
+限流的核心不是阻止用户，而是限制资源消耗。
+
+Nginx 限流的价值在于，它可以在请求进入昂贵应用代码之前拒绝过量流量。把它作为第一层流量控制；当规则需要业务上下文时，再加入应用层限流。
+
+</Lang>

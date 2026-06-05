@@ -1,0 +1,1121 @@
+---
+title: "RAG Failure Diagnosis: How to Find Where the Answer Broke"
+category: "Software Development"
+createdAt: "2026-06-05"
+summary: "A practical workflow for identifying whether a RAG failure comes from indexing, retrieval, prompt design, generation, or validation."
+readTime: "12 min read"
+tags:
+  - "AI"
+  - "RAG"
+  - "Debugging"
+  - "System Design"
+featured: false
+series:
+  title: "Building a RAG Customer Support System"
+  slug: "building-rag-customer-support-system"
+  order: 5
+---
+
+<Lang lang="en">
+
+A bad RAG answer does not automatically mean the LLM is bad. The failure may happen before the model receives anything useful. To debug RAG correctly, inspect the pipeline in order: source data, indexing, retrieval, context construction, prompt behavior, answer generation, and validation.
+
+## Short Answer
+
+A RAG failure should be diagnosed by asking one question at each layer:
+
+```text
+Did the correct evidence exist?
+Did retrieval find it?
+Did the prompt send it clearly?
+Did the LLM use it correctly?
+Did validation catch unsupported claims?
+```
+
+If the answer is wrong, do not start by changing the model. First locate the broken stage.
+
+| Failure Layer | Main Question | Common Symptom |
+| --- | --- | --- |
+| Source data | Does the correct document exist? | System cannot answer because knowledge is missing |
+| Indexing | Was the document converted into useful chunks? | Correct policy exists but not in a retrievable shape |
+| Retrieval | Did the correct chunk appear in search results? | Wrong or irrelevant context is returned |
+| Context construction | Was retrieved evidence sent clearly to the LLM? | Correct chunk found but model misses the key rule |
+| Prompt and generation | Did the model follow the evidence? | Model overstates, invents, or ignores conditions |
+| Validation | Did the system catch unsupported claims? | Wrong answer reaches the user |
+| Observability | Can we inspect each step? | Failure cannot be reproduced or explained |
+
+The practical debugging rule is:
+
+```text
+Do not debug RAG from the final answer backward by guessing.
+Debug it from the source data forward by evidence.
+```
+
+## What a RAG Failure Looks Like
+
+A RAG system can fail in different ways.
+
+Example user question:
+
+```text
+Can I return an opened item after three days?
+```
+
+Bad final answer:
+
+```text
+Yes, opened items can be returned within seven days.
+```
+
+This answer may be wrong if the actual policy says:
+
+```text
+Opened items can be returned within seven days only if the product is defective.
+Non-defective opened items are not eligible for return.
+```
+
+The failure may come from several places:
+
+| Possible Cause | What Happened |
+| --- | --- |
+| Missing source | The return policy was never added to the knowledge base |
+| Bad chunking | The condition "only if defective" was separated from the rule |
+| Bad retrieval | The retriever returned a generic return policy instead |
+| Bad context formatting | The model received the right chunk but in a confusing structure |
+| Bad prompt | The model was not told to preserve conditions |
+| Bad generation | The model ignored the exception |
+| Bad validation | The unsupported final answer was not blocked |
+
+The same wrong answer can have different root causes. That is why final-answer inspection alone is not enough.
+
+## Step 1: Check Whether the Correct Source Exists
+
+Start with the raw source data.
+
+Before checking embeddings, vector search, prompt design, or LLM behavior, confirm whether the correct document exists in the system.
+
+Ask:
+
+| Check | What It Reveals |
+| --- | --- |
+| Is the policy document present? | Knowledge coverage |
+| Is it the current version? | Freshness |
+| Is it approved for customer-facing use? | Source trust |
+| Does it cover the user's product, region, and language? | Scope correctness |
+| Does it contain the exact answer? | Evidence availability |
+
+If the source does not exist, the failure is not retrieval or generation. The system cannot retrieve evidence that was never added.
+
+Example:
+
+```text
+User asks:
+Can I get same-day store replacement?
+
+Knowledge base contains:
+Warranty duration.
+Proof-of-purchase requirement.
+Battery failure coverage.
+
+Knowledge base does not contain:
+Store replacement policy.
+Same-day replacement rule.
+```
+
+In this case, the correct behavior is not to tune the prompt until it says yes. The correct behavior is to return a missing-evidence answer or add the missing policy document.
+
+<CardGrid columns={2}>
+  <InfoCard title="Failure Signal">
+    The system consistently fails a question because the required policy does not exist anywhere in the source documents.
+  </InfoCard>
+
+  <InfoCard title="Fix Direction">
+    Add the missing source, update stale policy, or route the question to a human-support fallback.
+  </InfoCard>
+</CardGrid>
+
+A source-data failure is a knowledge coverage problem.
+
+## Step 2: Check Whether Indexing Preserved the Evidence
+
+If the correct source exists, inspect the indexed chunks.
+
+The source may contain the answer, but indexing may destroy its usefulness.
+
+Common indexing failures:
+
+| Indexing Failure | Effect |
+| --- | --- |
+| Chunk too small | Rule separated from condition |
+| Chunk too large | Important rule buried in noise |
+| Bad PDF extraction | Text becomes broken or unreadable |
+| Missing heading | Chunk loses topic context |
+| Missing metadata | Retrieval cannot filter by product or region |
+| Old and new versions both active | Search returns conflicting truth |
+| Table flattened badly | Eligibility conditions are lost |
+
+Example source text:
+
+```text
+Opened items can be returned within seven days only if defective.
+Non-defective opened items are not eligible for return.
+```
+
+Bad indexed chunks:
+
+```text
+Chunk 1:
+Opened items can be returned within seven days.
+
+Chunk 2:
+Only if defective. Non-defective opened items are not eligible for return.
+```
+
+If retrieval returns only Chunk 1, the LLM may produce a wrong answer.
+
+Better indexed chunk:
+
+```text
+Title: Return Policy - Opened Items
+Region: Malaysia
+Status: active
+
+Opened items can be returned within seven days only if defective.
+Non-defective opened items are not eligible for return.
+```
+
+Indexing diagnosis should ask:
+
+| Question | Good Sign |
+| --- | --- |
+| Is the answer contained in one usable chunk? | The rule and exception stay together |
+| Does the chunk include a heading? | The model can understand context |
+| Does the chunk have correct metadata? | Retrieval can filter correctly |
+| Is the chunk active? | Old versions are excluded |
+| Is the extracted text clean? | No layout or PDF noise dominates |
+
+If the indexed chunk is broken, do not fix retrieval first. Fix the index.
+
+## Step 3: Check Whether Retrieval Found the Right Chunk
+
+If indexing is correct, inspect retrieval.
+
+For each test question, log the retrieved chunks before generation.
+
+A useful retrieval debug log looks like this:
+
+```text
+Question:
+Can I return an opened item after three days?
+
+Expected evidence:
+Active Malaysia return policy, opened-item section.
+
+Retrieved chunks:
+1. Active Malaysia refund timeline
+2. Generic customer satisfaction FAQ
+3. Deprecated Singapore return policy
+4. Active Malaysia return policy, opened-item section
+```
+
+This retrieval is weak. The correct chunk appears, but it is ranked too low. If the final prompt only includes the top three chunks, the model never sees the right evidence.
+
+Retrieval failures usually fall into these categories:
+
+| Retrieval Failure | Symptom | Fix Direction |
+| --- | --- | --- |
+| Low recall | Correct chunk never appears | Improve query, embeddings, hybrid search, or chunking |
+| Bad ranking | Correct chunk appears too low | Add reranking or improve scoring |
+| Bad filtering | Wrong region or version appears | Fix metadata filters |
+| Too much noise | Many irrelevant chunks returned | Reduce top-k or improve precision |
+| Too narrow search | Missing related evidence | Increase candidates or decompose query |
+| Exact term miss | Error code or SKU not found | Add keyword or hybrid search |
+
+Retrieval diagnosis should inspect both candidate results and final selected context.
+
+The retriever may find the correct chunk at rank 12, but if the system only sends rank 1 to 4 into the prompt, the LLM still cannot use it.
+
+<CardGrid columns={2}>
+  <InfoCard title="Failure Signal">
+    The answer exists in the index, but the retrieved context does not include it or ranks it too low.
+  </InfoCard>
+
+  <InfoCard title="Fix Direction">
+    Improve filters, hybrid search, top-k, reranking, callback retrieval, or query decomposition.
+  </InfoCard>
+</CardGrid>
+
+A retrieval failure is an evidence selection problem.
+
+## Step 4: Check Whether Context Construction Is Clear
+
+Sometimes retrieval is correct, but the LLM still fails because the retrieved context is poorly packaged.
+
+Example bad context:
+
+```text
+opened items seven days defective not eligible refund active my policy old policy return warranty timeline
+```
+
+This context contains useful words, but it is not structured. The model may mix rules, ignore status, or misread the condition.
+
+Better context:
+
+```text
+[Source 1]
+Title: Return Policy - Opened Items
+Region: Malaysia
+Status: active
+Section: Opened Item Eligibility
+
+Opened items can be returned within seven days only if the product is defective.
+Non-defective opened items are not eligible for return.
+```
+
+Context construction diagnosis should ask:
+
+| Question | Why It Matters |
+| --- | --- |
+| Are chunks clearly separated? | Prevents rule mixing |
+| Is source title included? | Helps interpret evidence |
+| Is section heading included? | Preserves local meaning |
+| Is status included? | Prevents deprecated content use |
+| Is region or product shown? | Prevents wrong-scope answers |
+| Is there too much context? | Reduces distraction |
+| Is there too little context? | Causes missing conditions |
+
+The model should not receive a pile of text without boundaries.
+
+A practical context block should include:
+
+```text
+[Source number]
+Title:
+Document type:
+Product:
+Region:
+Status:
+Section:
+Content:
+```
+
+If retrieval is correct but the model misses obvious evidence, inspect context formatting before changing models.
+
+## Step 5: Check Whether the Prompt Controls the Model
+
+If the correct context is sent clearly, inspect the prompt.
+
+The prompt should tell the model:
+
+- Use only the retrieved context.
+- Preserve conditions and exceptions.
+- Do not invent policy.
+- State when evidence is missing.
+- Give a direct answer first.
+- Mention sources used.
+
+Weak prompt:
+
+```text
+Answer the user helpfully.
+```
+
+Stronger prompt:
+
+```text
+Answer the user's question using only the support context.
+Every policy claim must be supported by the context.
+If the context does not answer the question, say what information is missing.
+Preserve conditions such as "only if", "unless", "requires", and "may".
+Do not promise refunds, replacements, compensation, or timelines unless explicitly stated.
+```
+
+Prompt failures usually look like this:
+
+| Prompt Failure | Symptom |
+| --- | --- |
+| No context-only rule | Model uses general knowledge |
+| No refusal rule | Model guesses missing policy |
+| No condition rule | Model drops exceptions |
+| No business guardrail | Model promises refund or replacement |
+| No output format | Answer becomes inconsistent |
+| No source rule | Hard to verify grounding |
+
+Prompt diagnosis should use fixed context.
+
+That means testing the LLM with the correct retrieved context manually. If the model still answers badly when the evidence is already correct, the failure is in the prompt or generation layer.
+
+## Step 6: Check Whether the LLM Overstated the Evidence
+
+Even with a good prompt, the model may overstate.
+
+Example context:
+
+```text
+Charging failure may be covered under warranty if no water damage, physical damage, or unauthorized repair is found.
+```
+
+Bad answer:
+
+```text
+Your charging failure is definitely covered under warranty.
+```
+
+The model changed "may be covered" into "definitely covered". That is an evidence-strength error.
+
+Common generation failures:
+
+| Generation Failure | Example |
+| --- | --- |
+| Overstatement | "May be eligible" becomes "approved" |
+| Unsupported detail | Adds a timeline not in context |
+| Condition loss | Drops "only if defective" |
+| Source mixing | Combines two policies incorrectly |
+| Wrong scope | Applies Malaysia policy to Singapore |
+| False certainty | Answers when evidence is incomplete |
+
+Generation diagnosis should compare each claim against the retrieved context.
+
+A practical manual check:
+
+```text
+Answer claim:
+Opened items can be returned within seven days.
+
+Context:
+Opened items can be returned within seven days only if defective.
+
+Diagnosis:
+Unsupported overgeneralization. The answer dropped the condition.
+```
+
+The fix may be:
+
+- Better grounding instruction.
+- More structured output.
+- Lower temperature.
+- Answer validation.
+- Post-generation revision.
+- Refusal for missing evidence.
+
+The LLM layer should explain evidence. It should not strengthen weak evidence.
+
+## Step 7: Check Whether Validation Caught the Error
+
+Validation is the last defensive layer.
+
+Even if generation produces an unsupported answer, validation should catch it before the user sees it.
+
+Validation can check:
+
+| Validation Check | Detects |
+| --- | --- |
+| Claim supported by context | Hallucinated policy |
+| Correct product and region | Scope error |
+| Conditions preserved | Oversimplification |
+| Missing evidence acknowledged | False certainty |
+| No unauthorized promise | Business risk |
+| Source included | Weak traceability |
+
+Example validation failure:
+
+```text
+Generated answer:
+Yes, you can return opened items within seven days.
+
+Retrieved context:
+Opened items can be returned within seven days only if defective.
+Non-defective opened items are not eligible for return.
+
+Validation result:
+Fail. The answer removes the defective-item condition.
+```
+
+The system can respond by revising the answer:
+
+```text
+Opened items can be returned within seven days only if the product is defective. Non-defective opened items are not eligible for return.
+```
+
+<CardGrid columns={2}>
+  <InfoCard title="Failure Signal">
+    The final answer contains a claim that is not supported by retrieved context, but the system still sends it to the user.
+  </InfoCard>
+
+  <InfoCard title="Fix Direction">
+    Add claim checking, source checking, condition checking, or a second-pass answer revision step.
+  </InfoCard>
+</CardGrid>
+
+Validation does not replace good indexing, retrieval, or prompting. It is the final safety check.
+
+## A Practical Failure Diagnosis Workflow
+
+Use a fixed debugging order. Do not jump randomly between prompt changes, vector database settings, and model changes.
+
+<CardGrid columns={2}>
+  <InfoCard title="1. Reproduce the Bad Answer">
+    Save the user question, final answer, retrieved chunks, prompt, and model settings. If you cannot reproduce it, you cannot diagnose it reliably.
+  </InfoCard>
+
+  <InfoCard title="2. Check Source Coverage">
+    Confirm that the correct policy or document exists, is current, and is approved for the answer scope.
+  </InfoCard>
+
+  <InfoCard title="3. Inspect Indexed Chunks">
+    Check whether the answer, conditions, headings, metadata, and version status survived indexing.
+  </InfoCard>
+
+  <InfoCard title="4. Inspect Retrieval Results">
+    Verify whether the correct chunk appears, where it ranks, and whether wrong chunks are mixed in.
+  </InfoCard>
+
+  <InfoCard title="5. Inspect Final Context">
+    Confirm what context was actually sent to the model, not only what retrieval initially found.
+  </InfoCard>
+
+  <InfoCard title="6. Test the Prompt With Fixed Context">
+    Give the model the correct context manually. If it still fails, the issue is in prompt or generation behavior.
+  </InfoCard>
+
+  <InfoCard title="7. Compare Claims Against Evidence">
+    Mark every answer claim as supported, unsupported, overstated, or missing a condition.
+  </InfoCard>
+
+  <InfoCard title="8. Add Validation or Guardrails">
+    If unsupported claims reach users, add checks before final response delivery.
+  </InfoCard>
+</CardGrid>
+
+This workflow separates pipeline bugs from model behavior.
+
+## Failure Map
+
+Use this map to identify the likely broken layer.
+
+| Observation | Likely Failure Point | First Fix |
+| --- | --- | --- |
+| Correct policy does not exist | Source data | Add or update document |
+| Policy exists but chunk is broken | Indexing | Fix chunking or extraction |
+| Correct chunk never retrieved | Retrieval recall | Improve query, embedding, hybrid search |
+| Correct chunk retrieved but ranked low | Retrieval ranking | Add reranking or scoring changes |
+| Correct chunk found but not in final prompt | Context selection | Adjust top-k and final context builder |
+| Correct context sent but answer ignores it | Prompt or generation | Strengthen grounding rules |
+| Answer drops exception | Prompt or generation | Preserve condition words |
+| Answer adds unsupported promise | Guardrail failure | Add business constraints |
+| Wrong answer passes final step | Validation failure | Add claim-level validation |
+| Cannot inspect what happened | Observability failure | Add logs and trace IDs |
+
+The map prevents one common mistake: treating every failure as a prompt problem.
+
+Prompt changes are useful only after you know the right evidence reached the model.
+
+## What to Log for Debugging
+
+A RAG system should log enough information to explain a bad answer.
+
+Useful debug fields:
+
+| Log Field | Purpose |
+| --- | --- |
+| `trace_id` | Connects all steps for one request |
+| `user_question` | Shows original input |
+| `query_rewrite` | Shows modified query if used |
+| `filters_applied` | Shows product, region, status, and type filters |
+| `retrieved_candidates` | Shows raw retrieval results |
+| `reranked_results` | Shows final ranking |
+| `final_context` | Shows what the model received |
+| `prompt_template_version` | Shows which prompt was used |
+| `model_name` | Shows generation model |
+| `temperature` | Shows generation randomness |
+| `final_answer` | Shows user-facing output |
+| `validation_result` | Shows whether claims passed checks |
+
+A minimal debug trace:
+
+```text
+trace_id: rag-2026-06-05-001
+question: Can I return an opened item after three days?
+filters: region=MY, status=active, document_type=return_policy
+retrieved_top_3:
+  1. return-policy-my-opened-items
+  2. refund-timeline-my
+  3. generic-return-faq
+final_context:
+  return-policy-my-opened-items
+answer:
+  Opened items can be returned within seven days only if defective.
+validation:
+  pass
+```
+
+Without logs like this, debugging becomes guesswork.
+
+## The Main Principle
+
+A RAG failure is a pipeline failure until proven otherwise.
+
+Do not assume the model is the problem. First check whether the correct evidence exists, whether indexing preserved it, whether retrieval found it, whether the final context contained it, whether the prompt constrained the model, and whether validation caught unsupported claims.
+
+The practical rule is:
+
+```text
+Source -> Index -> Retrieve -> Context -> Prompt -> Generate -> Validate
+```
+
+Debug in that order. The first broken stage is the real failure point.
+
+</Lang>
+
+<Lang lang="zh">
+
+一个错误的 RAG 答案，不代表一定是 LLM 太差。问题可能早在模型收到资料之前就已经发生。正确 debug RAG 的方式，是按 pipeline 顺序检查：source data、indexing、retrieval、context construction、prompt behavior、answer generation 和 validation。
+
+## 简短答案
+
+诊断 RAG failure 时，每一层都问一个问题：
+
+```text
+正确证据是否存在？
+Retrieval 有没有找到它？
+Prompt 有没有清楚地把它送给模型？
+LLM 有没有正确使用它？
+Validation 有没有挡住无依据 claim？
+```
+
+如果答案错了，不要第一步就换模型。先找出是哪一层坏掉。
+
+| Failure Layer | 主要问题 | 常见症状 |
+| --- | --- | --- |
+| Source data | 正确文档是否存在？ | 系统无法回答，因为知识缺失 |
+| Indexing | 文档是否被转换成可用 chunks？ | 正确政策存在，但形状不可检索 |
+| Retrieval | 正确 chunk 有没有出现在搜索结果？ | 返回错误或无关上下文 |
+| Context construction | 证据有没有清楚送给 LLM？ | 找到了正确 chunk，但模型没抓到关键规则 |
+| Prompt and generation | 模型有没有遵守证据？ | 模型夸大、发明或忽略条件 |
+| Validation | 系统有没有抓出无依据 claim？ | 错误答案直接发给用户 |
+| Observability | 每一步能不能被检查？ | 问题无法复现，也无法解释 |
+
+实用 debug 规则是：
+
+```text
+不要只从最终答案倒推乱猜。
+要从 source data 开始，按证据往后检查。
+```
+
+## RAG Failure 长什么样
+
+RAG 系统可能用不同方式失败。
+
+用户问题例子：
+
+```text
+拆封商品三天后还可以退货吗？
+```
+
+错误最终答案：
+
+```text
+可以，拆封商品七天内可以退货。
+```
+
+如果真实政策是：
+
+```text
+拆封商品七天内只有在产品有缺陷时才可以退货。
+没有缺陷的拆封商品不符合退货资格。
+```
+
+那么这个答案就是错的。
+
+失败可能来自很多地方：
+
+| 可能原因 | 发生了什么 |
+| --- | --- |
+| Source missing | 退货政策从来没有加入知识库 |
+| Bad chunking | “只有在有缺陷时” 被切到另一个 chunk |
+| Bad retrieval | Retriever 返回了普通退货政策 |
+| Bad context formatting | 模型收到了正确 chunk，但结构混乱 |
+| Bad prompt | Prompt 没要求保留条件 |
+| Bad generation | 模型忽略了例外 |
+| Bad validation | 无依据答案没有被挡下来 |
+
+同一个错误答案，可能有不同 root cause。所以只看 final answer 不够。
+
+## 第一步：检查正确 Source 是否存在
+
+先从原始资料开始。
+
+在检查 embedding、vector search、prompt design 或 LLM 行为之前，先确认系统里有没有正确文档。
+
+需要问：
+
+| 检查 | 揭示什么 |
+| --- | --- |
+| 政策文档是否存在？ | 知识覆盖 |
+| 是否为当前版本？ | 时效性 |
+| 是否允许用于客户回答？ | 来源可信度 |
+| 是否覆盖用户产品、地区和语言？ | 作用范围是否正确 |
+| 是否真的包含答案？ | 证据是否存在 |
+
+如果 source 不存在，这不是 retrieval 或 generation 问题。系统无法检索一个从未加入的证据。
+
+例子：
+
+```text
+用户问：
+可以在门店当天换新吗？
+
+知识库包含：
+保修期限。
+购买证明要求。
+电池故障保修范围。
+
+知识库不包含：
+门店换新政策。
+当天换新规则。
+```
+
+这种情况下，正确做法不是调 prompt 让它回答可以。正确做法是返回证据不足，或补充缺失政策文档。
+
+<CardGrid columns={2}>
+  <InfoCard title="Failure Signal">
+    系统持续无法回答某类问题，因为 source documents 里根本没有对应政策。
+  </InfoCard>
+
+  <InfoCard title="Fix Direction">
+    添加缺失 source、更新旧政策，或把问题交给人工客服 fallback。
+  </InfoCard>
+</CardGrid>
+
+Source-data failure 是知识覆盖问题。
+
+## 第二步：检查 Indexing 有没有保留证据
+
+如果正确 source 存在，就检查 indexed chunks。
+
+Source 里可能有答案，但 indexing 可能破坏了它的可用性。
+
+常见 indexing failures：
+
+| Indexing Failure | 影响 |
+| --- | --- |
+| Chunk 太小 | 规则和条件被拆开 |
+| Chunk 太大 | 重要规则被噪音埋住 |
+| PDF 提取错误 | 文字损坏或难以阅读 |
+| 缺少标题 | Chunk 失去主题上下文 |
+| 缺少 metadata | Retrieval 无法按产品或地区过滤 |
+| 新旧版本都 active | 搜索返回冲突事实 |
+| 表格被错误拉平 | 条件关系丢失 |
+
+Source text 例子：
+
+```text
+拆封商品七天内只有在产品有缺陷时才可以退货。
+没有缺陷的拆封商品不符合退货资格。
+```
+
+坏 indexed chunks：
+
+```text
+Chunk 1:
+拆封商品七天内可以退货。
+
+Chunk 2:
+只有在产品有缺陷时。没有缺陷的拆封商品不符合退货资格。
+```
+
+如果 retrieval 只返回 Chunk 1，LLM 可能会答错。
+
+更好的 indexed chunk：
+
+```text
+Title: Return Policy - Opened Items
+Region: Malaysia
+Status: active
+
+拆封商品七天内只有在产品有缺陷时才可以退货。
+没有缺陷的拆封商品不符合退货资格。
+```
+
+Indexing diagnosis 应该问：
+
+| 问题 | 好的信号 |
+| --- | --- |
+| 答案是否存在于一个可用 chunk 里？ | 规则和例外在一起 |
+| Chunk 是否有 heading？ | 模型能理解上下文 |
+| Chunk 是否有正确 metadata？ | Retrieval 可以正确过滤 |
+| Chunk 是否 active？ | 旧版本被排除 |
+| 提取文字是否干净？ | 没有页面噪音或 PDF 乱码主导内容 |
+
+如果 indexed chunk 本身坏了，不要先修 retrieval。先修 index。
+
+## 第三步：检查 Retrieval 是否找到正确 Chunk
+
+如果 indexing 正确，就检查 retrieval。
+
+对每个测试问题，在 generation 之前记录 retrieved chunks。
+
+有用的 retrieval debug log：
+
+```text
+Question:
+Can I return an opened item after three days?
+
+Expected evidence:
+Active Malaysia return policy, opened-item section.
+
+Retrieved chunks:
+1. Active Malaysia refund timeline
+2. Generic customer satisfaction FAQ
+3. Deprecated Singapore return policy
+4. Active Malaysia return policy, opened-item section
+```
+
+这个 retrieval 偏弱。正确 chunk 出现了，但排名太低。如果 final prompt 只包含前三个 chunks，模型就看不到正确证据。
+
+Retrieval failures 通常分成这些类型：
+
+| Retrieval Failure | 症状 | 修复方向 |
+| --- | --- | --- |
+| Low recall | 正确 chunk 完全没出现 | 改善 query、embedding、hybrid search 或 chunking |
+| Bad ranking | 正确 chunk 排太低 | 加 reranking 或改 scoring |
+| Bad filtering | 错地区或错版本出现 | 修 metadata filters |
+| Too much noise | 太多无关 chunks | 降低 top-k 或提高 precision |
+| Too narrow search | 漏掉相关证据 | 增加 candidates 或拆 query |
+| Exact term miss | 错误码或 SKU 找不到 | 加 keyword 或 hybrid search |
+
+Retrieval diagnosis 要同时检查 candidate results 和 final selected context。
+
+Retriever 可能在 rank 12 找到正确 chunk，但如果系统只把 rank 1 到 4 放进 prompt，LLM 还是用不到。
+
+<CardGrid columns={2}>
+  <InfoCard title="Failure Signal">
+    答案存在于 index，但 retrieved context 没有包含它，或它排名太低。
+  </InfoCard>
+
+  <InfoCard title="Fix Direction">
+    改善 filters、hybrid search、top-k、reranking、callback retrieval 或 query decomposition。
+  </InfoCard>
+</CardGrid>
+
+Retrieval failure 是证据选择问题。
+
+## 第四步：检查 Context Construction 是否清楚
+
+有时候 retrieval 是正确的，但 LLM 仍然失败，因为 retrieved context 被包装得太乱。
+
+坏 context：
+
+```text
+opened items seven days defective not eligible refund active my policy old policy return warranty timeline
+```
+
+这个 context 有有用词，但没有结构。模型可能混合规则、忽略 status，或误读条件。
+
+更好的 context：
+
+```text
+[Source 1]
+Title: Return Policy - Opened Items
+Region: Malaysia
+Status: active
+Section: Opened Item Eligibility
+
+Opened items can be returned within seven days only if the product is defective.
+Non-defective opened items are not eligible for return.
+```
+
+Context construction diagnosis 应该问：
+
+| 问题 | 为什么重要 |
+| --- | --- |
+| Chunks 是否清楚分隔？ | 防止规则混合 |
+| 是否包含 source title？ | 帮助理解证据身份 |
+| 是否包含 section heading？ | 保留局部语义 |
+| 是否包含 status？ | 防止使用 deprecated 内容 |
+| 是否显示 region 或 product？ | 防止 scope 错误 |
+| Context 是否太多？ | 减少干扰 |
+| Context 是否太少？ | 避免缺少条件 |
+
+模型不应该收到一坨没有边界的文字。
+
+实用 context block 应该包含：
+
+```text
+[Source number]
+Title:
+Document type:
+Product:
+Region:
+Status:
+Section:
+Content:
+```
+
+如果 retrieval 正确，但模型没有抓到明显证据，在换模型之前先检查 context formatting。
+
+## 第五步：检查 Prompt 是否控制住模型
+
+如果正确 context 已经清楚送出，就检查 prompt。
+
+Prompt 应该告诉模型：
+
+- 只能使用 retrieved context。
+- 保留条件和例外。
+- 不要发明政策。
+- 证据不足时说明缺失。
+- 先给直接答案。
+- 说明使用的来源。
+
+弱 prompt：
+
+```text
+Answer the user helpfully.
+```
+
+更强 prompt：
+
+```text
+Answer the user's question using only the support context.
+Every policy claim must be supported by the context.
+If the context does not answer the question, say what information is missing.
+Preserve conditions such as "only if", "unless", "requires", and "may".
+Do not promise refunds, replacements, compensation, or timelines unless explicitly stated.
+```
+
+Prompt failures 通常长这样：
+
+| Prompt Failure | 症状 |
+| --- | --- |
+| 没有 context-only rule | 模型使用一般常识 |
+| 没有 refusal rule | 模型猜缺失政策 |
+| 没有 condition rule | 模型漏掉例外 |
+| 没有 business guardrail | 模型承诺退款或换新 |
+| 没有 output format | 答案不稳定 |
+| 没有 source rule | 很难验证 grounding |
+
+Prompt diagnosis 应该使用固定 context。
+
+也就是手动给 LLM 正确 retrieved context。如果证据已经正确，模型还是答错，那问题就在 prompt 或 generation layer。
+
+## 第六步：检查 LLM 是否夸大证据
+
+就算 prompt 不错，模型也可能 overstate。
+
+Context：
+
+```text
+Charging failure may be covered under warranty if no water damage, physical damage, or unauthorized repair is found.
+```
+
+坏答案：
+
+```text
+Your charging failure is definitely covered under warranty.
+```
+
+模型把 “may be covered” 改成了 “definitely covered”。这是 evidence-strength error。
+
+常见 generation failures：
+
+| Generation Failure | 例子 |
+| --- | --- |
+| Overstatement | “可能符合资格” 变成 “已经批准” |
+| Unsupported detail | 加入 context 没有的时间线 |
+| Condition loss | 漏掉 “only if defective” |
+| Source mixing | 错误合并两个政策 |
+| Wrong scope | 把 Malaysia 政策套到 Singapore |
+| False certainty | 证据不完整时仍然回答确定答案 |
+
+Generation diagnosis 要把每个 answer claim 和 retrieved context 对照。
+
+实用人工检查：
+
+```text
+Answer claim:
+Opened items can be returned within seven days.
+
+Context:
+Opened items can be returned within seven days only if defective.
+
+Diagnosis:
+Unsupported overgeneralization. The answer dropped the condition.
+```
+
+修复方向可能是：
+
+- 更强 grounding instruction。
+- 更结构化 output。
+- 降低 temperature。
+- 加 answer validation。
+- 生成后 revision。
+- 证据不足时拒答。
+
+LLM layer 应该解释证据，不应该强化证据。
+
+## 第七步：检查 Validation 是否挡住错误
+
+Validation 是最后一层防线。
+
+即使 generation 产生了无依据答案，validation 也应该在用户看到前抓出来。
+
+Validation 可以检查：
+
+| Validation Check | 检测什么 |
+| --- | --- |
+| Claim 是否被 context 支持 | Hallucinated policy |
+| 产品和地区是否正确 | Scope error |
+| 条件是否保留 | Oversimplification |
+| 缺少证据时是否说明 | False certainty |
+| 是否有未授权承诺 | Business risk |
+| 是否包含来源 | Weak traceability |
+
+Validation failure 例子：
+
+```text
+Generated answer:
+Yes, you can return opened items within seven days.
+
+Retrieved context:
+Opened items can be returned within seven days only if defective.
+Non-defective opened items are not eligible for return.
+
+Validation result:
+Fail. The answer removes the defective-item condition.
+```
+
+系统可以改写答案：
+
+```text
+Opened items can be returned within seven days only if the product is defective. Non-defective opened items are not eligible for return.
+```
+
+<CardGrid columns={2}>
+  <InfoCard title="Failure Signal">
+    最终答案包含 retrieved context 不支持的 claim，但系统仍然把它发给用户。
+  </InfoCard>
+
+  <InfoCard title="Fix Direction">
+    加入 claim checking、source checking、condition checking，或第二轮 answer revision。
+  </InfoCard>
+</CardGrid>
+
+Validation 不能取代好的 indexing、retrieval 和 prompt。它只是最后检查。
+
+## 实际 Failure Diagnosis Workflow
+
+使用固定 debug 顺序。不要在 prompt、vector database settings 和 model 之间随机跳。
+
+<CardGrid columns={2}>
+  <InfoCard title="1. 复现错误答案">
+    保存 user question、final answer、retrieved chunks、prompt 和 model settings。如果无法复现，就很难可靠诊断。
+  </InfoCard>
+
+  <InfoCard title="2. 检查 Source Coverage">
+    确认正确政策或文档存在、是当前版本，并且允许用于这个回答范围。
+  </InfoCard>
+
+  <InfoCard title="3. 检查 Indexed Chunks">
+    检查答案、条件、heading、metadata 和 version status 是否在 indexing 后保留下来。
+  </InfoCard>
+
+  <InfoCard title="4. 检查 Retrieval Results">
+    验证正确 chunk 是否出现、排名多少，以及是否混入错误 chunks。
+  </InfoCard>
+
+  <InfoCard title="5. 检查 Final Context">
+    确认真正送给模型的 context，而不只是 retrieval 最初找到了什么。
+  </InfoCard>
+
+  <InfoCard title="6. 用固定 Context 测 Prompt">
+    手动给模型正确 context。如果还是失败，问题在 prompt 或 generation behavior。
+  </InfoCard>
+
+  <InfoCard title="7. 对照 Claim 和 Evidence">
+    把每个 answer claim 标记为 supported、unsupported、overstated 或 missing condition。
+  </InfoCard>
+
+  <InfoCard title="8. 加 Validation 或 Guardrails">
+    如果无依据 claim 会到达用户，就在 final response 前加入检查。
+  </InfoCard>
+</CardGrid>
+
+这个 workflow 可以分离 pipeline bugs 和 model behavior。
+
+## Failure Map
+
+用这张表判断最可能坏在哪一层。
+
+| Observation | Likely Failure Point | First Fix |
+| --- | --- | --- |
+| 正确政策不存在 | Source data | 添加或更新文档 |
+| 政策存在但 chunk 坏了 | Indexing | 修 chunking 或 extraction |
+| 正确 chunk 完全没检索到 | Retrieval recall | 改善 query、embedding、hybrid search |
+| 正确 chunk 排太低 | Retrieval ranking | 加 reranking 或改 scoring |
+| 正确 chunk 找到了但没进 final prompt | Context selection | 调整 top-k 和 final context builder |
+| 正确 context 送出但答案忽略它 | Prompt or generation | 强化 grounding rules |
+| 答案漏掉例外 | Prompt or generation | 要求保留 condition words |
+| 答案加入无依据承诺 | Guardrail failure | 加 business constraints |
+| 错误答案通过 final step | Validation failure | 加 claim-level validation |
+| 无法检查发生了什么 | Observability failure | 加 logs 和 trace IDs |
+
+这张 map 可以避免一个常见错误：把所有 failure 都当成 prompt 问题。
+
+只有在确定正确证据已经到达模型之后，prompt tuning 才有意义。
+
+## Debug 时应该记录什么
+
+RAG 系统应该记录足够信息，让你解释一个坏答案是怎么来的。
+
+有用 debug fields：
+
+| Log Field | 用途 |
+| --- | --- |
+| `trace_id` | 串起一次请求的所有步骤 |
+| `user_question` | 保留原始输入 |
+| `query_rewrite` | 显示是否改写 query |
+| `filters_applied` | 显示 product、region、status 和 type filters |
+| `retrieved_candidates` | 显示原始 retrieval results |
+| `reranked_results` | 显示最终排序 |
+| `final_context` | 显示模型实际收到什么 |
+| `prompt_template_version` | 显示使用哪个 prompt |
+| `model_name` | 显示生成模型 |
+| `temperature` | 显示生成随机性 |
+| `final_answer` | 显示用户看到的答案 |
+| `validation_result` | 显示 claim 是否通过检查 |
+
+最小 debug trace：
+
+```text
+trace_id: rag-2026-06-05-001
+question: Can I return an opened item after three days?
+filters: region=MY, status=active, document_type=return_policy
+retrieved_top_3:
+  1. return-policy-my-opened-items
+  2. refund-timeline-my
+  3. generic-return-faq
+final_context:
+  return-policy-my-opened-items
+answer:
+  Opened items can be returned within seven days only if defective.
+validation:
+  pass
+```
+
+没有这些 logs，debug 基本就是猜。
+
+## 核心原则
+
+RAG failure 在被证明之前，都应该先当成 pipeline failure。
+
+不要直接假设是模型问题。先检查正确证据是否存在、indexing 是否保留它、retrieval 是否找到它、final context 是否包含它、prompt 是否约束模型，以及 validation 是否挡住无依据 claim。
+
+实用规则是：
+
+```text
+Source -> Index -> Retrieve -> Context -> Prompt -> Generate -> Validate
+```
+
+按这个顺序 debug。第一个坏掉的阶段，才是真正的 failure point。
+
+</Lang>

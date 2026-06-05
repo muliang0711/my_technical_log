@@ -1,0 +1,593 @@
+---
+title: "Nginx as a Traffic Controller"
+category: "Software Development"
+createdAt: "2026-06-05"
+summary: "A practical introduction to what Nginx does, why it usually sits in front of application servers, and how it controls HTTP traffic."
+readTime: "8 min read"
+tags:
+  - "Backend"
+  - "HTTP"
+  - "Node.js"
+  - "System Design"
+featured: false
+series:
+  title: "Traffic Control"
+  slug: "traffic-control"
+  order: 1
+---
+
+<Lang lang="en">
+
+Nginx is usually introduced as a web server, but in real backend systems it is more useful to think of it as a traffic controller. It receives HTTP requests before they reach the application, decides where they should go, applies basic rules, and protects the application from doing unnecessary work.
+
+## Short Answer
+
+Nginx is a server process that commonly sits between the internet and your backend application.
+
+Its job is not to replace your application logic. Its job is to control the request path before the request reaches your application server.
+
+A typical setup looks like this:
+
+```text
+Client
+  ↓
+Nginx
+  ↓
+Application Server
+  ↓
+Database / Cache / External Services
+```
+
+In this setup, Nginx can handle:
+
+- Static file serving
+- Reverse proxying
+- Load balancing
+- TLS termination
+- Request routing
+- Compression
+- Basic access control
+- Rate limiting
+- Request size limits
+- Timeout control
+
+The application server still handles business logic. Nginx handles traffic-level decisions.
+
+## What Nginx Actually Does
+
+Nginx is often placed at the edge of a backend system.
+
+That means the request reaches Nginx before it reaches Node.js, Java, Go, Python, PHP, or any other application runtime.
+
+The important idea is separation of responsibility.
+
+| Layer | Main Responsibility |
+| --- | --- |
+| Nginx | Control traffic, route requests, reject invalid or excessive requests |
+| Application server | Execute business logic |
+| Database | Store and query persistent data |
+| Cache | Serve repeated data faster |
+
+Without Nginx, every request goes directly to the application server. That means the application must handle TLS, static files, large request bodies, slow clients, routing, and abuse protection by itself.
+
+With Nginx, some of that work can be handled before the application process is involved.
+
+## Reverse Proxy: The Most Important Concept
+
+The most common backend use of Nginx is as a reverse proxy.
+
+A reverse proxy accepts requests from clients and forwards them to an internal application server.
+
+Example:
+
+```text
+Browser requests:
+https://example.com/api/products
+
+Nginx receives it and forwards it to:
+http://localhost:3000/api/products
+```
+
+The client does not need to know that the actual application is running on port `3000`. The client only talks to Nginx.
+
+This gives the system a clean public entry point.
+
+<CardGrid columns={2}>
+  <InfoCard title="Public Side">
+    Nginx exposes port 80 or 443 to users. This is the side visible to the internet.
+  </InfoCard>
+
+  <InfoCard title="Private Side">
+    The application server can run on an internal port such as 3000, 8080, or 9000.
+  </InfoCard>
+
+  <InfoCard title="Traffic Control">
+    Nginx can decide which requests should be forwarded and which requests should be rejected early.
+  </InfoCard>
+
+  <InfoCard title="Operational Flexibility">
+    The application can be restarted, scaled, or moved behind Nginx without changing the public URL.
+  </InfoCard>
+</CardGrid>
+
+## How It Appears in Production
+
+In production, Nginx is usually not the whole system. It is one component in front of other services.
+
+A simple production setup may look like this:
+
+```text
+Internet
+  ↓
+Nginx
+  ↓
+Node.js API
+  ↓
+PostgreSQL
+```
+
+A slightly larger setup may look like this:
+
+```text
+Internet
+  ↓
+Nginx
+  ↓
+Service A / Service B / Service C
+  ↓
+Database / Redis / Queue
+```
+
+Nginx can route different paths to different services.
+
+| Request Path | Destination |
+| --- | --- |
+| `/` | Frontend static site |
+| `/api` | Backend API server |
+| `/uploads` | Static file directory |
+| `/admin` | Internal admin service |
+
+This is why Nginx is useful for traffic control. It does not only receive traffic. It shapes where the traffic goes.
+
+## Basic Nginx Reverse Proxy Example
+
+In a Node.js project, the application may listen on port `3000`.
+
+Nginx can expose the public domain and forward traffic to that internal process.
+
+Place this inside an Nginx server configuration to forward public HTTP traffic to a local application server:
+
+```text
+server {
+    listen 80;
+    server_name example.com;
+
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
+```
+
+This configuration means:
+
+- Nginx listens on port `80`.
+- Requests for `example.com` enter this server block.
+- All paths under `/` are forwarded to `http://localhost:3000`.
+- The original host and client IP information are passed to the application.
+
+The application still sees an HTTP request, but the request has already passed through Nginx first.
+
+## Why Not Let the Application Handle Everything
+
+Technically, the application can handle many things by itself.
+
+For example, a Node.js server can expose port `80`, handle TLS, serve static files, check request size, and implement rate limits.
+
+The problem is not whether it is possible. The problem is whether it is a good boundary.
+
+Application servers are usually better at business logic:
+
+- Create order
+- Login user
+- Search product
+- Process payment
+- Generate report
+
+Nginx is better at traffic-level control:
+
+- Reject request body that is too large
+- Stop very slow clients from holding resources forever
+- Serve static files without entering the application runtime
+- Forward traffic to the correct backend
+- Apply basic limits before business logic starts
+
+This matters because application resources are usually more expensive than Nginx resources.
+
+A request rejected by Nginx is cheaper than a request rejected after entering the application, hitting middleware, parsing JSON, checking auth, and touching the database.
+
+## Important Signals to Inspect
+
+When Nginx is part of the system, production debugging should include both Nginx and the application.
+
+Run this on the server running Nginx to check whether the Nginx service is active:
+
+```bash
+systemctl status nginx
+```
+
+This should reveal whether Nginx is running, stopped, failed, or restarting repeatedly.
+
+Run this on the Nginx server to test whether the configuration syntax is valid before reloading it:
+
+```bash
+nginx -t
+```
+
+This should reveal syntax errors, missing files, or invalid configuration directives.
+
+Run this on the Nginx server to reload configuration without fully stopping the service:
+
+```bash
+sudo systemctl reload nginx
+```
+
+This applies valid configuration changes while keeping the service available.
+
+For request-level debugging, inspect the Nginx access and error logs.
+
+Run this on the Nginx server to watch incoming request logs in real time:
+
+```bash
+sudo tail -f /var/log/nginx/access.log
+```
+
+Run this on the Nginx server to watch Nginx errors in real time:
+
+```bash
+sudo tail -f /var/log/nginx/error.log
+```
+
+The access log tells you what requests are coming in. The error log tells you what Nginx failed to do.
+
+## Common Misunderstandings
+
+| Misunderstanding | Better Understanding |
+| --- | --- |
+| Nginx is only for static websites | Nginx is commonly used in front of backend APIs |
+| Nginx replaces backend code | Nginx controls traffic; the app still handles business logic |
+| Nginx makes slow code fast | Nginx can reduce waste, but it cannot fix bad application logic |
+| Nginx is only needed for huge systems | Even small deployments benefit from a clean reverse proxy boundary |
+| Nginx and load balancer are always separate | Nginx can also perform basic load balancing |
+
+The main point is not that every system must use Nginx. The point is that once a system is exposed to real traffic, it needs a traffic boundary.
+
+Nginx is one common way to create that boundary.
+
+## A Practical Mental Model
+
+Think of Nginx as the front gate of your backend system.
+
+It should answer these questions before the request reaches application code:
+
+<CardGrid columns={2}>
+  <InfoCard title="Should this request enter?">
+    Reject requests that are too large, too frequent, malformed, or not allowed.
+  </InfoCard>
+
+  <InfoCard title="Where should it go?">
+    Route frontend, API, upload, and admin paths to the correct destination.
+  </InfoCard>
+
+  <InfoCard title="How long should it wait?">
+    Apply timeout rules so slow upstreams or slow clients do not consume resources forever.
+  </InfoCard>
+
+  <InfoCard title="Can this be handled cheaply?">
+    Serve static files, redirects, and simple traffic rules before involving the application.
+  </InfoCard>
+</CardGrid>
+
+This mental model makes later topics easier.
+
+Rate limiting, load balancing, caching, TLS termination, and request filtering are all traffic-control features.
+
+## The Main Principle
+
+Nginx is useful because it creates a clear boundary between public traffic and application logic.
+
+The application should focus on business rules. Nginx should handle the cheap, repetitive, traffic-level decisions before the application spends CPU, memory, database connections, or external API calls.
+
+</Lang>
+
+<Lang lang="zh">
+
+Nginx 常常被介绍成 Web Server，但在真实后端系统里，更实用的理解方式是：它是一个流量控制器。请求进入应用之前，先经过 Nginx，由它决定这个请求要不要进来、要转发到哪里、是否超过限制、是否可以直接被处理掉。
+
+## 简短答案
+
+Nginx 通常放在互联网和后端应用之间。
+
+它不是用来取代业务代码的。它的主要作用是，在请求进入应用服务器之前，先处理一部分流量层面的事情。
+
+一个常见结构是这样：
+
+```text
+Client
+  ↓
+Nginx
+  ↓
+Application Server
+  ↓
+Database / Cache / External Services
+```
+
+在这个结构里，Nginx 可以负责：
+
+- 静态文件服务
+- 反向代理
+- 负载均衡
+- TLS 终止
+- 请求路由
+- 压缩
+- 基础访问控制
+- 限流
+- 请求体大小限制
+- 超时控制
+
+应用服务器仍然负责业务逻辑。Nginx 负责请求进入业务系统之前的流量控制。
+
+## Nginx 实际上在做什么
+
+Nginx 经常被放在后端系统的入口位置。
+
+也就是说，请求会先到 Nginx，然后才到 Node.js、Java、Go、Python、PHP 或其他应用运行时。
+
+关键点是职责分离。
+
+| 层级 | 主要责任 |
+| --- | --- |
+| Nginx | 控制流量、转发请求、提前拒绝异常或过量请求 |
+| 应用服务器 | 执行业务逻辑 |
+| 数据库 | 存储和查询持久化数据 |
+| 缓存 | 更快地返回重复数据 |
+
+如果没有 Nginx，每个请求都会直接进入应用服务器。应用就需要自己处理 TLS、静态文件、大请求体、慢客户端、路由和滥用流量。
+
+有了 Nginx，一部分工作可以在请求进入应用进程之前就被处理掉。
+
+## 反向代理：最重要的概念
+
+Nginx 在后端系统里最常见的用法是反向代理。
+
+反向代理的意思是：Nginx 接收客户端请求，然后把请求转发到内部应用服务器。
+
+例如：
+
+```text
+浏览器请求：
+https://example.com/api/products
+
+Nginx 收到后转发到：
+http://localhost:3000/api/products
+```
+
+客户端不需要知道真正的应用跑在 `3000` 端口。客户端只需要访问 Nginx 暴露出来的域名。
+
+这让系统有一个干净的公开入口。
+
+<CardGrid columns={2}>
+  <InfoCard title="公开侧">
+    Nginx 对外暴露 80 或 443 端口。这是互联网用户能看到的入口。
+  </InfoCard>
+
+  <InfoCard title="内部侧">
+    应用服务器可以运行在内部端口，例如 3000、8080 或 9000。
+  </InfoCard>
+
+  <InfoCard title="流量控制">
+    Nginx 可以决定哪些请求应该被转发，哪些请求应该提前拒绝。
+  </InfoCard>
+
+  <InfoCard title="运维弹性">
+    应用可以在 Nginx 后面重启、扩容或迁移，而不需要改变用户访问的 URL。
+  </InfoCard>
+</CardGrid>
+
+## 在生产系统里长什么样
+
+在生产环境里，Nginx 通常不是整个系统，而是站在其他服务前面的入口组件。
+
+一个简单的生产结构可能是：
+
+```text
+Internet
+  ↓
+Nginx
+  ↓
+Node.js API
+  ↓
+PostgreSQL
+```
+
+一个稍微复杂一点的结构可能是：
+
+```text
+Internet
+  ↓
+Nginx
+  ↓
+Service A / Service B / Service C
+  ↓
+Database / Redis / Queue
+```
+
+Nginx 可以根据不同路径，把请求转发到不同服务。
+
+| 请求路径 | 目标服务 |
+| --- | --- |
+| `/` | 前端静态站点 |
+| `/api` | 后端 API 服务 |
+| `/uploads` | 静态文件目录 |
+| `/admin` | 内部管理服务 |
+
+所以 Nginx 不只是接收流量。它还会塑造流量的去向。
+
+## 基础 Nginx 反向代理例子
+
+在一个 Node.js 项目里，应用可能监听 `3000` 端口。
+
+Nginx 可以对外暴露公开域名，然后把请求转发到这个内部进程。
+
+把下面配置放进 Nginx server 配置中，可以把公开 HTTP 请求转发到本机应用服务器：
+
+```text
+server {
+    listen 80;
+    server_name example.com;
+
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
+```
+
+这段配置的意思是：
+
+- Nginx 监听 `80` 端口。
+- 访问 `example.com` 的请求会进入这个 server block。
+- `/` 下面的所有路径都会被转发到 `http://localhost:3000`。
+- 原始 host 和客户端 IP 信息会被传给应用。
+
+应用仍然会收到 HTTP 请求，但这个请求已经先经过 Nginx 了。
+
+## 为什么不要让应用处理全部事情
+
+技术上，应用确实可以自己处理很多事情。
+
+例如，Node.js 可以直接暴露 `80` 端口、处理 TLS、服务静态文件、检查请求大小、实现限流。
+
+问题不在于能不能做。问题在于这个边界是否合理。
+
+应用服务器更适合处理业务逻辑：
+
+- 创建订单
+- 用户登录
+- 搜索商品
+- 处理付款
+- 生成报告
+
+Nginx 更适合处理流量层面的工作：
+
+- 拒绝过大的请求体
+- 避免慢客户端长期占用资源
+- 不进入应用运行时就服务静态文件
+- 把请求转发到正确后端
+- 在业务逻辑开始前做基础限制
+
+这很重要，因为应用资源通常比 Nginx 资源更贵。
+
+一个在 Nginx 被拒绝的请求，比进入应用、经过 middleware、解析 JSON、检查 auth、访问数据库之后才被拒绝，要便宜得多。
+
+## 重要检查信号
+
+当系统里有 Nginx 时，生产排查不应该只看应用日志，也应该看 Nginx。
+
+在运行 Nginx 的服务器上执行下面命令，用来检查 Nginx 服务是否正常运行：
+
+```bash
+systemctl status nginx
+```
+
+这个命令会显示 Nginx 是运行中、停止、失败，还是反复重启。
+
+在 Nginx 服务器上执行下面命令，用来在 reload 前检查配置语法是否正确：
+
+```bash
+nginx -t
+```
+
+这个命令会暴露语法错误、文件缺失或无效配置项。
+
+在 Nginx 服务器上执行下面命令，用来在不中断服务的情况下重新加载配置：
+
+```bash
+sudo systemctl reload nginx
+```
+
+这个命令会应用新的有效配置，同时避免完整停止服务。
+
+如果要排查请求层面的行为，需要看 Nginx access log 和 error log。
+
+在 Nginx 服务器上执行下面命令，用来实时观察进入系统的请求：
+
+```bash
+sudo tail -f /var/log/nginx/access.log
+```
+
+在 Nginx 服务器上执行下面命令，用来实时观察 Nginx 层面的错误：
+
+```bash
+sudo tail -f /var/log/nginx/error.log
+```
+
+access log 告诉你有什么请求进来。error log 告诉你 Nginx 哪些事情失败了。
+
+## 常见误解
+
+| 误解 | 更准确的理解 |
+| --- | --- |
+| Nginx 只是静态网站服务器 | Nginx 很常用于后端 API 前面 |
+| Nginx 会取代后端代码 | Nginx 控制流量，应用仍然处理业务逻辑 |
+| Nginx 能让慢代码变快 | Nginx 可以减少浪费，但不能修复糟糕业务逻辑 |
+| 只有大系统才需要 Nginx | 小部署也可以从清晰的反向代理边界受益 |
+| Nginx 和负载均衡一定是两个东西 | Nginx 本身也可以做基础负载均衡 |
+
+重点不是每个系统都必须使用 Nginx。重点是，一旦系统暴露给真实流量，就需要一个流量边界。
+
+Nginx 是建立这个边界的常见方式。
+
+## 实用心智模型
+
+可以把 Nginx 想成后端系统的前门。
+
+请求进入应用代码之前，Nginx 应该先回答这些问题：
+
+<CardGrid columns={2}>
+  <InfoCard title="这个请求该不该进来？">
+    过大、过频繁、格式异常、不允许访问的请求，应该尽量提前拒绝。
+  </InfoCard>
+
+  <InfoCard title="这个请求该去哪里？">
+    前端、API、上传资源、管理后台，可以被路由到不同目标。
+  </InfoCard>
+
+  <InfoCard title="这个请求应该等多久？">
+    设置超时规则，避免慢上游或慢客户端无限占用资源。
+  </InfoCard>
+
+  <InfoCard title="这个请求能不能便宜处理？">
+    静态文件、重定向、简单规则，应该尽量不要进入应用进程。
+  </InfoCard>
+</CardGrid>
+
+理解这个模型后，后面的主题会更容易。
+
+限流、负载均衡、缓存、TLS 终止、请求过滤，本质上都是流量控制能力。
+
+## 核心原则
+
+Nginx 的价值在于，它在公开流量和应用逻辑之间建立了清晰边界。
+
+应用应该专注业务规则。Nginx 应该在应用消耗 CPU、内存、数据库连接或外部 API 调用之前，先处理那些便宜、重复、流量层面的决策。
+
+</Lang>
