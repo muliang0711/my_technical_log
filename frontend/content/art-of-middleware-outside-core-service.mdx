@@ -1,0 +1,747 @@
+---
+title: "The Art of Middleware: Turning Requests Into Performance Signals"
+category: "Software Development"
+createdAt: "2026-06-05"
+summary: "A practical guide to using middleware for request lifecycle logging, performance diagnostics, error tracing, and production observability."
+readTime: "9 min read"
+tags:
+  - "Backend"
+  - "HTTP"
+  - "Node.js"
+  - "System Design"
+featured: false
+series:
+  title: "Art of Middleware"
+  slug: "art-of-middleware"
+  order: 1
+---
+
+<Lang lang="en">
+
+Middleware is one of the cleanest places to observe a backend system because every request passes through it before reaching the business logic and before the response leaves the server. If used correctly, middleware can tell us which endpoint is slow, which request failed, which user action triggered the problem, and where the request spent most of its time.
+
+## Short Answer
+
+Middleware helps us identify performance and logging problems because it sits around the request lifecycle.
+
+It can record:
+
+- When the request entered the application.
+- Which method and route were called.
+- Which user, client, or service made the request.
+- How long the request took.
+- Whether the request succeeded or failed.
+- What status code was returned.
+- Which correlation ID connects this request to downstream logs.
+- Which part of the request lifecycle produced the error.
+
+The important point is this: middleware should not only print logs. Middleware should produce structured signals that help us debug production behavior.
+
+A weak log says:
+
+```text
+Request completed
+```
+
+A useful middleware log says:
+
+```json
+{
+  "requestId": "req_8f21",
+  "method": "POST",
+  "path": "/api/orders",
+  "statusCode": 500,
+  "durationMs": 842,
+  "userId": "u_123",
+  "errorName": "DatabaseTimeoutError"
+}
+```
+
+The second log gives us a direction. It tells us the request failed, which endpoint failed, how slow it was, and which error category appeared.
+
+## What Middleware Means
+
+Middleware is code that runs between the server receiving a request and the final route handler producing a response.
+
+In a typical HTTP backend, the flow looks like this:
+
+```text
+Client
+  -> Server
+  -> Middleware 1
+  -> Middleware 2
+  -> Route Handler
+  -> Middleware After Logic
+  -> Response
+  -> Client
+```
+
+Middleware can run before the route handler, after the route handler, or both.
+
+This makes it useful for cross-cutting concerns. A cross-cutting concern is behavior that many routes need but should not be repeated inside every controller.
+
+| Concern | Why Middleware Fits |
+| --- | --- |
+| Request logging | Every endpoint should be observable |
+| Performance timing | Every request has a start and end time |
+| Authentication | Many routes need identity checks |
+| Rate limiting | Traffic control should happen before business logic |
+| Error handling | Errors need consistent formatting and logging |
+| Correlation ID | Logs from one request need to be connected |
+| Response compression | It applies to many responses |
+
+Middleware is not the business logic itself. It is the layer that prepares, observes, protects, and finalizes the request lifecycle.
+
+## Why Middleware Is Good for Performance Logging
+
+Performance logging needs a stable boundary.
+
+If we place timing logic inside every controller, the implementation becomes inconsistent. One developer may log the start time before validation. Another may log after validation. Another may forget to log failures.
+
+Middleware gives us one consistent measurement boundary:
+
+```text
+Request enters application -> timer starts
+Response finishes -> timer stops
+```
+
+This allows us to measure request duration in a predictable way.
+
+For example, in an Express-style Node.js backend, a middleware can start a timer before calling the next handler. Then it can wait for the response to finish and record the total duration.
+
+This is the idea:
+
+```javascript
+app.use((req, res, next) => {
+  const startedAt = Date.now();
+
+  res.on("finish", () => {
+    const durationMs = Date.now() - startedAt;
+
+    console.log({
+      method: req.method,
+      path: req.path,
+      statusCode: res.statusCode,
+      durationMs,
+    });
+  });
+
+  next();
+});
+```
+
+This is simple, but the principle is powerful. Every route now gets basic performance logging without adding timing code to every route.
+
+## What Middleware Can Help Us Identify
+
+Middleware is useful because it can turn raw traffic into searchable production evidence.
+
+<CardGrid columns={2}>
+  <InfoCard title="1. Slow Endpoints">
+    Middleware can record request duration per route. This helps identify whether `/api/orders` is slower than `/api/users` instead of guessing from user complaints.
+  </InfoCard>
+
+  <InfoCard title="2. Error Hotspots">
+    Middleware can log status codes and error types. If one endpoint frequently returns `500`, that route becomes the first debugging target.
+  </InfoCard>
+
+  <InfoCard title="3. Request Volume">
+    Middleware can count how many requests hit each endpoint. High latency on a rarely used endpoint has different priority from moderate latency on a critical endpoint.
+  </InfoCard>
+
+  <InfoCard title="4. User or Tenant Impact">
+    Middleware can attach user ID, tenant ID, or service name. This helps identify whether the issue affects everyone or only one customer group.
+  </InfoCard>
+
+  <InfoCard title="5. Downstream Failure Direction">
+    Middleware can include error categories such as database timeout, validation error, external API failure, or permission failure.
+  </InfoCard>
+
+  <InfoCard title="6. Request Traceability">
+    Middleware can generate a request ID. That ID can connect application logs, database logs, queue logs, and reverse proxy logs.
+  </InfoCard>
+</CardGrid>
+
+Without middleware, debugging often becomes scattered. Logs are produced in random places with different formats. With middleware, every request starts with the same basic evidence.
+
+## The Signals We Should Log
+
+Good middleware logging should be structured. The goal is not to write more text. The goal is to write logs that can be filtered, grouped, counted, and compared.
+
+A practical request log should usually include:
+
+| Field | Purpose |
+| --- | --- |
+| `requestId` | Connects logs from the same request |
+| `method` | Shows whether the request was `GET`, `POST`, `PUT`, or `DELETE` |
+| `path` | Shows which endpoint was called |
+| `statusCode` | Shows success or failure |
+| `durationMs` | Shows request latency |
+| `userId` | Shows who triggered the request when available |
+| `ip` | Helps detect traffic source patterns |
+| `userAgent` | Helps identify client type |
+| `errorName` | Groups failures by error category |
+| `timestamp` | Places the event on the timeline |
+
+The `durationMs` field is especially important. It lets us ask practical questions:
+
+- Which route is slowest on average?
+- Which route has the highest p95 latency?
+- Did latency increase after deployment?
+- Are failed requests slower than successful requests?
+- Are some users or tenants affected more than others?
+
+Middleware does not answer every question by itself, but it gives the first layer of evidence.
+
+## Example Middleware Design
+
+A production-ready middleware should avoid logging random strings. It should create one structured event per request.
+
+In a Node.js service, the structure can look like this:
+
+```javascript
+function requestLogger(req, res, next) {
+  const startedAt = process.hrtime.bigint();
+
+  req.requestId = req.headers["x-request-id"] || crypto.randomUUID();
+
+  res.setHeader("x-request-id", req.requestId);
+
+  res.on("finish", () => {
+    const endedAt = process.hrtime.bigint();
+    const durationMs = Number(endedAt - startedAt) / 1_000_000;
+
+    const logEvent = {
+      event: "http_request_completed",
+      requestId: req.requestId,
+      method: req.method,
+      path: req.route?.path || req.path,
+      statusCode: res.statusCode,
+      durationMs: Math.round(durationMs),
+      userId: req.user?.id || null,
+      timestamp: new Date().toISOString(),
+    };
+
+    console.log(JSON.stringify(logEvent));
+  });
+
+  next();
+}
+```
+
+There are several useful details here:
+
+- `process.hrtime.bigint()` is better for measuring short durations than normal wall-clock time.
+- `requestId` is created once and reused.
+- The response returns the request ID so the client can report it when something fails.
+- The log is JSON, which is easier to search in systems like ELK, Loki, Datadog, or CloudWatch.
+
+This middleware does not know the business logic. It only observes the lifecycle.
+
+## How Middleware Helps Debug Production Problems
+
+Middleware logs should help us move from vague symptoms to specific checks.
+
+| Symptom | Middleware Signal | Next Direction |
+| --- | --- | --- |
+| Users say the app is slow | High `durationMs` on specific routes | Inspect that route's code and database queries |
+| Random 500 errors | Repeated `statusCode: 500` with same `path` | Inspect error handler and stack trace |
+| Only one customer is affected | Same `tenantId` appears in slow logs | Check tenant-specific data volume |
+| High traffic spike | Request count increases by path or IP | Check rate limit and caching |
+| API gateway timeout | Middleware log missing completion event | Request may be stuck before response finishes |
+| Response is fast but user sees delay | Low backend `durationMs` | Check frontend, network, CDN, or client rendering |
+
+This is the real value. Middleware does not magically fix performance. It narrows the search area.
+
+Instead of asking, “Why is the system slow?”, we can ask:
+
+```text
+Which endpoint became slow?
+Which users are affected?
+When did it start?
+Did it happen after deployment?
+Is it a slow success or a slow failure?
+Does the request reach the application?
+```
+
+These are better questions because they are answerable.
+
+## Middleware Is Not Enough
+
+Middleware is the first layer of observability, not the whole observability system.
+
+It can tell us that `/api/orders` took `842ms`, but it cannot always tell us which internal step consumed that time.
+
+For deeper diagnosis, middleware logs should connect to lower-level signals:
+
+| Layer | What It Reveals |
+| --- | --- |
+| Middleware log | Request path, status, total duration |
+| Application span | Which function or service step was slow |
+| Database query log | Which SQL query consumed time |
+| Cache log | Whether the request missed cache |
+| Queue log | Whether async work was delayed |
+| Reverse proxy log | Whether traffic reached the app |
+| Infrastructure metric | CPU, memory, network, and disk pressure |
+
+The request ID is what connects these layers.
+
+If the middleware log has `requestId: req_8f21`, the database log, service log, and error log should also carry `req_8f21`. Without that ID, debugging becomes manual searching.
+
+## Common Mistakes
+
+Middleware logging can become harmful if designed carelessly.
+
+<CardGrid columns={2}>
+  <InfoCard title="Logging Too Much">
+    Do not log full request bodies by default. They can contain passwords, tokens, personal data, or large payloads.
+  </InfoCard>
+
+  <InfoCard title="Logging Without Structure">
+    Plain text logs are readable by humans but weak for production analysis. Prefer JSON events with stable field names.
+  </InfoCard>
+
+  <InfoCard title="Measuring the Wrong Boundary">
+    If timing starts after validation or authentication, the duration does not represent the full request cost.
+  </InfoCard>
+
+  <InfoCard title="No Request ID">
+    Without a request ID, one failed request becomes hard to connect across application logs, database logs, and proxy logs.
+  </InfoCard>
+
+  <InfoCard title="Blocking the Request">
+    Logging should not make the request slow. Avoid synchronous remote logging inside the hot path when possible.
+  </InfoCard>
+
+  <InfoCard title="Treating Logs as Proof">
+    Logs are evidence, not absolute truth. Missing logs can mean the request never reached the app, crashed early, or logging failed.
+  </InfoCard>
+</CardGrid>
+
+Good middleware should add visibility without becoming a new performance problem.
+
+## A Practical Middleware Logging Workflow
+
+A useful backend logging workflow can start simple.
+
+Step one: create a request ID middleware.
+
+```text
+Incoming request -> create or reuse request ID -> attach it to req -> return it in response header
+```
+
+Step two: create a request completion logger.
+
+```text
+Start timer -> route runs -> response finishes -> log method, path, status, duration, request ID
+```
+
+Step three: create a centralized error middleware.
+
+```text
+Error thrown -> normalize error -> log request ID and error type -> return consistent error response
+```
+
+Step four: connect logs to a search system.
+
+```text
+Application logs -> log collector -> searchable dashboard
+```
+
+Step five: create practical views.
+
+Useful dashboards include:
+
+- Slowest endpoints by p95 latency.
+- Error count by route.
+- Request count by route.
+- Error count by user or tenant.
+- Slow requests after deployment.
+- Timeout count by downstream service.
+
+This workflow keeps the first version small but useful. The goal is not to build perfect observability on day one. The goal is to stop debugging blind.
+
+## The Main Principle
+
+Middleware is the edge of the application process. That makes it the best place to record the lifecycle of a request.
+
+Use middleware to answer four questions:
+
+```text
+Who called us?
+What did they call?
+How long did it take?
+What happened?
+```
+
+Once those questions are answered consistently, performance debugging becomes less emotional and more mechanical. We stop guessing from symptoms and start following request evidence.
+
+</Lang>
+
+<Lang lang="zh">
+
+Middleware 是后端系统里最适合做观察的位置之一，因为每一个 request 进入 application 后，都会先经过 middleware，再进入真正的业务逻辑，最后 response 离开 server 时也可以被 middleware 记录。用得好，middleware 可以告诉我们哪个 endpoint 慢、哪个 request 失败、哪个用户触发了问题、request 的生命周期大概花在哪里。
+
+## 简短答案
+
+Middleware 可以帮助我们识别 performance 和 logging 问题，因为它包住了 request 的生命周期。
+
+它可以记录：
+
+- Request 什么时候进入 application。
+- 调用了哪个 method 和 route。
+- 是哪个 user、client、service 发起 request。
+- Request 总共花了多久。
+- Request 成功还是失败。
+- 最后返回了什么 status code。
+- 哪个 correlation ID 可以把这次 request 的日志串起来。
+- Request 生命周期里哪里出现了 error。
+
+重点是：middleware 不应该只是随便 print log。Middleware 应该产出结构化的 signals，让我们可以 debug production behavior。
+
+弱的 log 长这样：
+
+```text
+Request completed
+```
+
+有用的 middleware log 长这样：
+
+```json
+{
+  "requestId": "req_8f21",
+  "method": "POST",
+  "path": "/api/orders",
+  "statusCode": 500,
+  "durationMs": 842,
+  "userId": "u_123",
+  "errorName": "DatabaseTimeoutError"
+}
+```
+
+第二种 log 才有 debugging direction。它告诉我们 request 失败了、哪个 endpoint 失败、它慢到什么程度、error 大概属于什么类型。
+
+## Middleware 是什么
+
+Middleware 是一段运行在 server 收到 request 之后、route handler 执行业务逻辑之前或之后的代码。
+
+一个常见的 HTTP backend flow 大概是这样：
+
+```text
+Client
+  -> Server
+  -> Middleware 1
+  -> Middleware 2
+  -> Route Handler
+  -> Middleware After Logic
+  -> Response
+  -> Client
+```
+
+Middleware 可以在 route handler 之前执行，也可以在 route handler 之后执行，也可以前后都参与。
+
+所以它很适合处理 cross-cutting concerns。所谓 cross-cutting concern，就是很多 routes 都需要，但不应该重复写在每个 controller 里面的逻辑。
+
+| Concern | 为什么适合放在 Middleware |
+| --- | --- |
+| Request logging | 每个 endpoint 都应该可以被观察 |
+| Performance timing | 每个 request 都有开始和结束时间 |
+| Authentication | 很多 route 都需要身份检查 |
+| Rate limiting | 流量控制应该尽量发生在业务逻辑之前 |
+| Error handling | Error 需要统一格式和统一记录 |
+| Correlation ID | 同一个 request 的 logs 需要被串起来 |
+| Response compression | 很多 response 都适用 |
+
+Middleware 不是业务逻辑本身。它更像是 request lifecycle 的准备层、观察层、保护层和收尾层。
+
+## 为什么 Middleware 适合做 Performance Logging
+
+Performance logging 需要一个稳定的边界。
+
+如果我们把 timing logic 写在每个 controller 里面，最后实现一定会变得不一致。一个 developer 可能在 validation 之前开始计时，另一个 developer 可能在 validation 之后才开始计时，也有人可能忘记记录失败 request。
+
+Middleware 给我们一个统一的 measurement boundary：
+
+```text
+Request enters application -> timer starts
+Response finishes -> timer stops
+```
+
+这样我们就可以用稳定的方式测量 request duration。
+
+比如在 Express 风格的 Node.js backend 里面，middleware 可以在进入 route handler 前启动 timer，然后等 response finish 时记录总耗时。
+
+核心逻辑是这样：
+
+```javascript
+app.use((req, res, next) => {
+  const startedAt = Date.now();
+
+  res.on("finish", () => {
+    const durationMs = Date.now() - startedAt;
+
+    console.log({
+      method: req.method,
+      path: req.path,
+      statusCode: res.statusCode,
+      durationMs,
+    });
+  });
+
+  next();
+});
+```
+
+代码很简单，但原则很重要。所有 route 都自动拥有基本的 performance logging，不需要在每个 route 里面重复写 timing code。
+
+## Middleware 可以帮我们识别什么
+
+Middleware 的价值在于，它可以把原本只是流量的 request，变成可以搜索、可以统计、可以对比的 production evidence。
+
+<CardGrid columns={2}>
+  <InfoCard title="1. 慢 Endpoint">
+    Middleware 可以记录每个 route 的 request duration。这样我们可以知道是 `/api/orders` 慢，还是 `/api/users` 慢，而不是只靠用户投诉猜。
+  </InfoCard>
+
+  <InfoCard title="2. Error 热点">
+    Middleware 可以记录 status code 和 error type。如果某个 endpoint 经常返回 `500`，那个 route 就是第一优先 debugging target。
+  </InfoCard>
+
+  <InfoCard title="3. Request Volume">
+    Middleware 可以统计每个 endpoint 的 request 数量。一个很少人用但很慢的 endpoint，和一个核心 endpoint 中等程度变慢，处理优先级是不一样的。
+  </InfoCard>
+
+  <InfoCard title="4. User 或 Tenant 影响范围">
+    Middleware 可以附上 user ID、tenant ID 或 service name。这样可以判断问题是影响所有人，还是只影响某一组用户。
+  </InfoCard>
+
+  <InfoCard title="5. Downstream Failure 方向">
+    Middleware 可以记录 error category，例如 database timeout、validation error、external API failure、permission failure。
+  </InfoCard>
+
+  <InfoCard title="6. Request Traceability">
+    Middleware 可以生成 request ID。这个 ID 可以把 application log、database log、queue log、reverse proxy log 串起来。
+  </InfoCard>
+</CardGrid>
+
+没有 middleware 的时候，debugging 很容易变得分散。Log 到处都有，格式也不统一。有 middleware 以后，每个 request 至少都有一份统一的基本证据。
+
+## 我们应该记录哪些 Signals
+
+好的 middleware logging 应该是 structured logging。目标不是写更多文字，而是写出可以 filter、group、count、compare 的 logs。
+
+一个实用的 request log 通常应该包含：
+
+| Field | 用途 |
+| --- | --- |
+| `requestId` | 把同一个 request 的 logs 串起来 |
+| `method` | 说明 request 是 `GET`、`POST`、`PUT` 还是 `DELETE` |
+| `path` | 说明调用了哪个 endpoint |
+| `statusCode` | 说明成功或失败 |
+| `durationMs` | 说明 request latency |
+| `userId` | 可以知道是谁触发了 request |
+| `ip` | 帮助判断 traffic source pattern |
+| `userAgent` | 帮助识别 client 类型 |
+| `errorName` | 按 error category 分组 |
+| `timestamp` | 把事件放回 timeline |
+
+其中 `durationMs` 特别重要。它可以让我们问更具体的问题：
+
+- 哪个 route 平均最慢？
+- 哪个 route 的 p95 latency 最高？
+- Deployment 之后 latency 有没有上升？
+- Failed request 是不是比 successful request 更慢？
+- 某些 user 或 tenant 是不是影响更严重？
+
+Middleware 不会回答所有问题，但它会给我们第一层证据。
+
+## Middleware 设计例子
+
+Production-ready middleware 不应该输出随机字符串。它应该为每个 request 创建一个 structured event。
+
+在 Node.js service 里面，结构可以像这样：
+
+```javascript
+function requestLogger(req, res, next) {
+  const startedAt = process.hrtime.bigint();
+
+  req.requestId = req.headers["x-request-id"] || crypto.randomUUID();
+
+  res.setHeader("x-request-id", req.requestId);
+
+  res.on("finish", () => {
+    const endedAt = process.hrtime.bigint();
+    const durationMs = Number(endedAt - startedAt) / 1_000_000;
+
+    const logEvent = {
+      event: "http_request_completed",
+      requestId: req.requestId,
+      method: req.method,
+      path: req.route?.path || req.path,
+      statusCode: res.statusCode,
+      durationMs: Math.round(durationMs),
+      userId: req.user?.id || null,
+      timestamp: new Date().toISOString(),
+    };
+
+    console.log(JSON.stringify(logEvent));
+  });
+
+  next();
+}
+```
+
+这里有几个关键点：
+
+- `process.hrtime.bigint()` 比普通 wall-clock time 更适合测量短时间 duration。
+- `requestId` 只创建一次，然后在 request lifecycle 里面复用。
+- Response header 返回 request ID，client 报错时可以带回来。
+- Log 是 JSON，比较适合放进 ELK、Loki、Datadog、CloudWatch 这类系统搜索。
+
+这个 middleware 不需要知道业务逻辑。它只负责观察 lifecycle。
+
+## Middleware 如何帮助 Debug Production 问题
+
+Middleware logs 应该帮助我们从模糊症状进入具体检查。
+
+| Symptom | Middleware Signal | Next Direction |
+| --- | --- | --- |
+| 用户说 app 很慢 | 某些 route 的 `durationMs` 很高 | 检查该 route 的代码和 database queries |
+| 随机出现 500 | 同一个 `path` 重复出现 `statusCode: 500` | 检查 error handler 和 stack trace |
+| 只有一个 customer 受影响 | 慢 logs 集中在同一个 `tenantId` | 检查 tenant-specific data volume |
+| Traffic 突然增加 | 按 path 或 IP 统计 request count 上升 | 检查 rate limit 和 caching |
+| API gateway timeout | Middleware 没有 completion event | Request 可能在 response finish 前卡住 |
+| Backend 很快但用户觉得慢 | Backend `durationMs` 很低 | 检查 frontend、network、CDN 或 client rendering |
+
+这才是 middleware 的真正价值。Middleware 不会自动修好 performance，但它会缩小搜索范围。
+
+我们不再问：
+
+```text
+为什么系统很慢？
+```
+
+而是问：
+
+```text
+哪个 endpoint 变慢？
+哪些用户受影响？
+什么时候开始的？
+是不是 deployment 后发生的？
+这是 slow success 还是 slow failure？
+Request 有没有进入 application？
+```
+
+这些问题更好，因为它们可以被证据回答。
+
+## Middleware 不是全部
+
+Middleware 是 observability 的第一层，不是完整的 observability 系统。
+
+它可以告诉我们 `/api/orders` 花了 `842ms`，但它不一定能告诉我们内部哪一步吃掉了这 `842ms`。
+
+更深入的诊断，需要把 middleware log 和更底层的 signals 连接起来：
+
+| Layer | 它能说明什么 |
+| --- | --- |
+| Middleware log | Request path、status、total duration |
+| Application span | 哪个 function 或 service step 慢 |
+| Database query log | 哪条 SQL query 花时间 |
+| Cache log | Request 有没有 cache miss |
+| Queue log | Async work 有没有 delay |
+| Reverse proxy log | Traffic 有没有到达 application |
+| Infrastructure metric | CPU、memory、network、disk pressure |
+
+Request ID 就是连接这些 layers 的关键。
+
+如果 middleware log 有 `requestId: req_8f21`，database log、service log、error log 也应该带着 `req_8f21`。没有这个 ID，debugging 就会变成手动搜索。
+
+## 常见错误
+
+Middleware logging 如果设计得不好，也会制造新问题。
+
+<CardGrid columns={2}>
+  <InfoCard title="Logging Too Much">
+    不要默认记录完整 request body。Body 里面可能有 password、token、personal data，或者 payload 本身很大。
+  </InfoCard>
+
+  <InfoCard title="Logging Without Structure">
+    Plain text logs 对人类可读，但对 production analysis 很弱。更推荐使用有稳定 field name 的 JSON event。
+  </InfoCard>
+
+  <InfoCard title="Measuring the Wrong Boundary">
+    如果 timing 从 validation 或 authentication 之后才开始，duration 就不能代表完整 request cost。
+  </InfoCard>
+
+  <InfoCard title="No Request ID">
+    没有 request ID，一次 failed request 就很难跨 application logs、database logs、proxy logs 串起来。
+  </InfoCard>
+
+  <InfoCard title="Blocking the Request">
+    Logging 不应该让 request 变慢。尽量避免在 hot path 里面做同步 remote logging。
+  </InfoCard>
+
+  <InfoCard title="Treating Logs as Proof">
+    Logs 是 evidence，不是绝对真相。Missing logs 可能代表 request 没到 app、太早 crash、或者 logging 自己失败。
+  </InfoCard>
+</CardGrid>
+
+好的 middleware 应该增加 visibility，而不是变成新的 performance problem。
+
+## 一个实用的 Middleware Logging Workflow
+
+一个实用的 backend logging workflow 可以从简单版本开始。
+
+第一步：建立 request ID middleware。
+
+```text
+Incoming request -> create or reuse request ID -> attach it to req -> return it in response header
+```
+
+第二步：建立 request completion logger。
+
+```text
+Start timer -> route runs -> response finishes -> log method, path, status, duration, request ID
+```
+
+第三步：建立 centralized error middleware。
+
+```text
+Error thrown -> normalize error -> log request ID and error type -> return consistent error response
+```
+
+第四步：把 logs 接到可搜索系统。
+
+```text
+Application logs -> log collector -> searchable dashboard
+```
+
+第五步：建立实用 dashboard。
+
+有用的 dashboard 包括：
+
+- 按 p95 latency 排列的 slowest endpoints。
+- 按 route 分组的 error count。
+- 按 route 分组的 request count。
+- 按 user 或 tenant 分组的 error count。
+- Deployment 后的 slow requests。
+- 按 downstream service 分组的 timeout count。
+
+这个 workflow 的重点是先小而有用。第一版 observability 不需要完美，但它必须让我们停止 blind debugging。
+
+## 核心原则
+
+Middleware 是 application process 的边界层。也因为它在边界，所以它最适合记录 request lifecycle。
+
+用 middleware 回答四个问题：
+
+```text
+谁调用了我们？
+调用了什么？
+花了多久？
+发生了什么？
+```
+
+当这四个问题可以被稳定回答时，performance debugging 就会从情绪化猜测，变成机械化追踪。我们不再根据症状乱猜，而是沿着 request evidence 一步一步往下查。
+
+</Lang>

@@ -1,0 +1,1151 @@
+---
+title: "AOP and Middleware: Injecting Logging Without Touching Business Logic"
+category: "Software Development"
+createdAt: "2026-06-05"
+summary: "A practical comparison of Java AOP and Node.js middleware for adding performance logging, request tracing, and error observation without polluting core service logic."
+readTime: "10 min read"
+tags:
+  - "Backend"
+  - "HTTP"
+  - "Node.js"
+  - "System Design"
+featured: false
+series:
+  title: "Art of Middleware"
+  slug: "art-of-middleware"
+  order: 2
+---
+
+<Lang lang="en">
+
+Performance logging should not be scattered across every service method. If logging logic is mixed directly into business logic, the code becomes noisy, inconsistent, and hard to maintain. Java AOP and Node.js middleware solve the same architectural problem from two different angles: they let us inject cross-cutting behavior around the core execution flow without rewriting the business service itself.
+
+## Short Answer
+
+Java AOP and Node.js middleware both help us add logging, tracing, timing, authentication checks, and error handling outside the core business logic.
+
+The difference is where they attach.
+
+| Technique | Common Runtime | Where It Attaches | Best For |
+| --- | --- | --- | --- |
+| AOP | Java / Spring | Around method execution | Service-layer logging, transaction-like behavior, method timing |
+| Middleware | Node.js / Express / Koa / Fastify | Around HTTP request lifecycle | Request logging, route timing, request ID, response status tracking |
+
+AOP is usually method-centric.
+
+Middleware is usually request-centric.
+
+For example, if we want to log how long `OrderService.createOrder()` takes, Java AOP is a clean fit. If we want to log how long `POST /api/orders` takes from HTTP entry to response finish, Node.js middleware is a clean fit.
+
+Both approaches follow the same principle:
+
+```text
+Do not pollute business logic with repeated infrastructure code.
+Wrap the execution boundary and observe it from the outside.
+```
+
+## The Problem: Logging Mixed Into Business Logic
+
+A common beginner implementation puts logging directly inside the service method.
+
+```javascript
+async function createOrder(orderInput) {
+  const startedAt = Date.now();
+  console.log("createOrder started");
+
+  const user = await userRepository.findById(orderInput.userId);
+  const order = await orderRepository.insert(orderInput);
+  await paymentService.charge(order);
+
+  const durationMs = Date.now() - startedAt;
+  console.log("createOrder completed", { durationMs });
+
+  return order;
+}
+```
+
+This works, but it creates several problems.
+
+The service method now has two responsibilities:
+
+- Create an order.
+- Handle observability logic.
+
+That looks harmless at first, but it becomes messy when every service method repeats the same pattern.
+
+The same problem appears in Java:
+
+```java
+public Order createOrder(CreateOrderRequest request) {
+    long startedAt = System.currentTimeMillis();
+    log.info("createOrder started");
+
+    User user = userRepository.findById(request.userId());
+    Order order = orderRepository.save(request);
+    paymentService.charge(order);
+
+    long durationMs = System.currentTimeMillis() - startedAt;
+    log.info("createOrder completed in {} ms", durationMs);
+
+    return order;
+}
+```
+
+The business logic is now surrounded by logging code. If the logging format changes, many methods must be changed. If a developer forgets to add timing logic, observability becomes inconsistent.
+
+This is exactly the type of problem AOP and middleware are designed to solve.
+
+## What Cross-Cutting Concern Means
+
+A cross-cutting concern is behavior needed by many parts of the system but not owned by the core business domain.
+
+Logging is a cross-cutting concern because almost every route and service may need it. But `OrderService` should not need to know how logs are formatted for ELK, Datadog, Loki, or CloudWatch.
+
+Common cross-cutting concerns include:
+
+| Concern | Why It Should Be Separated |
+| --- | --- |
+| Request logging | Needed everywhere, not specific to one feature |
+| Performance timing | Same measurement pattern repeated across methods |
+| Error handling | Needs consistent structure across the system |
+| Authentication | Protects access before business logic runs |
+| Authorization | Checks permissions without polluting domain flow |
+| Rate limiting | Controls traffic before expensive work |
+| Transaction handling | Wraps database work around service methods |
+| Metrics collection | Reports system signals, not domain behavior |
+
+The business service should answer domain questions:
+
+```text
+Can this order be created?
+Is the user allowed to buy this product?
+How much should the user pay?
+What state should the order become?
+```
+
+Infrastructure layers should answer operational questions:
+
+```text
+How long did the request take?
+Which endpoint failed?
+Which method threw an exception?
+Which user or request ID triggered this flow?
+```
+
+AOP and middleware exist to keep these two categories separate.
+
+## How Java AOP Injects Logging
+
+AOP means Aspect-Oriented Programming.
+
+In Java, especially in Spring, AOP allows us to define logic that runs before, after, or around selected method executions. The business method does not call the logging code directly. Instead, the framework wraps the method call.
+
+The flow looks like this:
+
+```text
+Controller
+  -> AOP Proxy
+  -> Before Logic
+  -> Business Service Method
+  -> After Logic
+  -> Controller
+```
+
+The service method stays focused:
+
+```java
+@Service
+public class OrderService {
+    public Order createOrder(CreateOrderRequest request) {
+        User user = userRepository.findById(request.userId());
+        Order order = orderRepository.save(request);
+        paymentService.charge(order);
+        return order;
+    }
+}
+```
+
+The logging concern moves into an aspect:
+
+```java
+@Aspect
+@Component
+public class PerformanceLoggingAspect {
+
+    private static final Logger log = LoggerFactory.getLogger(PerformanceLoggingAspect.class);
+
+    @Around("execution(* com.example.order..*(..))")
+    public Object logDuration(ProceedingJoinPoint joinPoint) throws Throwable {
+        long startedAt = System.nanoTime();
+
+        try {
+            return joinPoint.proceed();
+        } finally {
+            long durationMs = (System.nanoTime() - startedAt) / 1_000_000;
+
+            log.info("method={} durationMs={}",
+                joinPoint.getSignature().toShortString(),
+                durationMs
+            );
+        }
+    }
+}
+```
+
+Now every matched method can be timed without adding logging code into every method.
+
+The important part is `joinPoint.proceed()`. It represents the original method execution.
+
+```text
+Before proceed -> code runs before the business method
+proceed        -> original business method runs
+After proceed  -> code runs after the business method
+```
+
+This is why AOP is useful for service-layer observability. It gives us a controlled wrapper around method execution.
+
+## How Node.js Middleware Injects Logging
+
+Node.js middleware usually wraps the HTTP request lifecycle.
+
+In Express, the middleware receives `req`, `res`, and `next`.
+
+```text
+Client
+  -> Middleware
+  -> Route Handler
+  -> Response Finish
+  -> Middleware Finish Listener
+```
+
+The route handler stays clean:
+
+```javascript
+app.post("/api/orders", async (req, res) => {
+  const order = await orderService.createOrder(req.body);
+  res.status(201).json(order);
+});
+```
+
+The logging concern is injected at the HTTP layer:
+
+```javascript
+app.use((req, res, next) => {
+  const startedAt = process.hrtime.bigint();
+
+  res.on("finish", () => {
+    const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+
+    console.log(JSON.stringify({
+      event: "http_request_completed",
+      method: req.method,
+      path: req.path,
+      statusCode: res.statusCode,
+      durationMs: Math.round(durationMs),
+    }));
+  });
+
+  next();
+});
+```
+
+The business route does not need to know how request logging works. It only handles the domain operation.
+
+Middleware is especially good at request-level observability because it can see:
+
+- HTTP method.
+- Path.
+- Query string.
+- Request headers.
+- Response status code.
+- Response finish event.
+- Request ID.
+- Client IP.
+- User identity after authentication middleware.
+
+AOP observes method execution. Middleware observes request execution.
+
+## Same Goal, Different Boundary
+
+AOP and middleware are not enemies. They are different tools for different execution boundaries.
+
+| Question | Better Tool | Reason |
+| --- | --- | --- |
+| How long did `POST /api/orders` take? | Middleware | It observes the full HTTP lifecycle |
+| How long did `OrderService.createOrder()` take? | AOP | It observes service method execution |
+| Which response status was returned? | Middleware | It has access to `res.statusCode` |
+| Which internal method is slow? | AOP | It can wrap selected service methods |
+| Did the request reach the app? | Middleware | It runs near the HTTP entry point |
+| Did a specific domain operation become slow? | AOP | It targets domain service methods |
+| Should logging avoid controller/service pollution? | Both | Both separate cross-cutting concerns |
+
+A practical backend can use both layers.
+
+```text
+Middleware log:
+POST /api/orders -> 920ms -> 201
+
+AOP method log:
+OrderService.createOrder() -> 730ms
+PaymentService.charge() -> 510ms
+InventoryService.reserve() -> 120ms
+```
+
+The middleware log tells us the request was slow. The AOP logs help identify which internal method consumed the time.
+
+This creates a layered debugging path:
+
+```text
+Request is slow
+  -> Which route?
+  -> Which service method?
+  -> Which database query or downstream call?
+```
+
+## Why This Keeps Business Logic Clean
+
+The main benefit is separation of concerns.
+
+Business logic should not care about how logging infrastructure works. It should care about the rules of the domain.
+
+A clean service method should look like this:
+
+```java
+public Order createOrder(CreateOrderRequest request) {
+    validateOrder(request);
+    reserveInventory(request);
+    Order order = orderRepository.save(request);
+    paymentService.charge(order);
+    return order;
+}
+```
+
+This is readable because every line belongs to the order creation process.
+
+A polluted service method looks like this:
+
+```java
+public Order createOrder(CreateOrderRequest request) {
+    long startedAt = System.nanoTime();
+    log.info("createOrder started requestId={}", RequestContext.getRequestId());
+
+    try {
+        validateOrder(request);
+        reserveInventory(request);
+        Order order = orderRepository.save(request);
+        paymentService.charge(order);
+        return order;
+    } catch (Exception error) {
+        log.error("createOrder failed", error);
+        throw error;
+    } finally {
+        long durationMs = (System.nanoTime() - startedAt) / 1_000_000;
+        log.info("createOrder completed durationMs={}", durationMs);
+    }
+}
+```
+
+This second version is harder to scan. The domain flow is hidden inside infrastructure code.
+
+AOP and middleware solve this by moving repeated operational logic into a wrapper layer.
+
+<CardGrid columns={2}>
+  <InfoCard title="Business Logic Stays Focused">
+    Service methods describe domain behavior instead of logging mechanics.
+  </InfoCard>
+
+  <InfoCard title="Logging Becomes Consistent">
+    Every matched route or method follows the same event structure and timing rule.
+  </InfoCard>
+
+  <InfoCard title="Changes Become Safer">
+    Updating log format, fields, or destination can happen in one layer instead of many services.
+  </InfoCard>
+
+  <InfoCard title="Debugging Becomes Searchable">
+    Structured events make it easier to filter by route, method, status code, request ID, or duration.
+  </InfoCard>
+</CardGrid>
+
+Clean business logic is not only aesthetic. It reduces maintenance cost.
+
+## What Each Layer Should Log
+
+Do not make middleware and AOP log the exact same thing. That creates noise.
+
+Each layer should own a different level of detail.
+
+| Layer | Should Log | Should Avoid |
+| --- | --- | --- |
+| HTTP Middleware | Request path, method, status, total duration, request ID | Deep domain details |
+| AOP Service Aspect | Method name, class name, method duration, exception type | Raw HTTP headers |
+| Error Middleware | Normalized error response, request ID, error category | Sensitive payload |
+| Database Logger | Query duration, query type, lock/wait signal | Full private data |
+| External Call Wrapper | Target service, duration, status, timeout | Access tokens |
+
+A good rule:
+
+```text
+Middleware tells us what happened at the request boundary.
+AOP tells us what happened inside the application boundary.
+```
+
+For example, middleware may produce:
+
+```json
+{
+  "event": "http_request_completed",
+  "requestId": "req_123",
+  "method": "POST",
+  "path": "/api/orders",
+  "statusCode": 201,
+  "durationMs": 920
+}
+```
+
+AOP may produce:
+
+```json
+{
+  "event": "method_completed",
+  "requestId": "req_123",
+  "className": "OrderService",
+  "methodName": "createOrder",
+  "durationMs": 730
+}
+```
+
+Together, they tell a stronger story than either one alone.
+
+## Request ID Is the Bridge
+
+AOP and middleware become much more useful when they share the same request ID.
+
+The middleware should create or read a request ID when the HTTP request enters the application.
+
+```text
+Incoming HTTP request
+  -> create requestId
+  -> attach requestId to request context
+  -> route handler runs
+  -> service method runs
+  -> AOP logs method with same requestId
+  -> response returns requestId
+```
+
+In Node.js, the request ID can be attached to `req` or stored using `AsyncLocalStorage`.
+
+```javascript
+import { AsyncLocalStorage } from "node:async_hooks";
+import crypto from "node:crypto";
+
+const requestContext = new AsyncLocalStorage();
+
+app.use((req, res, next) => {
+  const requestId = req.headers["x-request-id"] || crypto.randomUUID();
+
+  requestContext.run({ requestId }, () => {
+    res.setHeader("x-request-id", requestId);
+    next();
+  });
+});
+
+function getRequestId() {
+  return requestContext.getStore()?.requestId;
+}
+```
+
+In Java, request context is often stored using a logging MDC.
+
+```java
+@Component
+public class RequestIdFilter extends OncePerRequestFilter {
+
+    @Override
+    protected void doFilterInternal(
+        HttpServletRequest request,
+        HttpServletResponse response,
+        FilterChain filterChain
+    ) throws ServletException, IOException {
+        String requestId = Optional
+            .ofNullable(request.getHeader("x-request-id"))
+            .orElse(UUID.randomUUID().toString());
+
+        MDC.put("requestId", requestId);
+        response.setHeader("x-request-id", requestId);
+
+        try {
+            filterChain.doFilter(request, response);
+        } finally {
+            MDC.remove("requestId");
+        }
+    }
+}
+```
+
+Then the AOP aspect can log normally, and the logging framework can include `requestId` from MDC.
+
+This is the key design: middleware or filter creates the request context, and deeper layers reuse it.
+
+## Common Mistakes
+
+AOP and middleware are powerful, but they can be misused.
+
+<CardGrid columns={2}>
+  <InfoCard title="Using AOP for Everything">
+    AOP is useful for method-level cross-cutting behavior, but too much hidden behavior makes code hard to reason about.
+  </InfoCard>
+
+  <InfoCard title="Logging Full Payloads">
+    Request bodies and method arguments may contain passwords, tokens, or personal data. Log identifiers and safe metadata by default.
+  </InfoCard>
+
+  <InfoCard title="No Shared Request ID">
+    Middleware logs and AOP logs are much weaker when they cannot be connected to the same request.
+  </InfoCard>
+
+  <InfoCard title="Duplicate Logs at Every Layer">
+    If every layer logs the same event, the signal becomes noisy. Each layer should own a different level of detail.
+  </InfoCard>
+
+  <InfoCard title="Blocking Remote Logging">
+    Sending logs synchronously to a remote system inside the request path can add latency or create failure coupling.
+  </InfoCard>
+
+  <InfoCard title="Forgetting Error Paths">
+    Logging only successful completion hides the most important cases. Failure and timeout paths need structured events too.
+  </InfoCard>
+</CardGrid>
+
+The goal is not to add more logs. The goal is to add better boundaries.
+
+## A Practical Implementation Order
+
+A good implementation does not start with perfect observability. It starts with a small number of consistent signals.
+
+Step one: add HTTP middleware or filter logging.
+
+```text
+requestId, method, path, statusCode, durationMs
+```
+
+Step two: add centralized error logging.
+
+```text
+requestId, path, errorName, errorMessage, statusCode
+```
+
+Step three: add AOP only to important service packages.
+
+```text
+OrderService, PaymentService, InventoryService
+```
+
+Step four: connect all logs through the same request ID.
+
+```text
+HTTP request log -> service method log -> database or downstream log
+```
+
+Step five: create dashboards around questions, not around random fields.
+
+Useful first dashboards:
+
+- Slowest routes by p95 latency.
+- Error count by route.
+- Slowest service methods.
+- Error count by exception type.
+- Timeout count by downstream service.
+- Latency before and after deployment.
+
+The best first version is boring but consistent.
+
+## The Main Principle
+
+AOP and middleware are both wrapper mechanisms.
+
+Middleware wraps the HTTP lifecycle.
+
+AOP wraps method execution.
+
+They help us inject logging, timing, tracing, and error observation without touching the core business service logic. This keeps business code readable and makes operational behavior consistent.
+
+The practical rule is:
+
+```text
+Use middleware to observe the request.
+Use AOP to observe the service method.
+Use request ID to connect both.
+Keep business logic focused on business rules.
+```
+
+That is how logging becomes an architecture feature instead of scattered console output.
+
+</Lang>
+
+<Lang lang="zh">
+
+Performance logging 不应该散落在每一个 service method 里面。如果 logging logic 直接混进 business logic，代码会变得吵、不一致、难维护。Java AOP 和 Node.js middleware 其实是在解决同一个架构问题：把 logging、timing、tracing 这些 cross-cutting behavior 注入到执行流程外层，而不是改动核心业务 service。
+
+## 简短答案
+
+Java AOP 和 Node.js middleware 都可以帮助我们在不污染 core business logic 的情况下，加入 logging、tracing、timing、authentication check 和 error handling。
+
+差别在于它们 attach 的位置不同。
+
+| Technique | 常见 Runtime | Attach 位置 | 最适合做什么 |
+| --- | --- | --- | --- |
+| AOP | Java / Spring | Method execution 外层 | Service-layer logging、method timing、类似 transaction 的包装逻辑 |
+| Middleware | Node.js / Express / Koa / Fastify | HTTP request lifecycle 外层 | Request logging、route timing、request ID、response status tracking |
+
+AOP 通常是 method-centric。
+
+Middleware 通常是 request-centric。
+
+例如，如果我们要记录 `OrderService.createOrder()` 花了多久，Java AOP 很适合。如果我们要记录 `POST /api/orders` 从 HTTP 入口到 response 结束总共花了多久，Node.js middleware 很适合。
+
+两者背后的原则一样：
+
+```text
+不要把重复的 infrastructure code 塞进 business logic。
+把 execution boundary 包起来，然后从外部观察它。
+```
+
+## 问题：Logging 混进 Business Logic
+
+很常见的初级写法，是直接在 service method 里面加 logging。
+
+```javascript
+async function createOrder(orderInput) {
+  const startedAt = Date.now();
+  console.log("createOrder started");
+
+  const user = await userRepository.findById(orderInput.userId);
+  const order = await orderRepository.insert(orderInput);
+  await paymentService.charge(order);
+
+  const durationMs = Date.now() - startedAt;
+  console.log("createOrder completed", { durationMs });
+
+  return order;
+}
+```
+
+这可以工作，但会制造几个问题。
+
+这个 service method 现在有两个责任：
+
+- 创建订单。
+- 处理 observability logic。
+
+一开始看起来没什么，但当每个 service method 都重复同样模式时，代码就会变得很乱。
+
+Java 里面也会出现同样问题：
+
+```java
+public Order createOrder(CreateOrderRequest request) {
+    long startedAt = System.currentTimeMillis();
+    log.info("createOrder started");
+
+    User user = userRepository.findById(request.userId());
+    Order order = orderRepository.save(request);
+    paymentService.charge(order);
+
+    long durationMs = System.currentTimeMillis() - startedAt;
+    log.info("createOrder completed in {} ms", durationMs);
+
+    return order;
+}
+```
+
+Business logic 现在被 logging code 包起来了。如果 log format 要改，就要改很多 method。如果某个 developer 忘记加 timing logic，observability 就不一致。
+
+这正是 AOP 和 middleware 要解决的问题。
+
+## Cross-Cutting Concern 是什么
+
+Cross-cutting concern 指的是很多地方都需要，但它不属于核心业务领域的行为。
+
+Logging 是 cross-cutting concern，因为几乎每个 route 和 service 都可能需要它。但是 `OrderService` 不应该关心 logs 最后是送去 ELK、Datadog、Loki 还是 CloudWatch。
+
+常见 cross-cutting concerns 包括：
+
+| Concern | 为什么应该分离 |
+| --- | --- |
+| Request logging | 到处都需要，不属于某一个 feature |
+| Performance timing | 同样的 measurement pattern 会重复出现在很多 method |
+| Error handling | 系统需要一致的 error 结构 |
+| Authentication | 应该在 business logic 之前保护入口 |
+| Authorization | 检查权限，但不应该盖住 domain flow |
+| Rate limiting | 在昂贵业务逻辑前控制流量 |
+| Transaction handling | 包住 database work |
+| Metrics collection | 报告系统信号，不是业务行为本身 |
+
+Business service 应该回答 domain questions：
+
+```text
+这个 order 能不能被创建？
+这个 user 能不能买这个 product？
+用户应该付多少钱？
+Order 应该进入什么状态？
+```
+
+Infrastructure layer 应该回答 operational questions：
+
+```text
+Request 花了多久？
+哪个 endpoint 失败？
+哪个 method 抛 exception？
+哪个 user 或 request ID 触发了这个 flow？
+```
+
+AOP 和 middleware 的价值，就是把这两类问题分开。
+
+## Java AOP 如何注入 Logging
+
+AOP 是 Aspect-Oriented Programming。
+
+在 Java，尤其是 Spring 里面，AOP 允许我们定义一段逻辑，在某些 method execution 之前、之后，或者前后包起来执行。Business method 不需要主动调用 logging code，而是由 framework 在外面包一层。
+
+Flow 大概是这样：
+
+```text
+Controller
+  -> AOP Proxy
+  -> Before Logic
+  -> Business Service Method
+  -> After Logic
+  -> Controller
+```
+
+Service method 保持干净：
+
+```java
+@Service
+public class OrderService {
+    public Order createOrder(CreateOrderRequest request) {
+        User user = userRepository.findById(request.userId());
+        Order order = orderRepository.save(request);
+        paymentService.charge(order);
+        return order;
+    }
+}
+```
+
+Logging concern 移到 aspect 里面：
+
+```java
+@Aspect
+@Component
+public class PerformanceLoggingAspect {
+
+    private static final Logger log = LoggerFactory.getLogger(PerformanceLoggingAspect.class);
+
+    @Around("execution(* com.example.order..*(..))")
+    public Object logDuration(ProceedingJoinPoint joinPoint) throws Throwable {
+        long startedAt = System.nanoTime();
+
+        try {
+            return joinPoint.proceed();
+        } finally {
+            long durationMs = (System.nanoTime() - startedAt) / 1_000_000;
+
+            log.info("method={} durationMs={}",
+                joinPoint.getSignature().toShortString(),
+                durationMs
+            );
+        }
+    }
+}
+```
+
+现在，所有被匹配到的 method 都可以被 timing，而不需要把 logging code 写进每个 method。
+
+关键是 `joinPoint.proceed()`。它代表原本的 method execution。
+
+```text
+Before proceed -> business method 之前执行
+proceed        -> 原本的 business method 执行
+After proceed  -> business method 之后执行
+```
+
+所以 AOP 很适合 service-layer observability。它让我们可以在 method execution 外面加一层可控的 wrapper。
+
+## Node.js Middleware 如何注入 Logging
+
+Node.js middleware 通常是包住 HTTP request lifecycle。
+
+在 Express 里面，middleware 会拿到 `req`、`res` 和 `next`。
+
+```text
+Client
+  -> Middleware
+  -> Route Handler
+  -> Response Finish
+  -> Middleware Finish Listener
+```
+
+Route handler 可以保持干净：
+
+```javascript
+app.post("/api/orders", async (req, res) => {
+  const order = await orderService.createOrder(req.body);
+  res.status(201).json(order);
+});
+```
+
+Logging concern 被注入在 HTTP layer：
+
+```javascript
+app.use((req, res, next) => {
+  const startedAt = process.hrtime.bigint();
+
+  res.on("finish", () => {
+    const durationMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+
+    console.log(JSON.stringify({
+      event: "http_request_completed",
+      method: req.method,
+      path: req.path,
+      statusCode: res.statusCode,
+      durationMs: Math.round(durationMs),
+    }));
+  });
+
+  next();
+});
+```
+
+Business route 不需要知道 request logging 是怎么实现的。它只处理 domain operation。
+
+Middleware 特别适合 request-level observability，因为它可以看到：
+
+- HTTP method。
+- Path。
+- Query string。
+- Request headers。
+- Response status code。
+- Response finish event。
+- Request ID。
+- Client IP。
+- Authentication middleware 之后得到的 user identity。
+
+AOP 观察 method execution。Middleware 观察 request execution。
+
+## 同一个目标，不同的 Boundary
+
+AOP 和 middleware 不是互相替代的关系。它们只是观察不同 execution boundary 的工具。
+
+| 问题 | 更适合的工具 | 原因 |
+| --- | --- | --- |
+| `POST /api/orders` 总共花了多久？ | Middleware | 它观察完整 HTTP lifecycle |
+| `OrderService.createOrder()` 花了多久？ | AOP | 它观察 service method execution |
+| 最后返回了什么 response status？ | Middleware | 它可以拿到 `res.statusCode` |
+| 内部哪个 method 慢？ | AOP | 它可以包住指定 service methods |
+| Request 有没有到达 app？ | Middleware | 它靠近 HTTP 入口 |
+| 某个 domain operation 是不是变慢？ | AOP | 它针对 domain service method |
+| 想避免 controller/service 被 logging 污染？ | 两者都可以 | 两者都能分离 cross-cutting concerns |
+
+一个实际 backend 可以同时使用两层。
+
+```text
+Middleware log:
+POST /api/orders -> 920ms -> 201
+
+AOP method log:
+OrderService.createOrder() -> 730ms
+PaymentService.charge() -> 510ms
+InventoryService.reserve() -> 120ms
+```
+
+Middleware log 告诉我们 request 慢了。AOP log 帮我们定位内部哪个 method 花时间。
+
+这样 debugging path 会分层：
+
+```text
+Request is slow
+  -> 哪个 route？
+  -> 哪个 service method？
+  -> 哪条 database query 或 downstream call？
+```
+
+## 为什么这能保持 Business Logic 干净
+
+核心价值是 separation of concerns。
+
+Business logic 不应该关心 logging infrastructure 怎么实现。它应该关心 domain rules。
+
+干净的 service method 应该像这样：
+
+```java
+public Order createOrder(CreateOrderRequest request) {
+    validateOrder(request);
+    reserveInventory(request);
+    Order order = orderRepository.save(request);
+    paymentService.charge(order);
+    return order;
+}
+```
+
+这段代码容易读，因为每一行都属于 order creation process。
+
+被污染的 service method 会像这样：
+
+```java
+public Order createOrder(CreateOrderRequest request) {
+    long startedAt = System.nanoTime();
+    log.info("createOrder started requestId={}", RequestContext.getRequestId());
+
+    try {
+        validateOrder(request);
+        reserveInventory(request);
+        Order order = orderRepository.save(request);
+        paymentService.charge(order);
+        return order;
+    } catch (Exception error) {
+        log.error("createOrder failed", error);
+        throw error;
+    } finally {
+        long durationMs = (System.nanoTime() - startedAt) / 1_000_000;
+        log.info("createOrder completed durationMs={}", durationMs);
+    }
+}
+```
+
+第二种版本比较难读。Domain flow 被 infrastructure code 挤在中间。
+
+AOP 和 middleware 通过 wrapper layer，把重复的 operational logic 移出去。
+
+<CardGrid columns={2}>
+  <InfoCard title="Business Logic 保持专注">
+    Service methods 只描述 domain behavior，而不是 logging mechanics。
+  </InfoCard>
+
+  <InfoCard title="Logging 更一致">
+    每个被匹配的 route 或 method 都使用同样的 event structure 和 timing rule。
+  </InfoCard>
+
+  <InfoCard title="修改更安全">
+    Log format、fields、destination 要调整时，可以集中在一个 layer 改，不需要改很多 services。
+  </InfoCard>
+
+  <InfoCard title="Debugging 更容易搜索">
+    Structured events 可以按 route、method、status code、request ID、duration 过滤。
+  </InfoCard>
+</CardGrid>
+
+Business logic 干净不是为了好看。它会直接降低维护成本。
+
+## 每一层应该记录什么
+
+不要让 middleware 和 AOP 记录完全一样的东西。那会制造 noise。
+
+每一层应该负责不同粒度的细节。
+
+| Layer | 应该记录 | 应该避免 |
+| --- | --- | --- |
+| HTTP Middleware | Request path、method、status、total duration、request ID | 太深的 domain details |
+| AOP Service Aspect | Method name、class name、method duration、exception type | Raw HTTP headers |
+| Error Middleware | Normalized error response、request ID、error category | Sensitive payload |
+| Database Logger | Query duration、query type、lock/wait signal | 完整 private data |
+| External Call Wrapper | Target service、duration、status、timeout | Access tokens |
+
+一个好规则是：
+
+```text
+Middleware 告诉我们 request boundary 发生了什么。
+AOP 告诉我们 application 内部 boundary 发生了什么。
+```
+
+例如，middleware 可以产出：
+
+```json
+{
+  "event": "http_request_completed",
+  "requestId": "req_123",
+  "method": "POST",
+  "path": "/api/orders",
+  "statusCode": 201,
+  "durationMs": 920
+}
+```
+
+AOP 可以产出：
+
+```json
+{
+  "event": "method_completed",
+  "requestId": "req_123",
+  "className": "OrderService",
+  "methodName": "createOrder",
+  "durationMs": 730
+}
+```
+
+两个合起来，比单独任何一个都更有解释力。
+
+## Request ID 是桥梁
+
+AOP 和 middleware 要变得真正有用，就必须共享同一个 request ID。
+
+Middleware 应该在 HTTP request 进入 application 时，创建或读取 request ID。
+
+```text
+Incoming HTTP request
+  -> create requestId
+  -> attach requestId to request context
+  -> route handler runs
+  -> service method runs
+  -> AOP logs method with same requestId
+  -> response returns requestId
+```
+
+在 Node.js 里，request ID 可以挂在 `req` 上，也可以用 `AsyncLocalStorage` 保存。
+
+```javascript
+import { AsyncLocalStorage } from "node:async_hooks";
+import crypto from "node:crypto";
+
+const requestContext = new AsyncLocalStorage();
+
+app.use((req, res, next) => {
+  const requestId = req.headers["x-request-id"] || crypto.randomUUID();
+
+  requestContext.run({ requestId }, () => {
+    res.setHeader("x-request-id", requestId);
+    next();
+  });
+});
+
+function getRequestId() {
+  return requestContext.getStore()?.requestId;
+}
+```
+
+在 Java 里，request context 通常可以用 logging MDC 保存。
+
+```java
+@Component
+public class RequestIdFilter extends OncePerRequestFilter {
+
+    @Override
+    protected void doFilterInternal(
+        HttpServletRequest request,
+        HttpServletResponse response,
+        FilterChain filterChain
+    ) throws ServletException, IOException {
+        String requestId = Optional
+            .ofNullable(request.getHeader("x-request-id"))
+            .orElse(UUID.randomUUID().toString());
+
+        MDC.put("requestId", requestId);
+        response.setHeader("x-request-id", requestId);
+
+        try {
+            filterChain.doFilter(request, response);
+        } finally {
+            MDC.remove("requestId");
+        }
+    }
+}
+```
+
+之后 AOP aspect 正常写 log，logging framework 就可以从 MDC 里面带上 `requestId`。
+
+这个设计的重点是：middleware 或 filter 负责建立 request context，深层 service 只复用它。
+
+## 常见错误
+
+AOP 和 middleware 很好用，但也很容易被滥用。
+
+<CardGrid columns={2}>
+  <InfoCard title="Using AOP for Everything">
+    AOP 适合 method-level cross-cutting behavior，但如果太多隐藏逻辑都靠 AOP，代码会变得难推理。
+  </InfoCard>
+
+  <InfoCard title="Logging Full Payloads">
+    Request body 和 method arguments 可能包含 password、token 或 personal data。默认只记录 identifiers 和 safe metadata。
+  </InfoCard>
+
+  <InfoCard title="No Shared Request ID">
+    Middleware logs 和 AOP logs 如果不能连接到同一个 request，价值会弱很多。
+  </InfoCard>
+
+  <InfoCard title="Duplicate Logs at Every Layer">
+    如果每一层都记录同样的 event，signal 会变吵。每一层应该负责不同 detail level。
+  </InfoCard>
+
+  <InfoCard title="Blocking Remote Logging">
+    在 request path 里面同步发送 logs 到远端系统，可能增加 latency，也可能造成 failure coupling。
+  </InfoCard>
+
+  <InfoCard title="Forgetting Error Paths">
+    只记录 successful completion 会漏掉最重要的情况。Failure 和 timeout path 也需要 structured events。
+  </InfoCard>
+</CardGrid>
+
+目标不是增加更多 logs。目标是增加更好的 boundaries。
+
+## 一个实用的实施顺序
+
+好的 implementation 不需要一开始就追求完美 observability。先建立少量稳定 signals 更重要。
+
+第一步：加入 HTTP middleware 或 filter logging。
+
+```text
+requestId, method, path, statusCode, durationMs
+```
+
+第二步：加入 centralized error logging。
+
+```text
+requestId, path, errorName, errorMessage, statusCode
+```
+
+第三步：只对重要 service packages 加 AOP。
+
+```text
+OrderService, PaymentService, InventoryService
+```
+
+第四步：用同一个 request ID 把所有 logs 串起来。
+
+```text
+HTTP request log -> service method log -> database or downstream log
+```
+
+第五步：根据问题建立 dashboard，不要根据随机字段建立 dashboard。
+
+第一批有用 dashboard：
+
+- 按 p95 latency 排列的 slowest routes。
+- 按 route 分组的 error count。
+- 最慢的 service methods。
+- 按 exception type 分组的 error count。
+- 按 downstream service 分组的 timeout count。
+- Deployment 前后的 latency 对比。
+
+最好的第一版通常很无聊，但必须一致。
+
+## 核心原则
+
+AOP 和 middleware 本质上都是 wrapper mechanism。
+
+Middleware 包住 HTTP lifecycle。
+
+AOP 包住 method execution。
+
+它们让我们在不触碰 core business service logic 的情况下，注入 logging、timing、tracing 和 error observation。这样 business code 保持可读，operational behavior 也保持一致。
+
+实用规则是：
+
+```text
+用 middleware 观察 request。
+用 AOP 观察 service method。
+用 request ID 把两者接起来。
+让 business logic 专心处理 business rules。
+```
+
+这样 logging 才会从散落的 console output，变成系统架构的一部分。
+
+</Lang>
