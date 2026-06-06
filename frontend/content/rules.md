@@ -718,7 +718,114 @@ Before returning the MDX, verify:
 - Cards use only `CardGrid` and `InfoCard`.
 - The article ends with a practical takeaway.
 
-## Raw MDX Output Preservation Rule
+## Strict MDX Response Format Rule
 
-- When generating a complete .mdx article for the user to copy into frontend/content/, the MDX source must be returned inside a single outer fenced code block labelled mdx.
-- Do not place the complete MDX article inside a rendered document block, rich-text block, canvas-style block, or any format that may interpret or transform YAML, Markdown, JSX, indentation, or code fences.
+When generating a complete `.mdx` article, the assistant must return the article as raw source code only.
+
+Required response shape:
+
+1. First line outside the code block:
+
+```text
+Filename: article-name.mdx
+```
+
+2. Then return the full MDX article inside one single outer fenced code block labelled `mdx`.
+
+3. The outer fence must use four backticks:
+
+````text
+````mdx
+FULL MDX CONTENT HERE
+
+
+4. Do not render any part of the MDX article outside the fenced code block.
+
+5. Do not put explanations, comments, summaries, or notes inside the MDX code block.
+
+6. If the MDX article contains inner code blocks, keep them as normal triple-backtick fences.
+
+Correct output format:
+
+`````text
+Filename: example-log.mdx
+
+````mdx
+---
+title: "Example Log"
+category: "Software Development"
+createdAt: "2026-06-06"
+summary: "One concise sentence explaining what the article teaches."
+readTime: "6 min read"
+tags:
+  - "Backend"
+  - "HTTP"
+  - "Node.js"
+featured: false
+---
+
+<Lang lang="en">
+
+Opening paragraph.
+
+## Short Answer
+
+Run this from the project root to check the build:
+
+```bash
+npm run build
+```
+
+</Lang>
+
+<Lang lang="zh">
+
+开头段落。
+
+## 简短答案
+
+在项目根目录运行这个命令来检查构建：
+
+```bash
+npm run build
+```
+
+</Lang>
+
+
+Wrong output format:
+
+```md
+---
+title: "Example Log"
+---
+
+<Lang lang="en">
+
+## Short Answer
+
+Content here.
+
+</Lang>
+```
+
+Why this is wrong:
+
+- The MDX is not wrapped in one outer fenced code block.
+- The chat UI may render headings, tables, and MDX components.
+- YAML indentation or JSX formatting may be transformed.
+````
+
+Also add this small rule near **AI Task**:
+
+```md
+When the user asks for a log, the final answer must contain only:
+
+- `Filename: <filename>.mdx`
+- One fenced `mdx` code block containing the full article
+
+Do not return the article as rendered Markdown.
+Do not use canvas, document blocks, rich text blocks, or split code blocks.
+```
+
+Your current rule is correct, but not strict enough. The key missing part is: **force four-backtick outer fence and define the exact final response shape.**
