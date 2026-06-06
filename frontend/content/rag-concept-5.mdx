@@ -1,13 +1,13 @@
 ---
-title: "RAG Failure Diagnosis: How to Find Where the Answer Broke"
+title: "RAG Vector Database Selection"
 category: "Software Development"
-createdAt: "2026-06-05"
-summary: "A practical workflow for identifying whether a RAG failure comes from indexing, retrieval, prompt design, generation, or validation."
-readTime: "12 min read"
+createdAt: "2026-06-06"
+summary: "A practical guide to choosing a suitable vector database for storing embeddings, metadata, and retrieval-ready RAG data."
+readTime: "9 min read"
 tags:
-  - "AI"
   - "RAG"
-  - "Debugging"
+  - "Backend"
+  - "AI"
   - "System Design"
 featured: false
 series:
@@ -18,1104 +18,808 @@ series:
 
 <Lang lang="en">
 
-A bad RAG answer does not automatically mean the LLM is bad. The failure may happen before the model receives anything useful. To debug RAG correctly, inspect the pipeline in order: source data, indexing, retrieval, context construction, prompt behavior, answer generation, and validation.
+After parsing, chunking, embedding, and metadata design, the next question is where to store the retrieval data. This is where vector database selection matters. A vector database is not only a place to store vectors. It also affects filtering, retrieval speed, hybrid search, scaling, debugging, and operational complexity.
 
 ## Short Answer
 
-A RAG failure should be diagnosed by asking one question at each layer:
+A vector database stores embeddings and makes similarity search possible.
 
-```text
-Did the correct evidence exist?
-Did retrieval find it?
-Did the prompt send it clearly?
-Did the LLM use it correctly?
-Did validation catch unsupported claims?
+In a RAG system, it usually stores:
+
+- vector embeddings
+- chunk text
+- chunk ID
+- document ID
+- metadata
+- source reference
+- sometimes sparse vectors or keyword index data
+
+The correct vector database depends on the system you are building.
+
+| Situation | Suitable Direction |
+| --- | --- |
+| Small app already using PostgreSQL | pgvector |
+| Managed production RAG with low ops burden | Pinecone, Weaviate Cloud, Qdrant Cloud |
+| Open-source self-hosted vector search | Qdrant, Weaviate, Milvus |
+| Very large-scale vector workload | Milvus or managed vector DB |
+| Strong keyword plus vector search | Elasticsearch, OpenSearch, Weaviate |
+| Fast cache-like vector retrieval | Redis |
+| Local prototype | Chroma, FAISS, SQLite plus vector extension |
+
+There is no universal best vector database. The best choice depends on scale, filtering needs, deployment model, team skill, cost, and how much operational work you want to own.
+
+## What a Vector Database Actually Stores
+
+A vector database stores the retrieval unit produced by your indexing pipeline.
+
+It does not only store the vector. A practical RAG record usually looks like this:
+
+```json
+{
+  "chunk_id": "doc_refund_policy_learnpro_2026_04__subscription_cancellation",
+  "document_id": "doc_refund_policy_learnpro_2026_04",
+  "embedding": [0.012, -0.044, 0.031],
+  "text": "Monthly subscriptions can be cancelled at any time. The cancellation will stop the next billing cycle, but it does not refund the current active month.",
+  "metadata": {
+    "product": "LearnPro Online Course Platform",
+    "domain": "billing",
+    "document_type": "policy",
+    "version": "2026.04",
+    "language": "en",
+    "permission_scope": "public_support"
+  },
+  "source": {
+    "title": "Refund and Cancellation Policy",
+    "section": "Subscription Cancellation",
+    "source_uri": "manual://learnpro/refund-policy/2026-04"
+  }
+}
 ```
 
-If the answer is wrong, do not start by changing the model. First locate the broken stage.
+The embedding is used for similarity search. The text is used by the LLM. The metadata is used for filtering and debugging. The source fields are used for citation and traceability.
 
-| Failure Layer | Main Question | Common Symptom |
+A weak vector store design only stores vectors. A better design stores vectors, text, metadata, and source references together or keeps stable links between them.
+
+## Why Vector Databases Are Different
+
+Vector databases differ because they optimize for different trade-offs.
+
+Some are built for managed simplicity. Some are built for open-source control. Some are extensions on existing databases. Some are search engines that added vector search. Some are better for hybrid search. Some are better for large-scale distributed workloads.
+
+| Difference | Why It Matters |
+| --- | --- |
+| Deployment model | Managed service or self-hosted |
+| Filtering capability | Whether metadata filters work efficiently |
+| Hybrid search | Whether vector and keyword search can be combined |
+| Scaling model | Single node, distributed cluster, or serverless |
+| Index types | Affects speed, recall, memory, and write behavior |
+| Update behavior | Important when documents change often |
+| Cost model | Storage, query count, pods, nodes, memory, or cloud usage |
+| Ecosystem | SDKs, framework support, monitoring, backup, and operations |
+
+The vector database is not a neutral storage choice. It shapes how the RAG system can retrieve evidence.
+
+## Common Vector Database Options
+
+This is not a complete market list. It is a practical engineering map of common choices.
+
+| Option | What It Is Good For | Main Trade-Off |
 | --- | --- | --- |
-| Source data | Does the correct document exist? | System cannot answer because knowledge is missing |
-| Indexing | Was the document converted into useful chunks? | Correct policy exists but not in a retrievable shape |
-| Retrieval | Did the correct chunk appear in search results? | Wrong or irrelevant context is returned |
-| Context construction | Was retrieved evidence sent clearly to the LLM? | Correct chunk found but model misses the key rule |
-| Prompt and generation | Did the model follow the evidence? | Model overstates, invents, or ignores conditions |
-| Validation | Did the system catch unsupported claims? | Wrong answer reaches the user |
-| Observability | Can we inspect each step? | Failure cannot be reproduced or explained |
+| pgvector | Simple RAG inside PostgreSQL | Less specialized for very large vector workloads |
+| Pinecone | Managed vector search with low ops burden | Vendor dependency and cloud cost |
+| Weaviate | Open-source or managed vector DB with hybrid search features | More concepts to learn |
+| Qdrant | Open-source vector search with strong filtering model | Need to operate it if self-hosted |
+| Milvus | Large-scale open-source vector database | More infrastructure complexity |
+| Elasticsearch / OpenSearch | Search-heavy systems needing keyword plus vector retrieval | Heavier search stack |
+| Redis | Low-latency vector search near cache/session workloads | Memory and persistence trade-offs |
+| Chroma | Local development and prototyping | Not usually the first choice for large production systems |
+| FAISS | Local vector index library | Not a full database by itself |
 
-The practical debugging rule is:
+The important point: these tools are not different only by syntax. They represent different operational models.
 
-```text
-Do not debug RAG from the final answer backward by guessing.
-Debug it from the source data forward by evidence.
-```
+## pgvector
 
-## What a RAG Failure Looks Like
+pgvector is a PostgreSQL extension that lets PostgreSQL store and search vector embeddings.
 
-A RAG system can fail in different ways.
-
-Example user question:
-
-```text
-Can I return an opened item after three days?
-```
-
-Bad final answer:
-
-```text
-Yes, opened items can be returned within seven days.
-```
-
-This answer may be wrong if the actual policy says:
-
-```text
-Opened items can be returned within seven days only if the product is defective.
-Non-defective opened items are not eligible for return.
-```
-
-The failure may come from several places:
-
-| Possible Cause | What Happened |
-| --- | --- |
-| Missing source | The return policy was never added to the knowledge base |
-| Bad chunking | The condition "only if defective" was separated from the rule |
-| Bad retrieval | The retriever returned a generic return policy instead |
-| Bad context formatting | The model received the right chunk but in a confusing structure |
-| Bad prompt | The model was not told to preserve conditions |
-| Bad generation | The model ignored the exception |
-| Bad validation | The unsupported final answer was not blocked |
-
-The same wrong answer can have different root causes. That is why final-answer inspection alone is not enough.
-
-## Step 1: Check Whether the Correct Source Exists
-
-Start with the raw source data.
-
-Before checking embeddings, vector search, prompt design, or LLM behavior, confirm whether the correct document exists in the system.
-
-Ask:
-
-| Check | What It Reveals |
-| --- | --- |
-| Is the policy document present? | Knowledge coverage |
-| Is it the current version? | Freshness |
-| Is it approved for customer-facing use? | Source trust |
-| Does it cover the user's product, region, and language? | Scope correctness |
-| Does it contain the exact answer? | Evidence availability |
-
-If the source does not exist, the failure is not retrieval or generation. The system cannot retrieve evidence that was never added.
-
-Example:
-
-```text
-User asks:
-Can I get same-day store replacement?
-
-Knowledge base contains:
-Warranty duration.
-Proof-of-purchase requirement.
-Battery failure coverage.
-
-Knowledge base does not contain:
-Store replacement policy.
-Same-day replacement rule.
-```
-
-In this case, the correct behavior is not to tune the prompt until it says yes. The correct behavior is to return a missing-evidence answer or add the missing policy document.
+It is a strong choice when your application already uses PostgreSQL and your RAG dataset is not too large.
 
 <CardGrid columns={2}>
-  <InfoCard title="Failure Signal">
-    The system consistently fails a question because the required policy does not exist anywhere in the source documents.
+  <InfoCard title="Good Fit">
+    Small to medium RAG apps, internal tools, SaaS apps already using PostgreSQL, and teams that want one database first.
   </InfoCard>
 
-  <InfoCard title="Fix Direction">
-    Add the missing source, update stale policy, or route the question to a human-support fallback.
+  <InfoCard title="Be Careful">
+    If vector traffic becomes very large, PostgreSQL may become harder to tune than a purpose-built vector database.
   </InfoCard>
 </CardGrid>
 
-A source-data failure is a knowledge coverage problem.
+Use pgvector when simplicity is more important than specialized vector infrastructure.
 
-## Step 2: Check Whether Indexing Preserved the Evidence
-
-If the correct source exists, inspect the indexed chunks.
-
-The source may contain the answer, but indexing may destroy its usefulness.
-
-Common indexing failures:
-
-| Indexing Failure | Effect |
-| --- | --- |
-| Chunk too small | Rule separated from condition |
-| Chunk too large | Important rule buried in noise |
-| Bad PDF extraction | Text becomes broken or unreadable |
-| Missing heading | Chunk loses topic context |
-| Missing metadata | Retrieval cannot filter by product or region |
-| Old and new versions both active | Search returns conflicting truth |
-| Table flattened badly | Eligibility conditions are lost |
-
-Example source text:
+A common early-stage architecture is:
 
 ```text
-Opened items can be returned within seven days only if defective.
-Non-defective opened items are not eligible for return.
+Application DB: PostgreSQL
+Vector Storage: pgvector table
+Metadata: normal PostgreSQL columns
+Chunk Text: normal PostgreSQL text column
 ```
 
-Bad indexed chunks:
+This keeps the system easy to inspect. You can join chunks with documents, users, products, permissions, and evaluation records.
 
-```text
-Chunk 1:
-Opened items can be returned within seven days.
+## Pinecone
 
-Chunk 2:
-Only if defective. Non-defective opened items are not eligible for return.
-```
+Pinecone is a managed vector database.
 
-If retrieval returns only Chunk 1, the LLM may produce a wrong answer.
+Its main value is reducing operational work. The team does not need to manage vector database servers, indexes, replication, or scaling details directly.
 
-Better indexed chunk:
+<CardGrid columns={2}>
+  <InfoCard title="Good Fit">
+    Production RAG systems where the team wants managed vector search and does not want to operate vector infrastructure.
+  </InfoCard>
 
-```text
-Title: Return Policy - Opened Items
-Region: Malaysia
-Status: active
+  <InfoCard title="Be Careful">
+    Managed convenience usually means cloud cost, vendor dependency, and less low-level control.
+  </InfoCard>
+</CardGrid>
 
-Opened items can be returned within seven days only if defective.
-Non-defective opened items are not eligible for return.
-```
+Use Pinecone when your main priority is shipping a production vector search feature without owning too much database operation.
 
-Indexing diagnosis should ask:
+It is often suitable when:
 
-| Question | Good Sign |
-| --- | --- |
-| Is the answer contained in one usable chunk? | The rule and exception stay together |
-| Does the chunk include a heading? | The model can understand context |
-| Does the chunk have correct metadata? | Retrieval can filter correctly |
-| Is the chunk active? | Old versions are excluded |
-| Is the extracted text clean? | No layout or PDF noise dominates |
+- the team is small
+- production reliability matters
+- vector search is core to the product
+- you want managed scaling
+- you do not want to tune a self-hosted cluster
 
-If the indexed chunk is broken, do not fix retrieval first. Fix the index.
+## Weaviate
 
-## Step 3: Check Whether Retrieval Found the Right Chunk
+Weaviate is an open-source vector database that can also be used as a managed cloud service.
 
-If indexing is correct, inspect retrieval.
+It is often attractive when you want vector search, metadata filtering, schema, hybrid search, and AI-related features in one system.
 
-For each test question, log the retrieved chunks before generation.
+<CardGrid columns={2}>
+  <InfoCard title="Good Fit">
+    RAG systems that need hybrid search, object-like data modeling, and a database designed around AI retrieval.
+  </InfoCard>
 
-A useful retrieval debug log looks like this:
+  <InfoCard title="Be Careful">
+    It introduces its own schema and concepts, so the team needs to learn how to model data correctly.
+  </InfoCard>
+</CardGrid>
 
-```text
-Question:
-Can I return an opened item after three days?
+Use Weaviate when you want a purpose-built vector database but still care about structured object storage and hybrid retrieval.
 
-Expected evidence:
-Active Malaysia return policy, opened-item section.
+It is useful when:
 
-Retrieved chunks:
-1. Active Malaysia refund timeline
-2. Generic customer satisfaction FAQ
-3. Deprecated Singapore return policy
-4. Active Malaysia return policy, opened-item section
-```
+- documents have rich metadata
+- hybrid search matters
+- you want managed or self-hosted options
+- your team wants a vector database with more application-level retrieval features
 
-This retrieval is weak. The correct chunk appears, but it is ranked too low. If the final prompt only includes the top three chunks, the model never sees the right evidence.
+## Qdrant
 
-Retrieval failures usually fall into these categories:
+Qdrant is an open-source vector search engine designed around vectors plus payload metadata.
 
-| Retrieval Failure | Symptom | Fix Direction |
+It is a strong option when metadata filtering is important and the team wants a clean vector search service.
+
+<CardGrid columns={2}>
+  <InfoCard title="Good Fit">
+    Systems that need semantic search with strong metadata filtering, clear APIs, and self-hosted or cloud deployment.
+  </InfoCard>
+
+  <InfoCard title="Be Careful">
+    If self-hosted, your team still owns deployment, monitoring, backup, scaling, and upgrades.
+  </InfoCard>
+</CardGrid>
+
+Use Qdrant when you want a dedicated vector search engine with practical filtering and good control over retrieval behavior.
+
+It is often a good middle ground between simple pgvector and heavier distributed systems.
+
+## Milvus
+
+Milvus is an open-source vector database designed for large-scale vector similarity search.
+
+It is usually more relevant when the dataset is large, query volume is high, or the vector search workload needs distributed architecture.
+
+<CardGrid columns={2}>
+  <InfoCard title="Good Fit">
+    Large vector collections, high-throughput retrieval, and teams that can operate more complex data infrastructure.
+  </InfoCard>
+
+  <InfoCard title="Be Careful">
+    It can be heavier to operate than smaller or managed options.
+  </InfoCard>
+</CardGrid>
+
+Use Milvus when vector search scale is a serious requirement, not just a future possibility.
+
+If your dataset is still small, Milvus may be more infrastructure than you need.
+
+## Elasticsearch and OpenSearch
+
+Elasticsearch and OpenSearch are search engines that support keyword search and vector search.
+
+They are useful when your system needs strong text search, filters, analytics, logs, or search ranking features together with vector search.
+
+<CardGrid columns={2}>
+  <InfoCard title="Good Fit">
+    Search-heavy systems where BM25, filters, facets, text analyzers, and vector search all matter.
+  </InfoCard>
+
+  <InfoCard title="Be Careful">
+    They are heavier systems. If you only need simple vector search, they may be too much.
+  </InfoCard>
+</CardGrid>
+
+Use this direction when hybrid search is central.
+
+For example, if users often search exact product names, error codes, IDs, legal terms, and semantic questions, a search engine can be a strong fit.
+
+## Redis
+
+Redis can support vector search through its search/query capabilities.
+
+It is useful when low latency matters and the data fits the Redis operating model.
+
+<CardGrid columns={2}>
+  <InfoCard title="Good Fit">
+    Fast retrieval near cache-heavy applications, session-aware personalization, and low-latency semantic lookup.
+  </InfoCard>
+
+  <InfoCard title="Be Careful">
+    Redis is often memory-oriented. Cost and persistence behavior need careful design.
+  </InfoCard>
+</CardGrid>
+
+Use Redis when vector search is close to real-time application state or cache-like workloads.
+
+Do not select Redis only because it is fast. Select it when its data model and memory cost fit your system.
+
+## Chroma and FAISS
+
+Chroma and FAISS are common in local experiments and prototypes.
+
+FAISS is a vector index library, not a full database. Chroma is easier to use as a local vector store for application experiments.
+
+<CardGrid columns={2}>
+  <InfoCard title="Good Fit">
+    Local RAG prototypes, notebooks, demos, and experiments before production database selection.
+  </InfoCard>
+
+  <InfoCard title="Be Careful">
+    Prototype convenience does not automatically mean production suitability.
+  </InfoCard>
+</CardGrid>
+
+Use these tools when you are still validating chunking, embeddings, retrieval quality, and prompt design.
+
+For production, evaluate persistence, backup, access control, monitoring, scaling, and deployment model before committing.
+
+## How to Select Based on Situation
+
+The best vector database is the one that matches your current workload and near-future workload.
+
+| Case | Recommended Direction | Why |
 | --- | --- | --- |
-| Low recall | Correct chunk never appears | Improve query, embeddings, hybrid search, or chunking |
-| Bad ranking | Correct chunk appears too low | Add reranking or improve scoring |
-| Bad filtering | Wrong region or version appears | Fix metadata filters |
-| Too much noise | Many irrelevant chunks returned | Reduce top-k or improve precision |
-| Too narrow search | Missing related evidence | Increase candidates or decompose query |
-| Exact term miss | Error code or SKU not found | Add keyword or hybrid search |
+| Personal project or small internal tool | pgvector or Chroma | Simple and cheap to start |
+| Existing PostgreSQL app | pgvector | Keeps data and metadata in one system |
+| Production SaaS with small team | Pinecone or managed Qdrant / Weaviate | Reduces operations burden |
+| Heavy metadata filtering | Qdrant, Weaviate, pgvector | Filtering is part of retrieval control |
+| Strong hybrid search requirement | Elasticsearch, OpenSearch, Weaviate | Keyword and vector search both matter |
+| Very large vector dataset | Milvus or managed vector DB | Built for scale |
+| Low-latency cache-like lookup | Redis | Fast access pattern |
+| Research prototype | FAISS or Chroma | Fast iteration |
 
-Retrieval diagnosis should inspect both candidate results and final selected context.
+Selection should start from constraints, not from popularity.
 
-The retriever may find the correct chunk at rank 12, but if the system only sends rank 1 to 4 into the prompt, the LLM still cannot use it.
+## Selection Checklist
+
+Before choosing a vector database, answer these questions.
 
 <CardGrid columns={2}>
-  <InfoCard title="Failure Signal">
-    The answer exists in the index, but the retrieved context does not include it or ranks it too low.
+  <InfoCard title="1. How Large Is the Dataset?">
+    Ten thousand chunks and one billion vectors require very different infrastructure.
   </InfoCard>
 
-  <InfoCard title="Fix Direction">
-    Improve filters, hybrid search, top-k, reranking, callback retrieval, or query decomposition.
+  <InfoCard title="2. How Important Is Metadata Filtering?">
+    If filtering by product, permission, version, or region is critical, test filtered retrieval early.
+  </InfoCard>
+
+  <InfoCard title="3. Do You Need Hybrid Search?">
+    If users search IDs, names, and exact terms, pure vector search may not be enough.
+  </InfoCard>
+
+  <InfoCard title="4. Who Operates the Database?">
+    A self-hosted database is not free if your team must monitor, scale, patch, and recover it.
+  </InfoCard>
+
+  <InfoCard title="5. How Often Does Data Change?">
+    Frequent updates need good upsert, delete, reindex, and versioning behavior.
+  </InfoCard>
+
+  <InfoCard title="6. What Is the Cost Model?">
+    Check storage cost, query cost, memory cost, node cost, and managed service pricing.
   </InfoCard>
 </CardGrid>
 
-A retrieval failure is an evidence selection problem.
+A database that works well in a demo may fail when filtering, updates, permissions, and evaluation are added.
 
-## Step 4: Check Whether Context Construction Is Clear
+## Common Mistakes
 
-Sometimes retrieval is correct, but the LLM still fails because the retrieved context is poorly packaged.
+Vector database selection often fails because teams choose based on tool popularity instead of workload.
 
-Example bad context:
-
-```text
-opened items seven days defective not eligible refund active my policy old policy return warranty timeline
-```
-
-This context contains useful words, but it is not structured. The model may mix rules, ignore status, or misread the condition.
-
-Better context:
-
-```text
-[Source 1]
-Title: Return Policy - Opened Items
-Region: Malaysia
-Status: active
-Section: Opened Item Eligibility
-
-Opened items can be returned within seven days only if the product is defective.
-Non-defective opened items are not eligible for return.
-```
-
-Context construction diagnosis should ask:
-
-| Question | Why It Matters |
+| Mistake | Why It Hurts |
 | --- | --- |
-| Are chunks clearly separated? | Prevents rule mixing |
-| Is source title included? | Helps interpret evidence |
-| Is section heading included? | Preserves local meaning |
-| Is status included? | Prevents deprecated content use |
-| Is region or product shown? | Prevents wrong-scope answers |
-| Is there too much context? | Reduces distraction |
-| Is there too little context? | Causes missing conditions |
+| Choosing before defining metadata filters | The selected DB may not support efficient filtering |
+| Ignoring keyword search | Exact terms, IDs, and error codes may retrieve poorly |
+| Storing vectors without source references | Answers become hard to cite and debug |
+| Using local prototype storage in production | Backup, scaling, and access control may be weak |
+| Overengineering too early | Large distributed DB adds complexity before it is needed |
+| Ignoring update behavior | Reindexing and document deletion become painful |
+| Treating vector DB as the only source of truth | Source documents and chunk records become hard to rebuild |
 
-The model should not receive a pile of text without boundaries.
+The safest approach is to keep the indexing pipeline reproducible. If you can rebuild vectors from parsed documents and chunks, changing vector databases later is much easier.
 
-A practical context block should include:
+## Reusable Example: Storage Record
 
-```text
-[Source number]
-Title:
-Document type:
-Product:
-Region:
-Status:
-Section:
-Content:
+Using the same refund policy example, a production-ready storage record should keep the vector, text, metadata, and source reference connected.
+
+```json
+{
+  "id": "doc_refund_policy_learnpro_2026_04__subscription_cancellation",
+  "vector": [0.012, -0.044, 0.031],
+  "payload": {
+    "document_id": "doc_refund_policy_learnpro_2026_04",
+    "title": "Refund and Cancellation Policy",
+    "section": "Subscription Cancellation",
+    "text": "Monthly subscriptions can be cancelled at any time. The cancellation will stop the next billing cycle, but it does not refund the current active month.",
+    "metadata": {
+      "product": "LearnPro Online Course Platform",
+      "domain": "billing",
+      "document_type": "policy",
+      "version": "2026.04",
+      "language": "en",
+      "permission_scope": "public_support",
+      "chunk_strategy": "heading_aware_table_aware_v1",
+      "embedding_model": "text-embedding-3-small"
+    },
+    "source_uri": "manual://learnpro/refund-policy/2026-04"
+  }
+}
 ```
 
-If retrieval is correct but the model misses obvious evidence, inspect context formatting before changing models.
+Different databases may name this differently.
 
-## Step 5: Check Whether the Prompt Controls the Model
+Some call the extra fields `metadata`. Some call them `payload`. Some store them as table columns. The naming is less important than the design principle: the vector must stay connected to the chunk text, metadata, and source.
 
-If the correct context is sent clearly, inspect the prompt.
+## Practical Starting Recommendation
 
-The prompt should tell the model:
+For most early RAG projects, start with the simplest option that can support your expected evaluation.
 
-- Use only the retrieved context.
-- Preserve conditions and exceptions.
-- Do not invent policy.
-- State when evidence is missing.
-- Give a direct answer first.
-- Mention sources used.
+A reasonable default path is:
 
-Weak prompt:
-
-```text
-Answer the user helpfully.
-```
-
-Stronger prompt:
-
-```text
-Answer the user's question using only the support context.
-Every policy claim must be supported by the context.
-If the context does not answer the question, say what information is missing.
-Preserve conditions such as "only if", "unless", "requires", and "may".
-Do not promise refunds, replacements, compensation, or timelines unless explicitly stated.
-```
-
-Prompt failures usually look like this:
-
-| Prompt Failure | Symptom |
+| Stage | Practical Choice |
 | --- | --- |
-| No context-only rule | Model uses general knowledge |
-| No refusal rule | Model guesses missing policy |
-| No condition rule | Model drops exceptions |
-| No business guardrail | Model promises refund or replacement |
-| No output format | Answer becomes inconsistent |
-| No source rule | Hard to verify grounding |
+| Local prototype | Chroma or FAISS |
+| Small real app with PostgreSQL | pgvector |
+| Production with low ops | Managed vector DB |
+| Search-heavy production | Elasticsearch, OpenSearch, or Weaviate |
+| Large-scale vector infrastructure | Milvus or managed large-scale vector DB |
 
-Prompt diagnosis should use fixed context.
-
-That means testing the LLM with the correct retrieved context manually. If the model still answers badly when the evidence is already correct, the failure is in the prompt or generation layer.
-
-## Step 6: Check Whether the LLM Overstated the Evidence
-
-Even with a good prompt, the model may overstate.
-
-Example context:
-
-```text
-Charging failure may be covered under warranty if no water damage, physical damage, or unauthorized repair is found.
-```
-
-Bad answer:
-
-```text
-Your charging failure is definitely covered under warranty.
-```
-
-The model changed "may be covered" into "definitely covered". That is an evidence-strength error.
-
-Common generation failures:
-
-| Generation Failure | Example |
-| --- | --- |
-| Overstatement | "May be eligible" becomes "approved" |
-| Unsupported detail | Adds a timeline not in context |
-| Condition loss | Drops "only if defective" |
-| Source mixing | Combines two policies incorrectly |
-| Wrong scope | Applies Malaysia policy to Singapore |
-| False certainty | Answers when evidence is incomplete |
-
-Generation diagnosis should compare each claim against the retrieved context.
-
-A practical manual check:
-
-```text
-Answer claim:
-Opened items can be returned within seven days.
-
-Context:
-Opened items can be returned within seven days only if defective.
-
-Diagnosis:
-Unsupported overgeneralization. The answer dropped the condition.
-```
-
-The fix may be:
-
-- Better grounding instruction.
-- More structured output.
-- Lower temperature.
-- Answer validation.
-- Post-generation revision.
-- Refusal for missing evidence.
-
-The LLM layer should explain evidence. It should not strengthen weak evidence.
-
-## Step 7: Check Whether Validation Caught the Error
-
-Validation is the last defensive layer.
-
-Even if generation produces an unsupported answer, validation should catch it before the user sees it.
-
-Validation can check:
-
-| Validation Check | Detects |
-| --- | --- |
-| Claim supported by context | Hallucinated policy |
-| Correct product and region | Scope error |
-| Conditions preserved | Oversimplification |
-| Missing evidence acknowledged | False certainty |
-| No unauthorized promise | Business risk |
-| Source included | Weak traceability |
-
-Example validation failure:
-
-```text
-Generated answer:
-Yes, you can return opened items within seven days.
-
-Retrieved context:
-Opened items can be returned within seven days only if defective.
-Non-defective opened items are not eligible for return.
-
-Validation result:
-Fail. The answer removes the defective-item condition.
-```
-
-The system can respond by revising the answer:
-
-```text
-Opened items can be returned within seven days only if the product is defective. Non-defective opened items are not eligible for return.
-```
-
-<CardGrid columns={2}>
-  <InfoCard title="Failure Signal">
-    The final answer contains a claim that is not supported by retrieved context, but the system still sends it to the user.
-  </InfoCard>
-
-  <InfoCard title="Fix Direction">
-    Add claim checking, source checking, condition checking, or a second-pass answer revision step.
-  </InfoCard>
-</CardGrid>
-
-Validation does not replace good indexing, retrieval, or prompting. It is the final safety check.
-
-## A Practical Failure Diagnosis Workflow
-
-Use a fixed debugging order. Do not jump randomly between prompt changes, vector database settings, and model changes.
-
-<CardGrid columns={2}>
-  <InfoCard title="1. Reproduce the Bad Answer">
-    Save the user question, final answer, retrieved chunks, prompt, and model settings. If you cannot reproduce it, you cannot diagnose it reliably.
-  </InfoCard>
-
-  <InfoCard title="2. Check Source Coverage">
-    Confirm that the correct policy or document exists, is current, and is approved for the answer scope.
-  </InfoCard>
-
-  <InfoCard title="3. Inspect Indexed Chunks">
-    Check whether the answer, conditions, headings, metadata, and version status survived indexing.
-  </InfoCard>
-
-  <InfoCard title="4. Inspect Retrieval Results">
-    Verify whether the correct chunk appears, where it ranks, and whether wrong chunks are mixed in.
-  </InfoCard>
-
-  <InfoCard title="5. Inspect Final Context">
-    Confirm what context was actually sent to the model, not only what retrieval initially found.
-  </InfoCard>
-
-  <InfoCard title="6. Test the Prompt With Fixed Context">
-    Give the model the correct context manually. If it still fails, the issue is in prompt or generation behavior.
-  </InfoCard>
-
-  <InfoCard title="7. Compare Claims Against Evidence">
-    Mark every answer claim as supported, unsupported, overstated, or missing a condition.
-  </InfoCard>
-
-  <InfoCard title="8. Add Validation or Guardrails">
-    If unsupported claims reach users, add checks before final response delivery.
-  </InfoCard>
-</CardGrid>
-
-This workflow separates pipeline bugs from model behavior.
-
-## Failure Map
-
-Use this map to identify the likely broken layer.
-
-| Observation | Likely Failure Point | First Fix |
-| --- | --- | --- |
-| Correct policy does not exist | Source data | Add or update document |
-| Policy exists but chunk is broken | Indexing | Fix chunking or extraction |
-| Correct chunk never retrieved | Retrieval recall | Improve query, embedding, hybrid search |
-| Correct chunk retrieved but ranked low | Retrieval ranking | Add reranking or scoring changes |
-| Correct chunk found but not in final prompt | Context selection | Adjust top-k and final context builder |
-| Correct context sent but answer ignores it | Prompt or generation | Strengthen grounding rules |
-| Answer drops exception | Prompt or generation | Preserve condition words |
-| Answer adds unsupported promise | Guardrail failure | Add business constraints |
-| Wrong answer passes final step | Validation failure | Add claim-level validation |
-| Cannot inspect what happened | Observability failure | Add logs and trace IDs |
-
-The map prevents one common mistake: treating every failure as a prompt problem.
-
-Prompt changes are useful only after you know the right evidence reached the model.
-
-## What to Log for Debugging
-
-A RAG system should log enough information to explain a bad answer.
-
-Useful debug fields:
-
-| Log Field | Purpose |
-| --- | --- |
-| `trace_id` | Connects all steps for one request |
-| `user_question` | Shows original input |
-| `query_rewrite` | Shows modified query if used |
-| `filters_applied` | Shows product, region, status, and type filters |
-| `retrieved_candidates` | Shows raw retrieval results |
-| `reranked_results` | Shows final ranking |
-| `final_context` | Shows what the model received |
-| `prompt_template_version` | Shows which prompt was used |
-| `model_name` | Shows generation model |
-| `temperature` | Shows generation randomness |
-| `final_answer` | Shows user-facing output |
-| `validation_result` | Shows whether claims passed checks |
-
-A minimal debug trace:
-
-```text
-trace_id: rag-2026-06-05-001
-question: Can I return an opened item after three days?
-filters: region=MY, status=active, document_type=return_policy
-retrieved_top_3:
-  1. return-policy-my-opened-items
-  2. refund-timeline-my
-  3. generic-return-faq
-final_context:
-  return-policy-my-opened-items
-answer:
-  Opened items can be returned within seven days only if defective.
-validation:
-  pass
-```
-
-Without logs like this, debugging becomes guesswork.
+If you are not sure, start with pgvector when you already use PostgreSQL. Start with a managed vector database when you want to avoid infrastructure work. Start with Elasticsearch or OpenSearch when keyword search is as important as semantic search.
 
 ## The Main Principle
 
-A RAG failure is a pipeline failure until proven otherwise.
+A vector database is part of retrieval design, not just storage.
 
-Do not assume the model is the problem. First check whether the correct evidence exists, whether indexing preserved it, whether retrieval found it, whether the final context contained it, whether the prompt constrained the model, and whether validation caught unsupported claims.
+The right choice depends on your workload: scale, metadata filtering, hybrid search, update frequency, cost, deployment model, and team operation ability.
 
-The practical rule is:
-
-```text
-Source -> Index -> Retrieve -> Context -> Prompt -> Generate -> Validate
-```
-
-Debug in that order. The first broken stage is the real failure point.
+The practical rule is simple: choose the database that makes your retrieval behavior easy to build, easy to inspect, and easy to operate. Do not choose based only on popularity.
 
 </Lang>
 
 <Lang lang="zh">
 
-一个错误的 RAG 答案，不代表一定是 LLM 太差。问题可能早在模型收到资料之前就已经发生。正确 debug RAG 的方式，是按 pipeline 顺序检查：source data、indexing、retrieval、context construction、prompt behavior、answer generation 和 validation。
+在 parsing、chunking、embedding 和 metadata design 之后，下一个问题就是 retrieval data 要存在哪里。这里就会进入 vector database selection。vector database 不只是存 vector 的地方。它也会影响 filtering、retrieval speed、hybrid search、scaling、debugging 和整体运维复杂度。
 
 ## 简短答案
 
-诊断 RAG failure 时，每一层都问一个问题：
+Vector database 用来存 embedding，并支持 similarity search。
 
-```text
-正确证据是否存在？
-Retrieval 有没有找到它？
-Prompt 有没有清楚地把它送给模型？
-LLM 有没有正确使用它？
-Validation 有没有挡住无依据 claim？
+在 RAG 系统里，它通常会存：
+
+- vector embeddings
+- chunk text
+- chunk ID
+- document ID
+- metadata
+- source reference
+- 有时也会存 sparse vectors 或 keyword index data
+
+正确的 vector database 取决于你正在构建什么系统。
+
+| 情况 | 适合方向 |
+| --- | --- |
+| 小型应用，已经使用 PostgreSQL | pgvector |
+| 想少做运维的 production RAG | Pinecone、Weaviate Cloud、Qdrant Cloud |
+| open-source self-hosted vector search | Qdrant、Weaviate、Milvus |
+| 超大规模 vector workload | Milvus 或 managed vector DB |
+| 强 keyword + vector search | Elasticsearch、OpenSearch、Weaviate |
+| 类似 cache 的高速 vector retrieval | Redis |
+| 本地 prototype | Chroma、FAISS、SQLite plus vector extension |
+
+没有通用最好的 vector database。正确选择取决于 scale、filtering 需求、部署方式、团队能力、成本，以及你愿意承担多少运维工作。
+
+## Vector Database 实际上存什么
+
+Vector database 存的是 indexing pipeline 产出的 retrieval unit。
+
+它不应该只存 vector。实用的 RAG record 通常长这样：
+
+```json
+{
+  "chunk_id": "doc_refund_policy_learnpro_2026_04__subscription_cancellation",
+  "document_id": "doc_refund_policy_learnpro_2026_04",
+  "embedding": [0.012, -0.044, 0.031],
+  "text": "Monthly subscriptions can be cancelled at any time. The cancellation will stop the next billing cycle, but it does not refund the current active month.",
+  "metadata": {
+    "product": "LearnPro Online Course Platform",
+    "domain": "billing",
+    "document_type": "policy",
+    "version": "2026.04",
+    "language": "en",
+    "permission_scope": "public_support"
+  },
+  "source": {
+    "title": "Refund and Cancellation Policy",
+    "section": "Subscription Cancellation",
+    "source_uri": "manual://learnpro/refund-policy/2026-04"
+  }
+}
 ```
 
-如果答案错了，不要第一步就换模型。先找出是哪一层坏掉。
+embedding 用来做 similarity search。text 会交给 LLM。metadata 用来 filtering 和 debugging。source fields 用来 citation 和 traceability。
 
-| Failure Layer | 主要问题 | 常见症状 |
+弱的 vector store design 只存 vectors。更好的设计会把 vectors、text、metadata 和 source references 一起存，或者至少让它们之间有稳定连接。
+
+## 为什么 Vector Database 之间会不同
+
+Vector database 不同，是因为它们优化的 trade-off 不同。
+
+有些强调 managed simplicity。有些强调 open-source control。有些是 existing database 的 extension。有些是 search engine 加上 vector search。有些更适合 hybrid search。有些更适合大规模 distributed workload。
+
+| 差异 | 为什么重要 |
+| --- | --- |
+| Deployment model | managed service 还是 self-hosted |
+| Filtering capability | metadata filters 是否能高效执行 |
+| Hybrid search | 是否能结合 vector 和 keyword search |
+| Scaling model | single node、distributed cluster，还是 serverless |
+| Index types | 影响速度、recall、memory 和 write behavior |
+| Update behavior | 文档频繁更新时很重要 |
+| Cost model | storage、query count、pods、nodes、memory 或 cloud usage |
+| Ecosystem | SDK、framework support、monitoring、backup 和 operations |
+
+vector database 不是一个中立的存储选择。它会塑造 RAG 系统如何检索证据。
+
+## 常见 Vector Database 选择
+
+这不是完整市场列表，而是一个实用的工程地图。
+
+| 选择 | 适合什么 | 主要 trade-off |
 | --- | --- | --- |
-| Source data | 正确文档是否存在？ | 系统无法回答，因为知识缺失 |
-| Indexing | 文档是否被转换成可用 chunks？ | 正确政策存在，但形状不可检索 |
-| Retrieval | 正确 chunk 有没有出现在搜索结果？ | 返回错误或无关上下文 |
-| Context construction | 证据有没有清楚送给 LLM？ | 找到了正确 chunk，但模型没抓到关键规则 |
-| Prompt and generation | 模型有没有遵守证据？ | 模型夸大、发明或忽略条件 |
-| Validation | 系统有没有抓出无依据 claim？ | 错误答案直接发给用户 |
-| Observability | 每一步能不能被检查？ | 问题无法复现，也无法解释 |
+| pgvector | 在 PostgreSQL 内做简单 RAG | 对超大 vector workload 没那么专用 |
+| Pinecone | 低运维 managed vector search | vendor dependency 和 cloud cost |
+| Weaviate | open-source 或 managed vector DB，支持 hybrid search 特性 | 需要学习自己的 schema 和概念 |
+| Qdrant | open-source vector search，filtering model 清晰 | self-hosted 时需要自己运维 |
+| Milvus | 大规模 open-source vector database | infrastructure complexity 更高 |
+| Elasticsearch / OpenSearch | 需要 keyword + vector retrieval 的 search-heavy systems | search stack 更重 |
+| Redis | 低延迟 vector search，接近 cache/session workload | memory 和 persistence trade-off |
+| Chroma | 本地开发和 prototype | 通常不是大型 production 首选 |
+| FAISS | 本地 vector index library | 它本身不是完整 database |
 
-实用 debug 规则是：
+重点是：这些工具不只是语法不同。它们代表的是不同的 operational model。
 
-```text
-不要只从最终答案倒推乱猜。
-要从 source data 开始，按证据往后检查。
-```
+## pgvector
 
-## RAG Failure 长什么样
+pgvector 是 PostgreSQL 的 extension，可以让 PostgreSQL 存储和搜索 vector embeddings。
 
-RAG 系统可能用不同方式失败。
-
-用户问题例子：
-
-```text
-拆封商品三天后还可以退货吗？
-```
-
-错误最终答案：
-
-```text
-可以，拆封商品七天内可以退货。
-```
-
-如果真实政策是：
-
-```text
-拆封商品七天内只有在产品有缺陷时才可以退货。
-没有缺陷的拆封商品不符合退货资格。
-```
-
-那么这个答案就是错的。
-
-失败可能来自很多地方：
-
-| 可能原因 | 发生了什么 |
-| --- | --- |
-| Source missing | 退货政策从来没有加入知识库 |
-| Bad chunking | “只有在有缺陷时” 被切到另一个 chunk |
-| Bad retrieval | Retriever 返回了普通退货政策 |
-| Bad context formatting | 模型收到了正确 chunk，但结构混乱 |
-| Bad prompt | Prompt 没要求保留条件 |
-| Bad generation | 模型忽略了例外 |
-| Bad validation | 无依据答案没有被挡下来 |
-
-同一个错误答案，可能有不同 root cause。所以只看 final answer 不够。
-
-## 第一步：检查正确 Source 是否存在
-
-先从原始资料开始。
-
-在检查 embedding、vector search、prompt design 或 LLM 行为之前，先确认系统里有没有正确文档。
-
-需要问：
-
-| 检查 | 揭示什么 |
-| --- | --- |
-| 政策文档是否存在？ | 知识覆盖 |
-| 是否为当前版本？ | 时效性 |
-| 是否允许用于客户回答？ | 来源可信度 |
-| 是否覆盖用户产品、地区和语言？ | 作用范围是否正确 |
-| 是否真的包含答案？ | 证据是否存在 |
-
-如果 source 不存在，这不是 retrieval 或 generation 问题。系统无法检索一个从未加入的证据。
-
-例子：
-
-```text
-用户问：
-可以在门店当天换新吗？
-
-知识库包含：
-保修期限。
-购买证明要求。
-电池故障保修范围。
-
-知识库不包含：
-门店换新政策。
-当天换新规则。
-```
-
-这种情况下，正确做法不是调 prompt 让它回答可以。正确做法是返回证据不足，或补充缺失政策文档。
+如果你的应用已经使用 PostgreSQL，而且 RAG dataset 还没有大到很夸张，它是很强的选择。
 
 <CardGrid columns={2}>
-  <InfoCard title="Failure Signal">
-    系统持续无法回答某类问题，因为 source documents 里根本没有对应政策。
+  <InfoCard title="适合">
+    small to medium RAG apps、internal tools、已经使用 PostgreSQL 的 SaaS apps，以及想先维持单一 database 的团队。
   </InfoCard>
 
-  <InfoCard title="Fix Direction">
-    添加缺失 source、更新旧政策，或把问题交给人工客服 fallback。
+  <InfoCard title="注意">
+    如果 vector traffic 变得很大，PostgreSQL 可能会比专用 vector database 更难调优。
   </InfoCard>
 </CardGrid>
 
-Source-data failure 是知识覆盖问题。
+当 simplicity 比专用 vector infrastructure 更重要时，可以使用 pgvector。
 
-## 第二步：检查 Indexing 有没有保留证据
-
-如果正确 source 存在，就检查 indexed chunks。
-
-Source 里可能有答案，但 indexing 可能破坏了它的可用性。
-
-常见 indexing failures：
-
-| Indexing Failure | 影响 |
-| --- | --- |
-| Chunk 太小 | 规则和条件被拆开 |
-| Chunk 太大 | 重要规则被噪音埋住 |
-| PDF 提取错误 | 文字损坏或难以阅读 |
-| 缺少标题 | Chunk 失去主题上下文 |
-| 缺少 metadata | Retrieval 无法按产品或地区过滤 |
-| 新旧版本都 active | 搜索返回冲突事实 |
-| 表格被错误拉平 | 条件关系丢失 |
-
-Source text 例子：
+常见早期架构是：
 
 ```text
-拆封商品七天内只有在产品有缺陷时才可以退货。
-没有缺陷的拆封商品不符合退货资格。
+Application DB: PostgreSQL
+Vector Storage: pgvector table
+Metadata: normal PostgreSQL columns
+Chunk Text: normal PostgreSQL text column
 ```
 
-坏 indexed chunks：
+这样系统很容易检查。你可以把 chunks 和 documents、users、products、permissions、evaluation records 直接 join 起来。
 
-```text
-Chunk 1:
-拆封商品七天内可以退货。
+## Pinecone
 
-Chunk 2:
-只有在产品有缺陷时。没有缺陷的拆封商品不符合退货资格。
-```
+Pinecone 是 managed vector database。
 
-如果 retrieval 只返回 Chunk 1，LLM 可能会答错。
+它的主要价值是减少运维工作。团队不需要直接管理 vector database servers、indexes、replication 或 scaling details。
 
-更好的 indexed chunk：
+<CardGrid columns={2}>
+  <InfoCard title="适合">
+    production RAG systems，尤其是团队想要 managed vector search，不想自己维护 vector infrastructure。
+  </InfoCard>
 
-```text
-Title: Return Policy - Opened Items
-Region: Malaysia
-Status: active
+  <InfoCard title="注意">
+    managed convenience 通常代表 cloud cost、vendor dependency，以及较少 low-level control。
+  </InfoCard>
+</CardGrid>
 
-拆封商品七天内只有在产品有缺陷时才可以退货。
-没有缺陷的拆封商品不符合退货资格。
-```
+当你的主要目标是快速上线 production vector search，而且不想承担太多 database operation，可以考虑 Pinecone。
 
-Indexing diagnosis 应该问：
+它适合这些情况：
 
-| 问题 | 好的信号 |
-| --- | --- |
-| 答案是否存在于一个可用 chunk 里？ | 规则和例外在一起 |
-| Chunk 是否有 heading？ | 模型能理解上下文 |
-| Chunk 是否有正确 metadata？ | Retrieval 可以正确过滤 |
-| Chunk 是否 active？ | 旧版本被排除 |
-| 提取文字是否干净？ | 没有页面噪音或 PDF 乱码主导内容 |
+- 团队比较小
+- production reliability 很重要
+- vector search 是产品核心能力
+- 希望 managed scaling
+- 不想调 self-hosted cluster
 
-如果 indexed chunk 本身坏了，不要先修 retrieval。先修 index。
+## Weaviate
 
-## 第三步：检查 Retrieval 是否找到正确 Chunk
+Weaviate 是 open-source vector database，也可以使用 managed cloud service。
 
-如果 indexing 正确，就检查 retrieval。
+当你想要 vector search、metadata filtering、schema、hybrid search 和 AI retrieval features 放在同一个系统里，它会比较有吸引力。
 
-对每个测试问题，在 generation 之前记录 retrieved chunks。
+<CardGrid columns={2}>
+  <InfoCard title="适合">
+    需要 hybrid search、object-like data modeling，以及围绕 AI retrieval 设计的 RAG 系统。
+  </InfoCard>
 
-有用的 retrieval debug log：
+  <InfoCard title="注意">
+    它有自己的 schema 和概念，所以团队需要学会正确 modeling data。
+  </InfoCard>
+</CardGrid>
 
-```text
-Question:
-Can I return an opened item after three days?
+当你想要 purpose-built vector database，同时又关心 structured object storage 和 hybrid retrieval，可以考虑 Weaviate。
 
-Expected evidence:
-Active Malaysia return policy, opened-item section.
+它适合：
 
-Retrieved chunks:
-1. Active Malaysia refund timeline
-2. Generic customer satisfaction FAQ
-3. Deprecated Singapore return policy
-4. Active Malaysia return policy, opened-item section
-```
+- documents 有丰富 metadata
+- hybrid search 很重要
+- 需要 managed 或 self-hosted 选择
+- 团队想要更多 application-level retrieval features
 
-这个 retrieval 偏弱。正确 chunk 出现了，但排名太低。如果 final prompt 只包含前三个 chunks，模型就看不到正确证据。
+## Qdrant
 
-Retrieval failures 通常分成这些类型：
+Qdrant 是 open-source vector search engine，核心设计围绕 vectors plus payload metadata。
 
-| Retrieval Failure | 症状 | 修复方向 |
+当 metadata filtering 很重要，而且团队想要一个清晰的 vector search service 时，它是很强的选择。
+
+<CardGrid columns={2}>
+  <InfoCard title="适合">
+    需要 semantic search、强 metadata filtering、清晰 API，以及 self-hosted 或 cloud deployment 的系统。
+  </InfoCard>
+
+  <InfoCard title="注意">
+    如果 self-hosted，团队仍然要负责 deployment、monitoring、backup、scaling 和 upgrades。
+  </InfoCard>
+</CardGrid>
+
+当你想要 dedicated vector search engine，并且希望对 retrieval behavior 有更好的控制，可以考虑 Qdrant。
+
+它通常是 simple pgvector 和更重型 distributed systems 之间的中间选择。
+
+## Milvus
+
+Milvus 是 open-source vector database，目标是大规模 vector similarity search。
+
+当 dataset 很大、query volume 很高，或者 vector search workload 需要 distributed architecture 时，它会更相关。
+
+<CardGrid columns={2}>
+  <InfoCard title="适合">
+    大型 vector collections、高吞吐 retrieval，以及有能力运维复杂 data infrastructure 的团队。
+  </InfoCard>
+
+  <InfoCard title="注意">
+    它通常比更小型或 managed 的选择更重，需要更多运维能力。
+  </InfoCard>
+</CardGrid>
+
+当 vector search scale 是明确需求，而不只是未来可能发生的事情时，可以考虑 Milvus。
+
+如果你的 dataset 还很小，Milvus 可能会比你现在需要的东西更复杂。
+
+## Elasticsearch 和 OpenSearch
+
+Elasticsearch 和 OpenSearch 是支持 keyword search 和 vector search 的 search engines。
+
+当你的系统需要强 text search、filters、analytics、logs 或 search ranking features，同时也需要 vector search，它们会很有用。
+
+<CardGrid columns={2}>
+  <InfoCard title="适合">
+    search-heavy systems，尤其是 BM25、filters、facets、text analyzers 和 vector search 都重要的场景。
+  </InfoCard>
+
+  <InfoCard title="注意">
+    它们是比较重的系统。如果你只需要简单 vector search，可能会过度复杂。
+  </InfoCard>
+</CardGrid>
+
+当 hybrid search 是核心需求时，可以考虑这个方向。
+
+比如用户经常搜索 exact product names、error codes、IDs、legal terms，同时也会问 semantic questions，那么 search engine 会很适合。
+
+## Redis
+
+Redis 可以通过 search/query 能力支持 vector search。
+
+当低延迟很重要，而且数据适合 Redis 的 operating model 时，它会比较有用。
+
+<CardGrid columns={2}>
+  <InfoCard title="适合">
+    cache-heavy applications、session-aware personalization，以及低延迟 semantic lookup。
+  </InfoCard>
+
+  <InfoCard title="注意">
+    Redis 通常偏 memory-oriented。成本和 persistence behavior 需要认真设计。
+  </InfoCard>
+</CardGrid>
+
+当 vector search 接近 real-time application state 或 cache-like workload 时，可以考虑 Redis。
+
+不要只是因为 Redis 快就选择 Redis。要确认它的数据模型和 memory cost 适合你的系统。
+
+## Chroma 和 FAISS
+
+Chroma 和 FAISS 常见于本地实验和 prototype。
+
+FAISS 是 vector index library，不是完整 database。Chroma 则比较适合用作本地 vector store，快速做 application experiments。
+
+<CardGrid columns={2}>
+  <InfoCard title="适合">
+    local RAG prototypes、notebooks、demos，以及 production database selection 之前的实验。
+  </InfoCard>
+
+  <InfoCard title="注意">
+    prototype 方便，不代表 production 就一定适合。
+  </InfoCard>
+</CardGrid>
+
+当你还在验证 chunking、embeddings、retrieval quality 和 prompt design 时，可以用这些工具。
+
+如果要进入 production，就要重新评估 persistence、backup、access control、monitoring、scaling 和 deployment model。
+
+## 如何根据情况选择
+
+最好的 vector database，是符合当前 workload 和近期 workload 的那个。
+
+| Case | 推荐方向 | 原因 |
 | --- | --- | --- |
-| Low recall | 正确 chunk 完全没出现 | 改善 query、embedding、hybrid search 或 chunking |
-| Bad ranking | 正确 chunk 排太低 | 加 reranking 或改 scoring |
-| Bad filtering | 错地区或错版本出现 | 修 metadata filters |
-| Too much noise | 太多无关 chunks | 降低 top-k 或提高 precision |
-| Too narrow search | 漏掉相关证据 | 增加 candidates 或拆 query |
-| Exact term miss | 错误码或 SKU 找不到 | 加 keyword 或 hybrid search |
+| 个人项目或小型内部工具 | pgvector 或 Chroma | 简单、便宜、容易开始 |
+| 已经使用 PostgreSQL 的应用 | pgvector | 数据和 metadata 可以留在一个系统 |
+| 小团队 production SaaS | Pinecone 或 managed Qdrant / Weaviate | 降低运维负担 |
+| metadata filtering 很重 | Qdrant、Weaviate、pgvector | filtering 是 retrieval control 的一部分 |
+| 强 hybrid search requirement | Elasticsearch、OpenSearch、Weaviate | keyword 和 vector search 都重要 |
+| 超大 vector dataset | Milvus 或 managed vector DB | 为 scale 设计 |
+| 低延迟 cache-like lookup | Redis | 适合高速访问模式 |
+| research prototype | FAISS 或 Chroma | 快速迭代 |
 
-Retrieval diagnosis 要同时检查 candidate results 和 final selected context。
+选择应该从 constraints 出发，而不是从 popularity 出发。
 
-Retriever 可能在 rank 12 找到正确 chunk，但如果系统只把 rank 1 到 4 放进 prompt，LLM 还是用不到。
+## Selection Checklist
+
+在选择 vector database 之前，先回答这些问题。
 
 <CardGrid columns={2}>
-  <InfoCard title="Failure Signal">
-    答案存在于 index，但 retrieved context 没有包含它，或它排名太低。
+  <InfoCard title="1. Dataset 有多大？">
+    一万个 chunks 和十亿个 vectors 需要完全不同的 infrastructure。
   </InfoCard>
 
-  <InfoCard title="Fix Direction">
-    改善 filters、hybrid search、top-k、reranking、callback retrieval 或 query decomposition。
+  <InfoCard title="2. Metadata Filtering 有多重要？">
+    如果需要按 product、permission、version 或 region 过滤，就要尽早测试 filtered retrieval。
+  </InfoCard>
+
+  <InfoCard title="3. 是否需要 Hybrid Search？">
+    如果用户会搜索 IDs、names 和 exact terms，纯 vector search 可能不够。
+  </InfoCard>
+
+  <InfoCard title="4. 谁负责运维？">
+    self-hosted database 不是免费。团队要负责 monitor、scale、patch 和 recover。
+  </InfoCard>
+
+  <InfoCard title="5. 数据多久更新一次？">
+    频繁更新需要好的 upsert、delete、reindex 和 versioning behavior。
+  </InfoCard>
+
+  <InfoCard title="6. 成本模型是什么？">
+    检查 storage cost、query cost、memory cost、node cost 和 managed service pricing。
   </InfoCard>
 </CardGrid>
 
-Retrieval failure 是证据选择问题。
+一个在 demo 中表现不错的 database，加入 filtering、updates、permissions 和 evaluation 后，不一定还适合。
 
-## 第四步：检查 Context Construction 是否清楚
+## 常见错误
 
-有时候 retrieval 是正确的，但 LLM 仍然失败，因为 retrieved context 被包装得太乱。
+Vector database selection 经常失败，是因为团队根据工具热度选择，而不是根据 workload 选择。
 
-坏 context：
-
-```text
-opened items seven days defective not eligible refund active my policy old policy return warranty timeline
-```
-
-这个 context 有有用词，但没有结构。模型可能混合规则、忽略 status，或误读条件。
-
-更好的 context：
-
-```text
-[Source 1]
-Title: Return Policy - Opened Items
-Region: Malaysia
-Status: active
-Section: Opened Item Eligibility
-
-Opened items can be returned within seven days only if the product is defective.
-Non-defective opened items are not eligible for return.
-```
-
-Context construction diagnosis 应该问：
-
-| 问题 | 为什么重要 |
+| 错误 | 为什么有害 |
 | --- | --- |
-| Chunks 是否清楚分隔？ | 防止规则混合 |
-| 是否包含 source title？ | 帮助理解证据身份 |
-| 是否包含 section heading？ | 保留局部语义 |
-| 是否包含 status？ | 防止使用 deprecated 内容 |
-| 是否显示 region 或 product？ | 防止 scope 错误 |
-| Context 是否太多？ | 减少干扰 |
-| Context 是否太少？ | 避免缺少条件 |
+| 没定义 metadata filters 就先选 DB | 选到的 DB 可能不适合高效 filtering |
+| 忽略 keyword search | exact terms、IDs、error codes 可能检索不好 |
+| 只存 vectors，不存 source references | 答案很难 citation 和 debugging |
+| 把 local prototype storage 直接上 production | backup、scaling 和 access control 可能不足 |
+| 太早 overengineering | 大型 distributed DB 在早期会增加复杂度 |
+| 忽略 update behavior | reindexing 和 document deletion 会变痛苦 |
+| 把 vector DB 当成唯一 source of truth | source documents 和 chunk records 很难重建 |
 
-模型不应该收到一坨没有边界的文字。
+最安全的做法是让 indexing pipeline 可以重复执行。只要你能从 parsed documents 和 chunks 重建 vectors，以后更换 vector database 就会容易很多。
 
-实用 context block 应该包含：
+## 可复用例子：Storage Record
 
-```text
-[Source number]
-Title:
-Document type:
-Product:
-Region:
-Status:
-Section:
-Content:
+继续使用前几篇的 refund policy 例子，一个 production-ready storage record 应该把 vector、text、metadata 和 source reference 连在一起。
+
+```json
+{
+  "id": "doc_refund_policy_learnpro_2026_04__subscription_cancellation",
+  "vector": [0.012, -0.044, 0.031],
+  "payload": {
+    "document_id": "doc_refund_policy_learnpro_2026_04",
+    "title": "Refund and Cancellation Policy",
+    "section": "Subscription Cancellation",
+    "text": "Monthly subscriptions can be cancelled at any time. The cancellation will stop the next billing cycle, but it does not refund the current active month.",
+    "metadata": {
+      "product": "LearnPro Online Course Platform",
+      "domain": "billing",
+      "document_type": "policy",
+      "version": "2026.04",
+      "language": "en",
+      "permission_scope": "public_support",
+      "chunk_strategy": "heading_aware_table_aware_v1",
+      "embedding_model": "text-embedding-3-small"
+    },
+    "source_uri": "manual://learnpro/refund-policy/2026-04"
+  }
+}
 ```
 
-如果 retrieval 正确，但模型没有抓到明显证据，在换模型之前先检查 context formatting。
+不同 database 对这个结构的命名可能不同。
 
-## 第五步：检查 Prompt 是否控制住模型
+有些叫 `metadata`。有些叫 `payload`。有些会把它们存成 table columns。命名不是重点。重点是设计原则：vector 必须和 chunk text、metadata、source 保持稳定连接。
 
-如果正确 context 已经清楚送出，就检查 prompt。
+## 实用起点建议
 
-Prompt 应该告诉模型：
+多数早期 RAG 项目，应该从能支持 evaluation 的最简单选择开始。
 
-- 只能使用 retrieved context。
-- 保留条件和例外。
-- 不要发明政策。
-- 证据不足时说明缺失。
-- 先给直接答案。
-- 说明使用的来源。
+一个合理路线是：
 
-弱 prompt：
-
-```text
-Answer the user helpfully.
-```
-
-更强 prompt：
-
-```text
-Answer the user's question using only the support context.
-Every policy claim must be supported by the context.
-If the context does not answer the question, say what information is missing.
-Preserve conditions such as "only if", "unless", "requires", and "may".
-Do not promise refunds, replacements, compensation, or timelines unless explicitly stated.
-```
-
-Prompt failures 通常长这样：
-
-| Prompt Failure | 症状 |
+| 阶段 | 实用选择 |
 | --- | --- |
-| 没有 context-only rule | 模型使用一般常识 |
-| 没有 refusal rule | 模型猜缺失政策 |
-| 没有 condition rule | 模型漏掉例外 |
-| 没有 business guardrail | 模型承诺退款或换新 |
-| 没有 output format | 答案不稳定 |
-| 没有 source rule | 很难验证 grounding |
+| Local prototype | Chroma 或 FAISS |
+| 小型真实应用，已经使用 PostgreSQL | pgvector |
+| 低运维 production | Managed vector DB |
+| Search-heavy production | Elasticsearch、OpenSearch 或 Weaviate |
+| 大规模 vector infrastructure | Milvus 或 managed large-scale vector DB |
 
-Prompt diagnosis 应该使用固定 context。
-
-也就是手动给 LLM 正确 retrieved context。如果证据已经正确，模型还是答错，那问题就在 prompt 或 generation layer。
-
-## 第六步：检查 LLM 是否夸大证据
-
-就算 prompt 不错，模型也可能 overstate。
-
-Context：
-
-```text
-Charging failure may be covered under warranty if no water damage, physical damage, or unauthorized repair is found.
-```
-
-坏答案：
-
-```text
-Your charging failure is definitely covered under warranty.
-```
-
-模型把 “may be covered” 改成了 “definitely covered”。这是 evidence-strength error。
-
-常见 generation failures：
-
-| Generation Failure | 例子 |
-| --- | --- |
-| Overstatement | “可能符合资格” 变成 “已经批准” |
-| Unsupported detail | 加入 context 没有的时间线 |
-| Condition loss | 漏掉 “only if defective” |
-| Source mixing | 错误合并两个政策 |
-| Wrong scope | 把 Malaysia 政策套到 Singapore |
-| False certainty | 证据不完整时仍然回答确定答案 |
-
-Generation diagnosis 要把每个 answer claim 和 retrieved context 对照。
-
-实用人工检查：
-
-```text
-Answer claim:
-Opened items can be returned within seven days.
-
-Context:
-Opened items can be returned within seven days only if defective.
-
-Diagnosis:
-Unsupported overgeneralization. The answer dropped the condition.
-```
-
-修复方向可能是：
-
-- 更强 grounding instruction。
-- 更结构化 output。
-- 降低 temperature。
-- 加 answer validation。
-- 生成后 revision。
-- 证据不足时拒答。
-
-LLM layer 应该解释证据，不应该强化证据。
-
-## 第七步：检查 Validation 是否挡住错误
-
-Validation 是最后一层防线。
-
-即使 generation 产生了无依据答案，validation 也应该在用户看到前抓出来。
-
-Validation 可以检查：
-
-| Validation Check | 检测什么 |
-| --- | --- |
-| Claim 是否被 context 支持 | Hallucinated policy |
-| 产品和地区是否正确 | Scope error |
-| 条件是否保留 | Oversimplification |
-| 缺少证据时是否说明 | False certainty |
-| 是否有未授权承诺 | Business risk |
-| 是否包含来源 | Weak traceability |
-
-Validation failure 例子：
-
-```text
-Generated answer:
-Yes, you can return opened items within seven days.
-
-Retrieved context:
-Opened items can be returned within seven days only if defective.
-Non-defective opened items are not eligible for return.
-
-Validation result:
-Fail. The answer removes the defective-item condition.
-```
-
-系统可以改写答案：
-
-```text
-Opened items can be returned within seven days only if the product is defective. Non-defective opened items are not eligible for return.
-```
-
-<CardGrid columns={2}>
-  <InfoCard title="Failure Signal">
-    最终答案包含 retrieved context 不支持的 claim，但系统仍然把它发给用户。
-  </InfoCard>
-
-  <InfoCard title="Fix Direction">
-    加入 claim checking、source checking、condition checking，或第二轮 answer revision。
-  </InfoCard>
-</CardGrid>
-
-Validation 不能取代好的 indexing、retrieval 和 prompt。它只是最后检查。
-
-## 实际 Failure Diagnosis Workflow
-
-使用固定 debug 顺序。不要在 prompt、vector database settings 和 model 之间随机跳。
-
-<CardGrid columns={2}>
-  <InfoCard title="1. 复现错误答案">
-    保存 user question、final answer、retrieved chunks、prompt 和 model settings。如果无法复现，就很难可靠诊断。
-  </InfoCard>
-
-  <InfoCard title="2. 检查 Source Coverage">
-    确认正确政策或文档存在、是当前版本，并且允许用于这个回答范围。
-  </InfoCard>
-
-  <InfoCard title="3. 检查 Indexed Chunks">
-    检查答案、条件、heading、metadata 和 version status 是否在 indexing 后保留下来。
-  </InfoCard>
-
-  <InfoCard title="4. 检查 Retrieval Results">
-    验证正确 chunk 是否出现、排名多少，以及是否混入错误 chunks。
-  </InfoCard>
-
-  <InfoCard title="5. 检查 Final Context">
-    确认真正送给模型的 context，而不只是 retrieval 最初找到了什么。
-  </InfoCard>
-
-  <InfoCard title="6. 用固定 Context 测 Prompt">
-    手动给模型正确 context。如果还是失败，问题在 prompt 或 generation behavior。
-  </InfoCard>
-
-  <InfoCard title="7. 对照 Claim 和 Evidence">
-    把每个 answer claim 标记为 supported、unsupported、overstated 或 missing condition。
-  </InfoCard>
-
-  <InfoCard title="8. 加 Validation 或 Guardrails">
-    如果无依据 claim 会到达用户，就在 final response 前加入检查。
-  </InfoCard>
-</CardGrid>
-
-这个 workflow 可以分离 pipeline bugs 和 model behavior。
-
-## Failure Map
-
-用这张表判断最可能坏在哪一层。
-
-| Observation | Likely Failure Point | First Fix |
-| --- | --- | --- |
-| 正确政策不存在 | Source data | 添加或更新文档 |
-| 政策存在但 chunk 坏了 | Indexing | 修 chunking 或 extraction |
-| 正确 chunk 完全没检索到 | Retrieval recall | 改善 query、embedding、hybrid search |
-| 正确 chunk 排太低 | Retrieval ranking | 加 reranking 或改 scoring |
-| 正确 chunk 找到了但没进 final prompt | Context selection | 调整 top-k 和 final context builder |
-| 正确 context 送出但答案忽略它 | Prompt or generation | 强化 grounding rules |
-| 答案漏掉例外 | Prompt or generation | 要求保留 condition words |
-| 答案加入无依据承诺 | Guardrail failure | 加 business constraints |
-| 错误答案通过 final step | Validation failure | 加 claim-level validation |
-| 无法检查发生了什么 | Observability failure | 加 logs 和 trace IDs |
-
-这张 map 可以避免一个常见错误：把所有 failure 都当成 prompt 问题。
-
-只有在确定正确证据已经到达模型之后，prompt tuning 才有意义。
-
-## Debug 时应该记录什么
-
-RAG 系统应该记录足够信息，让你解释一个坏答案是怎么来的。
-
-有用 debug fields：
-
-| Log Field | 用途 |
-| --- | --- |
-| `trace_id` | 串起一次请求的所有步骤 |
-| `user_question` | 保留原始输入 |
-| `query_rewrite` | 显示是否改写 query |
-| `filters_applied` | 显示 product、region、status 和 type filters |
-| `retrieved_candidates` | 显示原始 retrieval results |
-| `reranked_results` | 显示最终排序 |
-| `final_context` | 显示模型实际收到什么 |
-| `prompt_template_version` | 显示使用哪个 prompt |
-| `model_name` | 显示生成模型 |
-| `temperature` | 显示生成随机性 |
-| `final_answer` | 显示用户看到的答案 |
-| `validation_result` | 显示 claim 是否通过检查 |
-
-最小 debug trace：
-
-```text
-trace_id: rag-2026-06-05-001
-question: Can I return an opened item after three days?
-filters: region=MY, status=active, document_type=return_policy
-retrieved_top_3:
-  1. return-policy-my-opened-items
-  2. refund-timeline-my
-  3. generic-return-faq
-final_context:
-  return-policy-my-opened-items
-answer:
-  Opened items can be returned within seven days only if defective.
-validation:
-  pass
-```
-
-没有这些 logs，debug 基本就是猜。
+如果不确定，而且你已经使用 PostgreSQL，可以先从 pgvector 开始。如果你想避免 infrastructure work，可以从 managed vector database 开始。如果 keyword search 和 semantic search 同样重要，可以考虑 Elasticsearch、OpenSearch 或 Weaviate。
 
 ## 核心原则
 
-RAG failure 在被证明之前，都应该先当成 pipeline failure。
+Vector database 是 retrieval design 的一部分，不只是 storage。
 
-不要直接假设是模型问题。先检查正确证据是否存在、indexing 是否保留它、retrieval 是否找到它、final context 是否包含它、prompt 是否约束模型，以及 validation 是否挡住无依据 claim。
+正确选择取决于 workload：scale、metadata filtering、hybrid search、update frequency、cost、deployment model 和团队运维能力。
 
-实用规则是：
-
-```text
-Source -> Index -> Retrieve -> Context -> Prompt -> Generate -> Validate
-```
-
-按这个顺序 debug。第一个坏掉的阶段，才是真正的 failure point。
+实用规则很简单：选择能让 retrieval behavior 容易构建、容易检查、容易运维的 database。不要只根据流行度选择。
 
 </Lang>

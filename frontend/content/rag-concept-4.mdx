@@ -1,13 +1,13 @@
 ---
-title: "RAG LLM Layer: Prompt Design, Grounding, and Guardrails"
+title: "RAG Metadata Design"
 category: "Software Development"
-createdAt: "2026-06-05"
-summary: "A practical explanation of how the LLM layer turns retrieved context into grounded answers without unsupported claims."
-readTime: "12 min read"
+createdAt: "2026-06-06"
+summary: "A practical explanation of metadata, how it differs from structure, and why it improves retrieval, filtering, tracing, and debugging in RAG systems."
+readTime: "8 min read"
 tags:
-  - "AI"
   - "RAG"
-  - "LLM"
+  - "Backend"
+  - "AI"
   - "System Design"
 featured: false
 series:
@@ -18,1162 +18,666 @@ series:
 
 <Lang lang="en">
 
-The LLM layer is the final answer phase of a RAG system. Indexing prepares the knowledge. Retrieval selects the evidence. The LLM layer decides how that evidence is formatted, how the model is instructed, when the model should answer, when it should refuse, and how the final response should be checked before it reaches the user.
+Metadata is the control layer around your RAG content. Structure explains how the content is organized inside a document. Metadata explains what the content is, where it came from, who owns it, when it was created, and how the system should use it.
 
 ## Short Answer
 
-The LLM layer controls **how retrieved evidence becomes a user-facing answer**.
+Structure and metadata are related, but they are not the same thing.
 
-It should not be treated as a place where the model freely guesses. In a RAG system, the LLM should work inside a controlled boundary: answer from retrieved context, mention uncertainty when evidence is incomplete, and avoid adding facts that are not supported by the provided documents.
-
-| LLM-Layer Strategy | What It Controls | Accuracy Effect |
+| Concept | Meaning | Example |
 | --- | --- | --- |
-| System instruction | The model's operating rules | Reduces unsupported behavior |
-| Context formatting | How retrieved chunks are shown | Improves evidence usage |
-| Prompt structure | How question, context, and rules are arranged | Reduces confusion |
-| Grounding rules | Whether answers must cite or reference evidence | Limits hallucination |
-| Refusal behavior | What happens when evidence is missing | Prevents guessing |
-| Output format | Shape of the final answer | Improves consistency |
-| Answer validation | Checks answer against context | Catches unsupported claims |
-| Guardrails | Safety and business constraints | Prevents risky responses |
+| Structure | The internal shape of the document content | title, sections, paragraphs, tables |
+| Metadata | Extra descriptive fields used for control and tracing | product, domain, source_uri, version, permission |
 
-The practical rule is:
+Structure helps the model understand the content.
 
-```text
-The LLM should not decide what is true.
-The retrieved evidence decides what is true.
-The LLM only explains it clearly.
+Metadata helps the system control, filter, rank, secure, and debug the content.
+
+A practical RAG system needs both. Structure makes the chunk meaningful. Metadata makes the chunk manageable.
+
+## What Structure Means
+
+Structure is about how the document itself is organized.
+
+It describes the content layout:
+
+- title
+- section
+- subsection
+- paragraph
+- list
+- table
+- row
+- column
+- block order
+
+For example, in a refund policy document, this is structure:
+
+```json
+{
+  "title": "Refund and Cancellation Policy",
+  "sections": [
+    {
+      "heading": "Subscription Cancellation",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "Monthly subscriptions can be cancelled at any time. The cancellation will stop the next billing cycle, but it does not refund the current active month."
+        }
+      ]
+    }
+  ]
+}
 ```
 
-## What the LLM Layer Means in RAG
+This tells us how the content is arranged.
 
-In a normal LLM chat, the model receives a user question and generates an answer from its internal knowledge.
+The section heading gives meaning to the paragraph. The block type tells us whether the content is normal text, a table, a list, or another format.
 
-In a RAG system, the model should receive:
+## What Metadata Means
 
-- A system instruction.
-- The user's question.
-- Retrieved context chunks.
-- Source information.
-- Answer rules.
-- Refusal rules.
-- Output format requirements.
+Metadata is data about the content.
 
-A simplified flow looks like this:
+It is not usually the main answer text. Instead, it gives the system more information about how the content should be used.
 
-```text
-User question
-  -> retrieved chunks
-  -> prompt construction
-  -> LLM generation
-  -> answer validation
-  -> final response
+For the same refund policy, this is metadata:
+
+```json
+{
+  "document_id": "doc_refund_policy_learnpro_2026_04",
+  "source_uri": "manual://learnpro/refund-policy/2026-04",
+  "product": "LearnPro Online Course Platform",
+  "domain": "billing",
+  "document_type": "policy",
+  "version": "2026.04",
+  "owner": "Billing Team",
+  "language": "en",
+  "permission_scope": "public_support",
+  "created_at": "2026-04-01",
+  "updated_at": "2026-04-15"
+}
 ```
 
-For a customer-support RAG system, this layer is responsible for turning evidence into a useful reply.
+This does not directly answer the user's refund question. But it helps the system decide whether this document should be searched, retrieved, shown, cited, or ignored.
 
-Example user question:
+Metadata is what lets the system ask questions like:
 
-```text
-My A12 headphone stopped charging after ten months. Can I claim warranty?
-```
+- Is this document about the correct product?
+- Is this content still current?
+- Can this user access this content?
+- Which team owns this answer?
+- Where did this chunk come from?
+- What document version produced this answer?
 
-The retrieved context may contain:
+## Why Structure and Metadata Are Related
 
-```text
-Source: A12 Warranty Policy
-Battery charging failure is covered for 12 months from the purchase date.
-Coverage does not apply if there is water damage, physical damage, or unauthorized repair.
-Proof of purchase is required for warranty verification.
-```
+Structure and metadata are related because both describe context.
 
-The LLM should produce something like:
+The difference is where that context comes from.
 
-```text
-Based on the A12 warranty policy, your charging issue may be covered because it happened within the 12-month warranty period. This depends on whether there is no water damage, physical damage, or unauthorized repair. You will also need proof of purchase for verification.
-```
-
-The model is not inventing policy. It is translating retrieved policy into a clear answer.
-
-## Strategy 1: System Instructions Define the Answer Boundary
-
-The system instruction is the highest-level rule for how the model should behave.
-
-In RAG, the instruction should make the boundary explicit:
-
-```text
-You are a customer-support assistant.
-Answer only using the provided support context.
-If the context does not contain enough information, say that the available documents do not provide enough evidence.
-Do not invent policy, warranty terms, pricing, delivery dates, or exceptions.
-```
-
-This instruction changes the model's job. It is not asked to be generally helpful. It is asked to be grounded.
-
-A weak instruction looks like this:
-
-```text
-Answer the user's question helpfully.
-```
-
-That is too open. The model may use general knowledge or make assumptions.
-
-A stronger instruction looks like this:
-
-```text
-Answer the user's question using only the retrieved support context.
-If the answer is not directly supported by the context, explain what information is missing.
-Do not add unsupported policy details.
-```
-
-| Instruction Style | Result |
-| --- | --- |
-| Helpful but unrestricted | Higher risk of guessing |
-| Context-only | Better grounding |
-| Context-only plus refusal rule | Safer when evidence is missing |
-| Context-only plus output format | More consistent answers |
-
-For customer support, the model should not create new return exceptions, warranty conditions, or escalation paths. Those are business rules, not creative-writing tasks.
-
-## Strategy 2: Context Formatting Affects Evidence Usage
-
-The LLM can only use retrieved context well if the context is formatted clearly.
-
-Bad context formatting:
-
-```text
-Battery issue covered 12 months no water damage proof needed refund 5 days Malaysia policy old version not active
-```
-
-This is hard for the model to interpret.
-
-Better context formatting:
-
-```text
-[Source 1]
-Title: A12 Warranty Policy
-Status: active
-Region: Malaysia
-Section: Battery Charging Failure
-
-Battery charging failure is covered for 12 months from the purchase date.
-Coverage does not apply if there is water damage, physical damage, or unauthorized repair.
-Proof of purchase is required for warranty verification.
-```
-
-Useful context fields include:
-
-| Field | Purpose |
-| --- | --- |
-| Source number | Lets the answer reference evidence |
-| Title | Shows document identity |
-| Section | Shows where the rule came from |
-| Status | Confirms whether the document is usable |
-| Region | Prevents wrong-country interpretation |
-| Product | Prevents wrong-product interpretation |
-| Content | Provides actual answer evidence |
-
-Good context formatting reduces the chance that the model mixes rules from different chunks.
-
-If multiple chunks are included, separate them clearly:
-
-```text
-[Source 1]
-Title: A12 Warranty Policy
-Section: Coverage
-Content: ...
-
-[Source 2]
-Title: A12 Troubleshooting Guide
-Section: Error E104
-Content: ...
-```
-
-The model should not receive an unstructured wall of text unless the task is very simple.
-
-## Strategy 3: Prompt Structure Reduces Confusion
-
-Prompt structure is the arrangement of instruction, context, question, and output rules.
-
-A stable RAG prompt usually has this shape:
-
-```text
-System role:
-You are a customer-support assistant. Use only the provided context.
-
-Task:
-Answer the user's question based on the retrieved context.
-
-Context:
-[Source 1]
-...
-
-[Source 2]
-...
-
-User question:
-...
-
-Answer rules:
-- Give a direct answer first.
-- Mention conditions and exceptions.
-- If evidence is missing, say so.
-- Do not invent unsupported policy.
-```
-
-The order matters. If the retrieved context is mixed with instructions, or if the output rules are vague, the model may ignore important constraints.
-
-A practical prompt template:
-
-```text
-You are a customer-support assistant.
-
-Use only the support context below.
-If the answer cannot be found in the context, say:
-"The available support documents do not provide enough information to answer this."
-
-Support context:
-{retrieved_context}
-
-User question:
-{user_question}
-
-Write the answer with:
-1. Direct answer
-2. Conditions or exceptions
-3. Required next step
-4. Sources used
-```
-
-This template gives the model a clear job and a clear answer shape.
-
-<CardGrid columns={2}>
-  <InfoCard title="Good Prompt Structure">
-    Separate role, context, user question, and answer rules. This makes the model's task easier to follow.
-  </InfoCard>
-
-  <InfoCard title="Bad Prompt Structure">
-    Mixing retrieved text, instructions, and user input into one paragraph increases the chance that the model misses constraints.
-  </InfoCard>
-</CardGrid>
-
-Prompt design is not only wording. It is information architecture.
-
-## Strategy 4: Grounding Rules Prevent Unsupported Answers
-
-Grounding means the answer must be supported by retrieved evidence.
-
-A grounded answer should satisfy three checks:
-
-| Check | Meaning |
-| --- | --- |
-| Evidence exists | The answer is based on retrieved context |
-| Evidence is relevant | The cited context actually supports the claim |
-| Evidence is not overextended | The answer does not add extra assumptions |
-
-Example retrieved context:
-
-```text
-Battery charging failure is covered for 12 months from the purchase date.
-Coverage does not apply if there is water damage.
-```
-
-Grounded answer:
-
-```text
-The charging failure may be covered because it is within the 12-month warranty period, unless water damage is found.
-```
-
-Unsupported answer:
-
-```text
-Your product is definitely covered, and we will send a replacement within three days.
-```
-
-The unsupported answer adds certainty and fulfillment process details that are not in the context.
-
-A useful grounding instruction:
-
-```text
-Every policy claim in the answer must be supported by the retrieved context.
-If the context only says "may be covered", do not rewrite it as "is definitely covered".
-```
-
-This matters because customer-support answers often involve conditions.
-
-| Context Says | Answer Should Say | Answer Should Not Say |
+| Context Type | Comes From | Used For |
 | --- | --- | --- |
-| May be eligible | May be eligible | Definitely approved |
-| Requires inspection | Requires inspection | Automatically approved |
-| Within 12 months | Within 12 months | Lifetime warranty |
-| Excludes water damage | Excludes water damage | All damage is covered |
+| Structure | Inside the document | Understanding local meaning |
+| Metadata | Around the document or chunk | Controlling system behavior |
 
-The LLM layer should preserve the strength of the evidence.
-
-## Strategy 5: Refusal Behavior Prevents Guessing
-
-A RAG system needs a clear behavior for missing evidence.
-
-If the retrieved context does not answer the question, the model should not guess.
-
-Example user question:
+For example:
 
 ```text
-Can I get same-day replacement at the store?
+Section: Subscription Cancellation
+Text: Monthly subscriptions can be cancelled at any time.
 ```
 
-Retrieved context:
+The section is structure. It helps the model understand the local meaning.
 
-```text
-Warranty claims require proof of purchase.
-Battery charging failure is covered for 12 months.
+Now add metadata:
+
+```json
+{
+  "product": "LearnPro Online Course Platform",
+  "domain": "billing",
+  "document_type": "policy",
+  "version": "2026.04"
+}
 ```
 
-The context does not mention same-day replacement. A good answer:
+The metadata tells the system that this chunk belongs to the billing domain, applies to LearnPro, and comes from the 2026.04 policy version.
 
-```text
-The available support documents do not provide enough information to confirm whether same-day store replacement is available. They only state that warranty claims require proof of purchase and that battery charging failure is covered for 12 months.
-```
+Together, structure and metadata make the chunk both understandable and controllable.
 
-A bad answer:
+## Why Metadata Benefits Retrieval
 
-```text
-Yes, you should be able to get a same-day replacement if the store has stock.
-```
+Metadata improves retrieval by reducing the search space.
 
-That sounds helpful, but it is unsupported.
+Without metadata, the retriever may search every chunk in the knowledge base. That means it may return chunks from the wrong product, wrong region, wrong language, wrong version, or wrong permission scope.
 
-Refusal does not need to be rude or useless. It should explain what is known and what is missing.
+With metadata, the system can filter before retrieval or during retrieval.
 
-A practical refusal pattern:
+| User Question | Useful Metadata Filter |
+| --- | --- |
+| "Can I refund a LearnPro course?" | product = LearnPro |
+| "What is the billing policy?" | domain = billing |
+| "Show the latest policy" | version or updated_at |
+| "Answer in Chinese" | language = zh |
+| "Search only public docs" | permission_scope = public |
 
-```text
-I cannot confirm {unknown part} from the available support documents.
-The documents do state {known part}.
-To answer fully, we need {missing document or missing field}.
-```
+Metadata filtering usually improves precision.
+
+The retriever has fewer irrelevant chunks to compare, so the correct chunk has a better chance of appearing in top-k.
+
+## Why Metadata Benefits Reranking
+
+Metadata can also help reranking.
+
+Retrieval may return many candidate chunks. Reranking decides which ones should be placed higher.
+
+Metadata gives extra ranking signals.
 
 <CardGrid columns={2}>
-  <InfoCard title="Good Refusal">
-    Refuses only the unsupported part, then gives the supported information that is available.
+  <InfoCard title="Freshness">
+    Newer policy versions can be ranked above older versions when the user needs the current rule.
   </InfoCard>
 
-  <InfoCard title="Bad Refusal">
-    Either guesses the missing policy or refuses everything even when part of the answer is available.
+  <InfoCard title="Source Priority">
+    Official documentation can be ranked above comments, notes, or old tickets.
+  </InfoCard>
+
+  <InfoCard title="Domain Match">
+    Billing documents can be ranked above general support documents for billing questions.
+  </InfoCard>
+
+  <InfoCard title="Permission Safety">
+    Chunks outside the user's permission scope can be removed before generation.
   </InfoCard>
 </CardGrid>
 
-The goal is not to make the model say "I don't know" all the time. The goal is to stop unsupported claims.
+This does not mean metadata should replace semantic relevance. It should support it.
 
-## Strategy 6: Output Format Improves Consistency
+A strong reranking system can combine semantic score, keyword score, metadata match, freshness, and source priority.
 
-Output format controls how the final answer is presented.
+## Why Metadata Benefits the LLM
 
-For customer support, a consistent answer shape helps both users and developers. Users get predictable replies. Developers can test whether the model included required parts.
+Metadata can give the LLM better grounding.
 
-A useful answer format:
+The model should not only see the chunk text. It can also receive selected metadata that helps it understand scope.
 
-```text
-Direct answer:
-...
-
-Conditions:
-...
-
-Next step:
-...
-
-Sources:
-...
-```
-
-Example:
+Example context:
 
 ```text
-Direct answer:
-Your A12 headphone charging issue may be covered under warranty because it happened within 12 months of purchase.
+Source: Refund and Cancellation Policy
+Product: LearnPro Online Course Platform
+Version: 2026.04
+Section: Subscription Cancellation
 
-Conditions:
-Coverage does not apply if there is water damage, physical damage, or unauthorized repair.
-
-Next step:
-Prepare your proof of purchase for warranty verification.
-
-Sources:
-A12 Warranty Policy, Battery Charging Failure section.
+Monthly subscriptions can be cancelled at any time. The cancellation will stop the next billing cycle, but it does not refund the current active month.
 ```
 
-This format is more reliable than a long paragraph because it forces the model to separate the answer, caveats, and next action.
+This context is stronger than sending only the paragraph.
 
-Different question types may need different formats:
+The model can answer more carefully because it knows:
 
-| Question Type | Useful Format |
+- which document the rule comes from
+- which product it applies to
+- which version it belongs to
+- which section explains the rule
+
+Metadata should be selected carefully. Do not send every internal field to the LLM. Send fields that improve answer quality, scope, citation, or safety.
+
+## Why Metadata Benefits Debugging
+
+Metadata is critical for debugging RAG failures.
+
+When an answer is wrong, metadata helps us identify where the wrong evidence came from.
+
+Without metadata, a retrieved chunk is just text. With metadata, it becomes traceable evidence.
+
+| Debug Question | Metadata Needed |
 | --- | --- |
-| Simple policy question | Direct answer + condition + source |
-| Troubleshooting question | Steps + warning + escalation condition |
-| Warranty eligibility | Eligibility + exclusions + required proof |
-| Comparison question | Option table + decision rule |
-| Missing evidence | Known facts + missing information + fallback |
+| Did the answer come from the correct document? | document_id, source_uri |
+| Did we retrieve the wrong product? | product |
+| Did we retrieve an old rule? | version, updated_at |
+| Did we search the wrong domain? | domain |
+| Did permission filtering fail? | permission_scope |
+| Which team should fix the source? | owner |
+| Which parser created this chunk? | parser_version |
 
-Output format is a guardrail. It makes bad answers easier to detect.
+This turns debugging from guessing into inspection.
 
-## Strategy 7: Answer Validation Catches Unsupported Claims
+Instead of saying "the model answered wrongly", we can say "retrieval selected an outdated policy chunk from version 2025.11" or "the correct chunk existed, but the metadata filter excluded it."
 
-Answer validation is a check after generation.
+## Reusable Example: Chunk With Structure and Metadata
 
-The goal is to compare the final answer against the retrieved context and detect whether the model added unsupported claims.
+We will continue using the refund policy example from the previous logs.
 
-Validation can be simple at first:
+This is one chunk with both structure and metadata.
 
-| Validation Question | Purpose |
-| --- | --- |
-| Is every policy claim supported by context? | Detects hallucination |
-| Does the answer mention missing evidence when needed? | Detects overconfidence |
-| Does the answer use the correct product and region? | Detects context mixing |
-| Does the answer preserve conditions and exceptions? | Detects oversimplification |
-| Does the answer cite or reference the right source? | Detects weak grounding |
-
-A simple validation flow:
-
-```text
-Generated answer
-  -> compare against retrieved context
-  -> flag unsupported claims
-  -> revise answer or refuse unsupported parts
+```json
+{
+  "chunk_id": "doc_refund_policy_learnpro_2026_04__subscription_cancellation",
+  "document_id": "doc_refund_policy_learnpro_2026_04",
+  "structure": {
+    "title": "Refund and Cancellation Policy",
+    "section": "Subscription Cancellation",
+    "block_type": "paragraph",
+    "section_order": 3
+  },
+  "text": "Monthly subscriptions can be cancelled at any time. The cancellation will stop the next billing cycle, but it does not refund the current active month.",
+  "metadata": {
+    "source_type": "text",
+    "source_uri": "manual://learnpro/refund-policy/2026-04",
+    "product": "LearnPro Online Course Platform",
+    "domain": "billing",
+    "document_type": "policy",
+    "version": "2026.04",
+    "owner": "Billing Team",
+    "language": "en",
+    "permission_scope": "public_support",
+    "created_at": "2026-04-01",
+    "updated_at": "2026-04-15",
+    "parser_version": "parser_policy_v1",
+    "chunk_strategy": "heading_aware_table_aware_v1"
+  }
+}
 ```
 
-Example unsupported claim:
+The `structure` field describes where the text sits inside the document.
 
-```text
-The answer says replacement will be completed within three days.
-```
+The `metadata` field describes how the system should manage the chunk.
 
-But retrieved context only says:
+This separation is useful. It keeps the content model clean while still giving the retrieval and debugging layers enough control.
 
-```text
-Warranty claims require proof of purchase.
-```
+## Practical Metadata Design Rules
 
-The validation layer should flag the three-day claim as unsupported.
+Metadata should be useful, stable, and queryable.
 
-Validation does not need to be perfect in the first version. Even manual validation on test cases is useful. The key is to stop evaluating only by whether the answer sounds good.
-
-## Strategy 8: Guardrails Control Business and Safety Risk
-
-Guardrails are rules that prevent the LLM from producing risky, unauthorized, or out-of-scope responses.
-
-In customer support, common guardrails include:
-
-| Guardrail | Purpose |
-| --- | --- |
-| No unsupported refunds | Prevents unauthorized compensation |
-| No legal commitment | Avoids creating binding promises |
-| No policy invention | Keeps answers aligned with company rules |
-| No private data exposure | Protects customer information |
-| No internal-only procedure disclosure | Prevents leaking operational details |
-| Escalate sensitive cases | Routes uncertain cases to human support |
-
-Example guardrail instruction:
-
-```text
-Do not promise refunds, replacements, compensation, or delivery timelines unless the retrieved context explicitly states them.
-For uncertain eligibility, explain the required verification step instead of approving the claim.
-```
-
-This is important because the model may otherwise use friendly language that sounds like a commitment.
-
-Bad answer:
-
-```text
-We will replace your product for free.
-```
-
-Safer answer:
-
-```text
-Your issue may be eligible for warranty review. The support documents require proof of purchase, and coverage depends on inspection conditions.
-```
-
-Guardrails should be specific. Vague rules such as "be safe" or "do not be wrong" are too abstract to reliably control business behavior.
-
-## How to Evaluate the LLM Layer
-
-The LLM layer should be tested separately from indexing and retrieval.
-
-For evaluation, use a fixed set of retrieved contexts and questions. This isolates whether the model can answer correctly when the evidence is already provided.
-
-| Test Case | What to Check |
-| --- | --- |
-| Context contains direct answer | Model gives direct grounded answer |
-| Context contains answer plus exception | Model preserves exception |
-| Context is missing answer | Model refuses unsupported part |
-| Context contains two sources | Model combines them correctly |
-| Context contains outdated source label | Model avoids using invalid source |
-| Context contains condition words | Model does not overstate certainty |
-
-Example test:
-
-```text
-Context:
-Opened items can be returned within 7 days only if defective.
-Non-defective opened items are not eligible for return.
-
-Question:
-Can I return an opened item after 3 days?
-
-Expected behavior:
-Answer should mention that opened items are returnable only if defective.
-It should not say all opened items can be returned within 7 days.
-```
-
-This test checks grounding, condition preservation, and overstatement risk.
+Do not add fields only because they seem nice. Add fields because they help filtering, ranking, tracing, permission control, or debugging.
 
 <CardGrid columns={2}>
-  <InfoCard title="Test With Correct Context">
-    Confirms whether the prompt can make the model use evidence properly.
+  <InfoCard title="Use Stable IDs">
+    Every document and chunk should have a stable ID so failures can be reproduced and inspected.
   </InfoCard>
 
-  <InfoCard title="Test With Missing Context">
-    Confirms whether the model refuses instead of guessing.
+  <InfoCard title="Store Source Reference">
+    Keep the original file path, URL, database ID, or manual source reference for citation and debugging.
   </InfoCard>
 
-  <InfoCard title="Test With Conditional Context">
-    Confirms whether the model preserves exceptions and requirements.
+  <InfoCard title="Track Version">
+    Policy, pricing, API, and product documents need version or updated_at fields.
   </InfoCard>
 
-  <InfoCard title="Test With Conflicting Context">
-    Confirms whether the model detects conflict or asks for clarification instead of choosing randomly.
+  <InfoCard title="Keep Permission Scope">
+    Retrieval should not return content the user is not allowed to see.
+  </InfoCard>
+
+  <InfoCard title="Record Pipeline Fields">
+    Store parser version, chunk strategy, embedding model, and ingestion time to debug pipeline changes.
+  </InfoCard>
+
+  <InfoCard title="Avoid Metadata Noise">
+    Too many unused fields make the system harder to maintain. Metadata should support a real decision.
   </InfoCard>
 </CardGrid>
 
-If the retrieved context is correct but the answer is wrong, the issue is in the LLM layer. If the retrieved context is wrong, the issue belongs to retrieval or indexing.
+## Common Metadata Mistakes
 
-## A Practical LLM-Layer Workflow
+Metadata mistakes usually create silent RAG failures.
 
-A practical RAG answer workflow should be controlled and inspectable.
+| Mistake | Result |
+| --- | --- |
+| No document_id | Cannot trace answer source |
+| No version field | Old and new rules mix together |
+| No product field | Cross-product retrieval noise |
+| No permission scope | Risk of unsafe retrieval |
+| No parser or chunk strategy field | Hard to compare indexing experiments |
+| Too many inconsistent fields | Filtering becomes unreliable |
+| Metadata only at document level | Chunk-level debugging is weak |
 
-<CardGrid columns={2}>
-  <InfoCard title="1. Build Structured Context">
-    Format retrieved chunks with source number, title, section, status, product, region, and content.
-  </InfoCard>
+The most common issue is inconsistent metadata.
 
-  <InfoCard title="2. Use Context-Only Instructions">
-    Tell the model to answer only from retrieved support context and to avoid unsupported policy claims.
-  </InfoCard>
+For example, one document uses `product: LearnPro`, another uses `product_name: LearnPro`, and another uses `app: LearnPro`. The system may treat these as different fields even though they mean the same thing.
 
-  <InfoCard title="3. Require a Stable Output Shape">
-    Use direct answer, conditions, next step, and sources so responses are predictable and testable.
-  </InfoCard>
-
-  <InfoCard title="4. Preserve Uncertainty">
-    Make the model keep words such as "may", "requires", "unless", and "only if" when the policy depends on conditions.
-  </InfoCard>
-
-  <InfoCard title="5. Refuse Missing Evidence">
-    If retrieved context cannot answer, say what is missing instead of generating a likely-sounding answer.
-  </InfoCard>
-
-  <InfoCard title="6. Validate the Answer">
-    Check whether every policy claim is supported by the retrieved context before showing the final response.
-  </InfoCard>
-</CardGrid>
-
-This workflow keeps the model's role narrow: explain evidence, preserve conditions, and avoid unsupported claims.
+Metadata design should be standardized before large-scale ingestion.
 
 ## The Main Principle
 
-The LLM layer is not where RAG becomes true. It is where retrieved evidence becomes readable.
+Structure and metadata solve different problems.
 
-Indexing controls what knowledge exists. Retrieval controls what evidence is selected. The LLM layer controls how that evidence is explained, constrained, and validated.
+Structure makes content understandable. Metadata makes content controllable.
 
-The practical rule is:
+A good RAG system needs both. Structure helps the model read the evidence correctly. Metadata helps the system retrieve, filter, rank, secure, cite, and debug that evidence.
 
-```text
-Do not ask the LLM to know the policy.
-Ask it to explain the retrieved policy.
-```
-
-For a customer-support RAG system, log 4 should be implemented after indexing and retrieval are already inspectable. First make sure the right chunks exist. Then make sure the right chunks are retrieved. Only then tune prompts, answer format, refusal behavior, and guardrails.
+The practical rule is simple: if a field helps the system decide whether a chunk should be searched, ranked, shown, cited, or inspected, it belongs in metadata.
 
 </Lang>
 
 <Lang lang="zh">
 
-LLM layer 是 RAG 系统的最终回答阶段。Indexing 负责准备知识，retrieval 负责选择证据，而 LLM layer 负责决定这些证据怎样被格式化、模型应该怎样被指令约束、什么时候应该回答、什么时候应该拒答，以及最终答案在给用户之前要怎样检查。
+Metadata 是 RAG 内容外层的控制信息。Structure 说明内容在文档内部是怎么组织的。Metadata 说明这段内容是什么、来自哪里、由谁负责、什么时候创建，以及系统应该怎样使用它。
 
 ## 简短答案
 
-LLM layer 控制 **检索到的证据如何变成用户能看的答案**。
+Structure 和 metadata 有关系，但不是同一个东西。
 
-它不应该被当成让模型自由发挥的地方。在 RAG 系统里，LLM 应该被限制在一个清楚边界内：根据 retrieved context 回答；证据不足时说明不确定；不要添加资料里没有支持的事实。
-
-| LLM Layer 策略 | 控制什么 | 对准确率的影响 |
+| 概念 | 含义 | 例子 |
 | --- | --- | --- |
-| System instruction | 模型的运行规则 | 减少无依据行为 |
-| Context formatting | retrieved chunks 怎样呈现 | 改善证据使用 |
-| Prompt structure | 问题、证据和规则如何排列 | 减少模型混乱 |
-| Grounding rules | 答案是否必须被证据支持 | 限制 hallucination |
-| Refusal behavior | 缺少证据时怎么办 | 防止模型乱猜 |
-| Output format | 最终答案的形状 | 提高一致性 |
-| Answer validation | 检查答案是否符合 context | 抓出无依据 claim |
-| Guardrails | 安全和业务限制 | 防止高风险回答 |
+| Structure | 文档内容内部的形状 | title、sections、paragraphs、tables |
+| Metadata | 用来控制和追踪内容的额外描述字段 | product、domain、source_uri、version、permission |
 
-实用规则是：
+Structure 帮助模型理解内容。
 
-```text
-LLM 不应该决定什么是真的。
-检索到的证据决定什么是真的。
-LLM 只负责把证据解释清楚。
+Metadata 帮助系统控制、过滤、排序、权限处理和调试内容。
+
+一个实用的 RAG 系统需要两者。Structure 让 chunk 有意义。Metadata 让 chunk 可管理。
+
+## Structure 是什么
+
+Structure 关注的是文档本身怎么组织。
+
+它描述内容的布局：
+
+- title
+- section
+- subsection
+- paragraph
+- list
+- table
+- row
+- column
+- block order
+
+比如在 refund policy 文档里，这是 structure：
+
+```json
+{
+  "title": "Refund and Cancellation Policy",
+  "sections": [
+    {
+      "heading": "Subscription Cancellation",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "text": "Monthly subscriptions can be cancelled at any time. The cancellation will stop the next billing cycle, but it does not refund the current active month."
+        }
+      ]
+    }
+  ]
+}
 ```
 
-## RAG 里的 LLM Layer 是什么
+这告诉我们内容是怎么排列的。
 
-在普通 LLM chat 里，模型收到用户问题后，会根据自身训练知识生成答案。
+section heading 让 paragraph 有上下文。block type 告诉我们内容是普通文字、表格、列表，还是其他格式。
 
-在 RAG 系统里，模型应该收到：
+## Metadata 是什么
 
-- System instruction。
-- 用户问题。
-- Retrieved context chunks。
-- 来源信息。
-- 回答规则。
-- 拒答规则。
-- 输出格式要求。
+Metadata 是描述内容的数据。
 
-简化流程如下：
+它通常不是主要答案文本，而是告诉系统这段内容应该怎么被使用。
 
-```text
-用户问题
-  -> retrieved chunks
-  -> prompt construction
-  -> LLM generation
-  -> answer validation
-  -> final response
+对于同一份 refund policy，这是 metadata：
+
+```json
+{
+  "document_id": "doc_refund_policy_learnpro_2026_04",
+  "source_uri": "manual://learnpro/refund-policy/2026-04",
+  "product": "LearnPro Online Course Platform",
+  "domain": "billing",
+  "document_type": "policy",
+  "version": "2026.04",
+  "owner": "Billing Team",
+  "language": "en",
+  "permission_scope": "public_support",
+  "created_at": "2026-04-01",
+  "updated_at": "2026-04-15"
+}
 ```
 
-对于客服 RAG 系统，这一层负责把证据转成有用回复。
+这些字段不一定直接回答用户的退款问题。但它们可以帮助系统判断这份文档要不要被搜索、检索、展示、引用或忽略。
 
-用户问题例子：
+Metadata 让系统可以问这些问题：
 
-```text
-我的 A12 耳机买了十个月，现在不能充电，可以申请保修吗？
-```
+- 这份文档是不是属于正确产品？
+- 这段内容是不是最新？
+- 这个用户有没有权限看到？
+- 这个答案由哪个团队负责？
+- 这个 chunk 来自哪里？
+- 这个答案来自哪个文档版本？
 
-Retrieved context 可能包含：
+## 为什么 Structure 和 Metadata 有关系
 
-```text
-Source: A12 Warranty Policy
-Battery charging failure is covered for 12 months from the purchase date.
-Coverage does not apply if there is water damage, physical damage, or unauthorized repair.
-Proof of purchase is required for warranty verification.
-```
+Structure 和 metadata 有关系，因为它们都在描述上下文。
 
-LLM 应该生成类似这样的回答：
+区别是上下文来源不同。
 
-```text
-根据 A12 保修政策，您的充电问题可能属于保修范围，因为问题发生在购买后的 12 个月内。但如果存在进水、物理损坏或未经授权维修，则不适用保修。您也需要提供购买证明进行验证。
-```
+| 上下文类型 | 来自哪里 | 用途 |
+| --- | --- | --- |
+| Structure | 文档内部 | 理解局部含义 |
+| Metadata | 文档或 chunk 外部 | 控制系统行为 |
 
-模型不是在发明政策，而是把检索到的政策翻译成清楚的用户答案。
-
-## 策略一：System Instruction 定义回答边界
-
-System instruction 是模型行为的最高层规则。
-
-在 RAG 中，这个 instruction 应该清楚定义边界：
+例如：
 
 ```text
-You are a customer-support assistant.
-Answer only using the provided support context.
-If the context does not contain enough information, say that the available documents do not provide enough evidence.
-Do not invent policy, warranty terms, pricing, delivery dates, or exceptions.
+Section: Subscription Cancellation
+Text: Monthly subscriptions can be cancelled at any time.
 ```
 
-这个规则会改变模型的工作。它不是被要求“尽量有帮助”，而是被要求“根据证据回答”。
+section 是 structure。它帮助模型理解这段文字的局部含义。
 
-弱 instruction：
+现在加入 metadata：
 
-```text
-Answer the user's question helpfully.
+```json
+{
+  "product": "LearnPro Online Course Platform",
+  "domain": "billing",
+  "document_type": "policy",
+  "version": "2026.04"
+}
 ```
 
-这太开放。模型可能使用一般常识或自己假设。
+metadata 告诉系统这个 chunk 属于 billing domain，适用于 LearnPro，并且来自 2026.04 版本的 policy。
 
-更强的 instruction：
+两者结合后，chunk 才同时具备可理解性和可控制性。
 
-```text
-Answer the user's question using only the retrieved support context.
-If the answer is not directly supported by the context, explain what information is missing.
-Do not add unsupported policy details.
-```
+## 为什么 Metadata 对 Retrieval 有帮助
 
-| Instruction 类型 | 结果 |
+Metadata 可以通过缩小搜索范围来改善 retrieval。
+
+如果没有 metadata，retriever 可能会搜索知识库里的所有 chunk。这样它可能返回错误产品、错误地区、错误语言、错误版本，或者错误权限范围的内容。
+
+有 metadata 后，系统可以在 retrieval 前或 retrieval 中进行过滤。
+
+| 用户问题 | 有用的 Metadata Filter |
 | --- | --- |
-| Helpful 但不限制 | 更容易猜 |
-| Context-only | grounding 更强 |
-| Context-only 加拒答规则 | 证据不足时更安全 |
-| Context-only 加输出格式 | 答案更一致 |
+| "Can I refund a LearnPro course?" | product = LearnPro |
+| "What is the billing policy?" | domain = billing |
+| "Show the latest policy" | version or updated_at |
+| "Answer in Chinese" | language = zh |
+| "Search only public docs" | permission_scope = public |
 
-对于客服系统，模型不应该创造新的退货例外、保修条件或升级流程。这些是业务规则，不是创作任务。
+metadata filtering 通常会提高 precision。
 
-## 策略二：Context Formatting 影响证据使用
+retriever 需要比较的无关 chunk 变少，正确 chunk 出现在 top-k 的机会就会增加。
 
-LLM 能不能用好 retrieved context，很大程度取决于 context 是否清楚。
+## 为什么 Metadata 对 Reranking 有帮助
 
-差的 context formatting：
+Metadata 也可以帮助 reranking。
 
-```text
-Battery issue covered 12 months no water damage proof needed refund 5 days Malaysia policy old version not active
-```
+retrieval 可能返回很多候选 chunk。reranking 决定哪些应该排在前面。
 
-这很难让模型正确理解。
-
-更好的 context formatting：
-
-```text
-[Source 1]
-Title: A12 Warranty Policy
-Status: active
-Region: Malaysia
-Section: Battery Charging Failure
-
-Battery charging failure is covered for 12 months from the purchase date.
-Coverage does not apply if there is water damage, physical damage, or unauthorized repair.
-Proof of purchase is required for warranty verification.
-```
-
-有用的 context fields：
-
-| Field | 用途 |
-| --- | --- |
-| Source number | 让答案可以引用证据 |
-| Title | 显示文件身份 |
-| Section | 显示规则来自哪里 |
-| Status | 确认文件是否可用 |
-| Region | 避免错误国家解释 |
-| Product | 避免错误产品解释 |
-| Content | 提供实际回答证据 |
-
-好的 context formatting 可以降低模型混合不同 chunks 规则的概率。
-
-如果有多个 chunks，应该清楚分隔：
-
-```text
-[Source 1]
-Title: A12 Warranty Policy
-Section: Coverage
-Content: ...
-
-[Source 2]
-Title: A12 Troubleshooting Guide
-Section: Error E104
-Content: ...
-```
-
-除非任务非常简单，否则不要把一整坨未结构化文字直接丢给模型。
-
-## 策略三：Prompt Structure 减少模型混乱
-
-Prompt structure 指的是 instruction、context、question 和 output rules 的排列方式。
-
-稳定的 RAG prompt 通常长这样：
-
-```text
-System role:
-You are a customer-support assistant. Use only the provided context.
-
-Task:
-Answer the user's question based on the retrieved context.
-
-Context:
-[Source 1]
-...
-
-[Source 2]
-...
-
-User question:
-...
-
-Answer rules:
-- Give a direct answer first.
-- Mention conditions and exceptions.
-- If evidence is missing, say so.
-- Do not invent unsupported policy.
-```
-
-顺序很重要。如果 retrieved context 和 instruction 混在一起，或者 output rules 很模糊，模型可能会忽略重要限制。
-
-实用 prompt template：
-
-```text
-You are a customer-support assistant.
-
-Use only the support context below.
-If the answer cannot be found in the context, say:
-"The available support documents do not provide enough information to answer this."
-
-Support context:
-{retrieved_context}
-
-User question:
-{user_question}
-
-Write the answer with:
-1. Direct answer
-2. Conditions or exceptions
-3. Required next step
-4. Sources used
-```
-
-这个 template 给模型清楚的任务和答案形状。
+metadata 可以提供额外排序信号。
 
 <CardGrid columns={2}>
-  <InfoCard title="好的 Prompt Structure">
-    把 role、context、user question 和 answer rules 分开。模型比较容易遵守任务。
+  <InfoCard title="新旧程度">
+    当用户需要当前规则时，新版本 policy 可以排在旧版本之前。
   </InfoCard>
 
-  <InfoCard title="差的 Prompt Structure">
-    把 retrieved text、instructions 和 user input 混成一段，会增加模型漏掉约束的概率。
+  <InfoCard title="来源优先级">
+    官方文档可以排在评论、笔记或旧 ticket 前面。
+  </InfoCard>
+
+  <InfoCard title="领域匹配">
+    billing 问题可以优先排序 billing documents，而不是 general support documents。
+  </InfoCard>
+
+  <InfoCard title="权限安全">
+    超出用户权限范围的 chunk 可以在生成前被移除。
   </InfoCard>
 </CardGrid>
 
-Prompt design 不只是措辞问题。它也是信息结构问题。
+这不代表 metadata 应该取代语义相关性。它应该辅助语义相关性。
 
-## 策略四：Grounding Rules 防止无依据答案
+更完整的 reranking 系统可以结合 semantic score、keyword score、metadata match、freshness 和 source priority。
 
-Grounding 的意思是答案必须被 retrieved evidence 支持。
+## 为什么 Metadata 对 LLM 有帮助
 
-一个 grounded answer 应该通过三个检查：
+Metadata 可以让 LLM 有更好的 grounding。
 
-| 检查 | 意思 |
-| --- | --- |
-| Evidence exists | 答案基于 retrieved context |
-| Evidence is relevant | 引用内容真的支持这个 claim |
-| Evidence is not overextended | 答案没有额外加假设 |
-
-Retrieved context 例子：
-
-```text
-Battery charging failure is covered for 12 months from the purchase date.
-Coverage does not apply if there is water damage.
-```
-
-Grounded answer：
-
-```text
-这个充电故障可能属于保修范围，因为还在 12 个月保修期内，但如果存在进水损坏则不适用。
-```
-
-Unsupported answer：
-
-```text
-您的产品一定可以保修，我们会在三天内寄出替换品。
-```
-
-这个 unsupported answer 增加了确定性和处理流程，但 context 没有支持这些内容。
-
-有用的 grounding instruction：
-
-```text
-Every policy claim in the answer must be supported by the retrieved context.
-If the context only says "may be covered", do not rewrite it as "is definitely covered".
-```
-
-这对客服很重要，因为客服答案经常包含条件。
-
-| Context 写法 | Answer 应该说 | 不应该说 |
-| --- | --- | --- |
-| May be eligible | 可能符合资格 | 一定通过 |
-| Requires inspection | 需要检查 | 自动通过 |
-| Within 12 months | 12 个月内 | 终身保修 |
-| Excludes water damage | 不包含进水损坏 | 所有损坏都保 |
-
-LLM layer 应该保留证据的强度，不要把不确定变成确定。
-
-## 策略五：Refusal Behavior 防止模型乱猜
-
-RAG 系统需要清楚定义：证据不足时怎么办。
-
-如果 retrieved context 无法回答问题，模型不应该猜。
-
-用户问题例子：
-
-```text
-我可以在门店当天换新吗？
-```
-
-Retrieved context：
-
-```text
-Warranty claims require proof of purchase.
-Battery charging failure is covered for 12 months.
-```
-
-Context 没有提到当天换新。好的回答：
-
-```text
-目前提供的客服文件不足以确认是否可以在门店当天换新。文件只说明保修申请需要购买证明，并且电池充电故障在 12 个月内可能属于保修范围。
-```
-
-坏回答：
-
-```text
-可以，如果门店有库存，通常可以当天换新。
-```
-
-这个回答听起来有帮助，但没有证据支持。
-
-拒答不需要没用。它应该说明已知内容和缺少内容。
-
-实用拒答模式：
-
-```text
-我无法根据目前文件确认 {unknown part}。
-目前文件只说明 {known part}。
-如果要完整回答，需要 {missing document or missing field}。
-```
-
-<CardGrid columns={2}>
-  <InfoCard title="好的 Refusal">
-    只拒绝没有证据支持的部分，同时提供文件中已经能确认的信息。
-  </InfoCard>
-
-  <InfoCard title="差的 Refusal">
-    要么乱猜缺失政策，要么在部分答案可用时也完全拒绝回答。
-  </InfoCard>
-</CardGrid>
-
-目标不是让模型一直说“不知道”。目标是阻止无依据 claim。
-
-## 策略六：Output Format 提高一致性
-
-Output format 控制最终答案怎样呈现。
-
-对于客服系统，一致的答案结构对用户和开发者都有价值。用户得到可预测的回复，开发者也更容易测试模型是否包含必要部分。
-
-实用答案格式：
-
-```text
-Direct answer:
-...
-
-Conditions:
-...
-
-Next step:
-...
-
-Sources:
-...
-```
+模型不应该只看到 chunk text。它也可以看到被筛选过、对回答有帮助的 metadata。
 
 例子：
 
 ```text
-Direct answer:
-您的 A12 耳机充电问题可能属于保修范围，因为问题发生在购买后的 12 个月内。
+Source: Refund and Cancellation Policy
+Product: LearnPro Online Course Platform
+Version: 2026.04
+Section: Subscription Cancellation
 
-Conditions:
-如果存在进水、物理损坏或未经授权维修，则不适用保修。
-
-Next step:
-请准备购买证明，以便进行保修验证。
-
-Sources:
-A12 Warranty Policy, Battery Charging Failure section.
+Monthly subscriptions can be cancelled at any time. The cancellation will stop the next billing cycle, but it does not refund the current active month.
 ```
 
-这种格式比长段落更可靠，因为它强迫模型分开回答、条件和下一步动作。
+这比只发送 paragraph 更强。
 
-不同问题类型可以使用不同格式：
+模型可以更谨慎地回答，因为它知道：
 
-| 问题类型 | 适合格式 |
+- 规则来自哪份文档
+- 规则适用于哪个产品
+- 规则属于哪个版本
+- 规则来自哪个 section
+
+metadata 不应该全部丢给 LLM。只应该发送会改善回答质量、适用范围、引用或安全性的字段。
+
+## 为什么 Metadata 对 Debugging 有帮助
+
+Metadata 对 RAG debugging 很关键。
+
+当答案错了，metadata 可以帮助我们判断错误证据来自哪里。
+
+没有 metadata 时，retrieved chunk 只是一段文字。有 metadata 后，它才是可以追踪的 evidence。
+
+| 调试问题 | 需要的 Metadata |
 | --- | --- |
-| 简单政策问题 | 直接答案 + 条件 + 来源 |
-| 故障排查问题 | 步骤 + 警告 + 升级条件 |
-| 保修资格 | 资格 + 排除条件 + 所需证明 |
-| 比较问题 | 选项表格 + 决策规则 |
-| 缺少证据 | 已知事实 + 缺失信息 + fallback |
+| 答案是否来自正确文档？ | document_id, source_uri |
+| 是否检索到错误产品？ | product |
+| 是否检索到旧规则？ | version, updated_at |
+| 是否搜索了错误 domain？ | domain |
+| permission filtering 是否失败？ | permission_scope |
+| 哪个团队应该修资料？ | owner |
+| 哪个 parser 生成这个 chunk？ | parser_version |
 
-Output format 是一种 guardrail。它让坏答案更容易被发现。
+这会让调试从猜测变成检查。
 
-## 策略七：Answer Validation 抓出无依据 Claims
+我们不需要笼统地说 “模型回答错了”，而是可以说 “retrieval 选中了 2025.11 的过期 policy chunk”，或者 “正确 chunk 存在，但 metadata filter 把它排除了”。
 
-Answer validation 是 generation 之后的检查。
+## 可复用例子：同时包含 Structure 和 Metadata 的 Chunk
 
-目标是把最终答案和 retrieved context 对照，检查模型有没有加入无依据 claim。
+我们继续使用前几篇 log 的 refund policy 例子。
 
-一开始可以很简单：
+下面是一个同时带有 structure 和 metadata 的 chunk。
 
-| Validation Question | 用途 |
-| --- | --- |
-| 每个政策 claim 是否被 context 支持？ | 发现 hallucination |
-| 证据不足时是否说明缺失？ | 发现过度自信 |
-| 产品和地区是否正确？ | 发现 context mixing |
-| 是否保留条件和例外？ | 发现过度简化 |
-| 是否引用正确来源？ | 发现 grounding 太弱 |
-
-简单 validation flow：
-
-```text
-Generated answer
-  -> compare against retrieved context
-  -> flag unsupported claims
-  -> revise answer or refuse unsupported parts
+```json
+{
+  "chunk_id": "doc_refund_policy_learnpro_2026_04__subscription_cancellation",
+  "document_id": "doc_refund_policy_learnpro_2026_04",
+  "structure": {
+    "title": "Refund and Cancellation Policy",
+    "section": "Subscription Cancellation",
+    "block_type": "paragraph",
+    "section_order": 3
+  },
+  "text": "Monthly subscriptions can be cancelled at any time. The cancellation will stop the next billing cycle, but it does not refund the current active month.",
+  "metadata": {
+    "source_type": "text",
+    "source_uri": "manual://learnpro/refund-policy/2026-04",
+    "product": "LearnPro Online Course Platform",
+    "domain": "billing",
+    "document_type": "policy",
+    "version": "2026.04",
+    "owner": "Billing Team",
+    "language": "en",
+    "permission_scope": "public_support",
+    "created_at": "2026-04-01",
+    "updated_at": "2026-04-15",
+    "parser_version": "parser_policy_v1",
+    "chunk_strategy": "heading_aware_table_aware_v1"
+  }
+}
 ```
 
-无依据 claim 例子：
+`structure` 字段描述这段文字在文档内部的位置。
 
-```text
-答案说替换流程会在三天内完成。
-```
+`metadata` 字段描述系统应该如何管理这个 chunk。
 
-但 retrieved context 只说：
+这种分离很有用。它让内容模型保持清楚，同时也让 retrieval 和 debugging layer 有足够的控制能力。
 
-```text
-Warranty claims require proof of purchase.
-```
+## 实用 Metadata 设计规则
 
-Validation layer 应该标记“三天内完成”这个 claim 没有证据支持。
+Metadata 应该有用、稳定、可以查询。
 
-第一版 validation 不需要完美。就算只是用测试案例人工检查，也很有价值。重点是不要只用“答案听起来好不好”来评估。
-
-## 策略八：Guardrails 控制业务和安全风险
-
-Guardrails 是防止 LLM 产生高风险、未授权或超出范围回答的规则。
-
-客服系统常见 guardrails：
-
-| Guardrail | 用途 |
-| --- | --- |
-| 不承诺无依据退款 | 防止未授权赔偿 |
-| 不制造法律承诺 | 避免产生绑定性承诺 |
-| 不发明政策 | 保持和公司规则一致 |
-| 不泄露私人资料 | 保护客户信息 |
-| 不公开内部流程 | 避免泄露运营细节 |
-| 敏感情况升级人工 | 把不确定问题交给人工支持 |
-
-Guardrail instruction 例子：
-
-```text
-Do not promise refunds, replacements, compensation, or delivery timelines unless the retrieved context explicitly states them.
-For uncertain eligibility, explain the required verification step instead of approving the claim.
-```
-
-这很重要，因为模型可能为了友善，写出听起来像承诺的话。
-
-坏回答：
-
-```text
-我们会免费为您更换产品。
-```
-
-更安全的回答：
-
-```text
-您的情况可能符合保修审核条件。客服文件要求提供购买证明，最终是否适用保修还取决于检查结果。
-```
-
-Guardrails 应该具体。像 “be safe” 或 “do not be wrong” 这种规则太抽象，很难稳定控制业务行为。
-
-## 如何评估 LLM Layer
-
-LLM layer 应该和 indexing、retrieval 分开测试。
-
-评估时，使用固定 retrieved context 和固定问题。这样可以隔离测试：当证据已经正确提供时，模型是否能正确回答。
-
-| Test Case | 检查什么 |
-| --- | --- |
-| Context 有直接答案 | 模型是否给出 grounded direct answer |
-| Context 有答案和例外 | 模型是否保留例外 |
-| Context 缺少答案 | 模型是否拒绝无依据部分 |
-| Context 有两个来源 | 模型是否正确合并 |
-| Context 有 outdated source label | 模型是否避免使用无效来源 |
-| Context 有条件词 | 模型是否避免过度确定 |
-
-测试例子：
-
-```text
-Context:
-Opened items can be returned within 7 days only if defective.
-Non-defective opened items are not eligible for return.
-
-Question:
-Can I return an opened item after 3 days?
-
-Expected behavior:
-Answer should mention that opened items are returnable only if defective.
-It should not say all opened items can be returned within 7 days.
-```
-
-这个测试检查 grounding、条件保留和过度扩展风险。
+不要因为某个字段看起来不错就加入。只有当它能帮助 filtering、ranking、tracing、permission control 或 debugging 时，才值得加入。
 
 <CardGrid columns={2}>
-  <InfoCard title="用正确 Context 测试">
-    确认 prompt 能不能让模型正确使用证据。
+  <InfoCard title="使用稳定 ID">
+    每份 document 和每个 chunk 都应该有稳定 ID，这样失败案例才能被复现和检查。
   </InfoCard>
 
-  <InfoCard title="用缺失 Context 测试">
-    确认模型会拒答，而不是乱猜。
+  <InfoCard title="保存来源引用">
+    保留原始文件路径、URL、database ID 或 manual source reference，方便 citation 和 debugging。
   </InfoCard>
 
-  <InfoCard title="用条件 Context 测试">
-    确认模型会保留例外、限制和要求。
+  <InfoCard title="追踪版本">
+    Policy、pricing、API 和 product documents 需要 version 或 updated_at 字段。
   </InfoCard>
 
-  <InfoCard title="用冲突 Context 测试">
-    确认模型会识别冲突或要求澄清，而不是随机选择一个。
+  <InfoCard title="保留权限范围">
+    Retrieval 不应该返回用户没有权限查看的内容。
+  </InfoCard>
+
+  <InfoCard title="记录 Pipeline 字段">
+    保存 parser version、chunk strategy、embedding model 和 ingestion time，方便调试 pipeline 变化。
+  </InfoCard>
+
+  <InfoCard title="避免 Metadata 噪音">
+    太多没被使用的字段会让系统更难维护。metadata 应该支持真实决策。
   </InfoCard>
 </CardGrid>
 
-如果 retrieved context 正确但答案错误，问题在 LLM layer。如果 retrieved context 本身错误，问题属于 retrieval 或 indexing。
+## 常见 Metadata 错误
 
-## 实际 LLM Layer 工作流
+Metadata 错误通常会造成很隐蔽的 RAG failure。
 
-一个实际 RAG answer workflow 应该受控、可检查。
+| 错误 | 结果 |
+| --- | --- |
+| 没有 document_id | 无法追踪答案来源 |
+| 没有 version field | 新旧规则混在一起 |
+| 没有 product field | 不同产品互相干扰 |
+| 没有 permission scope | 有不安全检索风险 |
+| 没有 parser 或 chunk strategy field | 很难比较 indexing 实验 |
+| 字段太多且不一致 | filtering 变得不可靠 |
+| metadata 只存在 document level | chunk-level debugging 很弱 |
 
-<CardGrid columns={2}>
-  <InfoCard title="1. 构建结构化 Context">
-    为 retrieved chunks 加上 source number、title、section、status、product、region 和 content。
-  </InfoCard>
+最常见的问题是 metadata 不一致。
 
-  <InfoCard title="2. 使用 Context-Only Instructions">
-    要求模型只根据 retrieved support context 回答，并避免无依据政策 claim。
-  </InfoCard>
+比如一份文档用 `product: LearnPro`，另一份用 `product_name: LearnPro`，还有一份用 `app: LearnPro`。系统可能会把它们当成不同字段，虽然它们表达的是同一个意思。
 
-  <InfoCard title="3. 要求稳定 Output Shape">
-    使用 direct answer、conditions、next step 和 sources，让答案可预测、可测试。
-  </InfoCard>
-
-  <InfoCard title="4. 保留不确定性">
-    当政策依赖条件时，让模型保留 “may”、“requires”、“unless”、“only if” 这类语气。
-  </InfoCard>
-
-  <InfoCard title="5. 缺少证据时拒答">
-    如果 retrieved context 无法回答，就说明缺少什么，不要生成看起来合理的答案。
-  </InfoCard>
-
-  <InfoCard title="6. 验证最终答案">
-    在展示给用户前，检查每个 policy claim 是否被 retrieved context 支持。
-  </InfoCard>
-</CardGrid>
-
-这个流程把模型角色限制得很清楚：解释证据、保留条件、避免无依据 claim。
+metadata design 应该在大规模 ingestion 之前先标准化。
 
 ## 核心原则
 
-LLM layer 不是让 RAG 变正确的地方。它是把 retrieved evidence 变成可读答案的地方。
+Structure 和 metadata 解决的是不同问题。
 
-Indexing 控制有哪些知识存在。Retrieval 控制哪些证据被选中。LLM layer 控制这些证据如何被解释、约束和验证。
+Structure 让内容可以被理解。Metadata 让内容可以被控制。
 
-实用规则是：
+好的 RAG 系统需要两者。Structure 帮助模型正确阅读 evidence。Metadata 帮助系统检索、过滤、排序、做权限控制、引用和调试 evidence。
 
-```text
-不要要求 LLM 记得政策。
-要求它解释 retrieved policy。
-```
-
-对于客服 RAG 系统，log 4 应该在 indexing 和 retrieval 已经可检查之后再实现。先确保正确 chunks 存在。再确保正确 chunks 会被检索出来。最后才调整 prompt、答案格式、拒答行为和 guardrails。
+实用规则很简单：如果一个字段可以帮助系统判断某个 chunk 是否应该被搜索、排序、展示、引用或检查，它就应该属于 metadata。
 
 </Lang>

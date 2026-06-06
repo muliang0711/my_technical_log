@@ -1,13 +1,13 @@
 ---
-title: "RAG Retrieval Strategies: How Search Quality Controls Answer Accuracy"
+title: "RAG Chunking Strategies"
 category: "Software Development"
-createdAt: "2026-06-05"
-summary: "A practical explanation of how retrieval strategies such as filtering, hybrid search, reranking, callback retrieval, and query decomposition affect RAG accuracy."
-readTime: "11 min read"
+createdAt: "2026-06-06"
+summary: "A practical guide to common RAG chunking strategies and how to choose the right one based on document type and retrieval behavior."
+readTime: "9 min read"
 tags:
-  - "AI"
   - "RAG"
-  - "Retrieval"
+  - "Backend"
+  - "AI"
   - "System Design"
 featured: false
 series:
@@ -18,1122 +18,936 @@ series:
 
 <Lang lang="en">
 
-Retrieval is the online search phase of a RAG system. Indexing prepares the knowledge base, but retrieval decides which pieces of that knowledge are actually sent to the LLM for one user question. If retrieval returns weak evidence, the LLM may still write a fluent answer, but the answer will not be grounded in the right support material.
+Chunking is the step that turns parsed documents into searchable units. A RAG system does not usually retrieve a whole document. It retrieves chunks. That means chunking directly affects what the retriever can find, what the reranker can compare, and what the LLM can use as context.
 
 ## Short Answer
 
-Retrieval controls **which indexed chunks reach the LLM**.
+There is no single best chunking strategy.
 
-Indexing decides what can be searched. Retrieval decides what is selected. In a customer-support RAG system, this layer is responsible for finding the most relevant policy, manual section, FAQ answer, troubleshooting step, or ticket reference for the user's question.
+A good chunking strategy depends on:
 
-| Retrieval Strategy | What It Controls | Accuracy Effect |
-| --- | --- | --- |
-| Vector search | Matches semantic meaning | Finds related content even when wording differs |
-| Metadata filtering | Limits the search scope | Prevents wrong product, region, version, or language |
-| Keyword search | Matches exact terms | Handles error codes, SKU, policy names, and IDs |
-| Hybrid search | Combines vector and keyword search | Improves both semantic and exact matching |
-| Top-k control | Decides how many chunks are returned | Balances evidence coverage and noise |
-| Reranking | Reorders candidate chunks | Improves the quality of final context |
-| Callback retrieval | Retries weak searches | Recovers from poor first queries |
-| Query decomposition | Splits complex questions | Improves multi-condition answers |
+- document structure
+- document length
+- question type
+- retrieval method
+- embedding model
+- metadata quality
+- answer format
+- context window budget
 
-The practical rule is:
-
-```text
-Retrieval is not just search.
-Retrieval is evidence selection.
-```
-
-If the right evidence does not reach the prompt, the LLM layer cannot reliably fix the answer.
-
-## What Retrieval Means in RAG
-
-Retrieval happens after indexing and before generation.
-
-The system already has indexed chunks. Each chunk may include text, embeddings, metadata, source reference, version, and status. When the user asks a question, retrieval searches this indexed knowledge base and selects the best candidate chunks.
-
-A simplified retrieval flow looks like this:
-
-```text
-User question
-  -> understand query intent
-  -> apply metadata filters
-  -> run vector, keyword, or hybrid search
-  -> collect candidate chunks
-  -> rerank candidates
-  -> send final context to LLM
-```
-
-For example, the user asks:
-
-```text
-My A12 headphone shows E104 and cannot charge. Is this covered by warranty?
-```
-
-A good retrieval result should include:
-
-- The A12 headphone warranty policy.
-- The E104 troubleshooting section.
-- The battery or charging failure rule.
-- The warranty exclusion conditions.
-- The active policy for the user's region.
-
-The retriever should not return:
-
-- A policy for a different product.
-- A policy for a different country.
-- An archived warranty document.
-- A generic charging article without warranty conditions.
-- A chunk about a similar but unrelated error code.
-
-This is why retrieval is part of correctness, not just performance.
-
-## Strategy 1: Metadata Filtering Controls Search Scope
-
-Metadata filtering should usually happen before or during search. It prevents obviously wrong documents from competing with correct ones.
-
-Useful filters in customer-support RAG include:
-
-| Filter | Example | Why It Matters |
-| --- | --- | --- |
-| `product_id` | `A12_HEADPHONE` | Avoids wrong product answers |
-| `region` | `MY` | Avoids wrong country policy |
-| `language` | `en` | Matches user language |
-| `document_type` | `warranty_policy` | Matches question intent |
-| `status` | `active` | Excludes drafts and deprecated documents |
-| `version` | `2026-02` | Controls policy freshness |
-
-Without filtering, semantic search may retrieve text that looks similar but should not be used.
-
-Example user question:
-
-```text
-Can I return an opened item in Malaysia?
-```
-
-Bad retrieval candidate:
-
-```text
-Singapore return policy, deprecated version.
-Opened items can be returned within fourteen days.
-```
-
-Better retrieval candidate:
-
-```text
-Malaysia return policy, active version.
-Opened items are returnable only if defective.
-```
-
-Both chunks are semantically related to opened-item returns. Metadata decides which one is valid.
+The practical goal is not to find the perfect chunk size. The goal is to make each chunk contain enough meaning to be retrieved and enough context to be answered.
 
 <CardGrid columns={2}>
-  <InfoCard title="Accuracy Benefit">
-    Filtering improves precision because it removes chunks that are not allowed to answer the question.
+  <InfoCard title="Too Small">
+    The chunk may match the query, but it may not contain enough surrounding context to answer correctly.
   </InfoCard>
 
-  <InfoCard title="Main Risk">
-    If metadata is missing or inconsistent, filtering may remove the correct document or allow the wrong one.
+  <InfoCard title="Too Large">
+    The chunk may contain the answer, but the embedding may become noisy because too many unrelated ideas are mixed together.
   </InfoCard>
 </CardGrid>
 
-A good retrieval system does not ask the LLM to choose between active and deprecated policies. It prevents deprecated policies from entering the prompt.
+## Why Chunking Matters
 
-## Strategy 2: Vector Search Handles Semantic Meaning
+Chunking controls the unit of retrieval.
 
-Vector search matches meaning instead of exact wording.
+If the correct answer is split across multiple chunks, retrieval may only return half of the evidence. If unrelated rules are mixed into the same chunk, the LLM may read conflicting context.
 
-This matters because users often describe problems differently from how documentation is written.
+Chunking is not only a storage problem. It affects the whole RAG pipeline.
 
-User wording:
-
-```text
-My device keeps turning off by itself.
-```
-
-Document wording:
-
-```text
-Unexpected shutdown may occur when the battery protection circuit is triggered.
-```
-
-A keyword search may miss this because the words are different. Vector search can still retrieve the relevant troubleshooting section because the meaning is close.
-
-Vector search is useful for:
-
-- Symptom descriptions.
-- Natural language questions.
-- Policy questions using different wording.
-- Broad troubleshooting requests.
-- User messages with informal language.
-
-However, vector search is not perfect.
-
-| Vector Search Strength | Vector Search Weakness |
+| Stage | How Chunking Affects It |
 | --- | --- |
-| Finds semantically similar text | May miss exact codes or IDs |
-| Works with natural language | Can retrieve similar but wrong policy |
-| Handles paraphrasing | Needs strong metadata filtering |
-| Useful for broad questions | Can be noisy when documents overlap |
+| Embedding | The vector represents the chunk, not the whole document |
+| Retrieval | Search returns chunks based on chunk-level similarity |
+| Reranking | Candidate chunks are compared against the user question |
+| LLM Context | The model only sees the selected chunks |
+| Debugging | Engineers inspect chunk-level evidence |
 
-For customer-support RAG, vector search should usually be combined with filters. Semantic similarity alone is not enough when business rules depend on region, product, status, or version.
+A weak chunking strategy can make a good retriever look bad. It can also make the LLM look unreliable when the real problem is that the answer was cut away from its context.
 
-## Strategy 3: Keyword Search Handles Exact Terms
+## Strategy 1: Fixed-Size Chunking
 
-Keyword search matches exact words, codes, and identifiers.
-
-This is important because customer-support questions often contain values where exact matching matters:
-
-- Error codes.
-- Product SKUs.
-- Order IDs.
-- Policy names.
-- Feature names.
-- Model numbers.
-- Warranty codes.
+Fixed-size chunking splits text by a fixed number of characters, words, or tokens.
 
 Example:
 
-```text
-Why does my device show E104?
-```
-
-The term `E104` should be matched exactly. A pure embedding search may not understand that `E104` is a critical identifier. It may return a general error article instead of the exact error-code section.
-
-Keyword search is useful for:
-
-| User Input | Why Keyword Search Helps |
+| Setting | Meaning |
 | --- | --- |
-| `E104` | Exact error-code match |
-| `A12 Pro Max` | Exact model match |
-| `refund exception clause` | Exact policy phrase |
-| `ORDER-9912` | Exact record identifier |
-| `battery calibration mode` | Exact feature name |
+| Chunk size | 500 tokens |
+| Overlap | 50 tokens |
+| Split rule | Keep cutting until the document ends |
 
-Keyword search alone is also limited. If the user says "cannot charge" and the document says "charging failure", keyword matching may not find the best result.
+This is the simplest strategy. It is easy to implement and easy to test.
 
-The practical rule:
+### When It Works
 
-```text
-Use vector search for meaning.
-Use keyword search for exact identifiers.
-```
+Fixed-size chunking works reasonably well when documents are plain text and do not have strong structure.
 
-## Strategy 4: Hybrid Search Combines Meaning and Exact Matching
+Use it for:
 
-Hybrid search combines vector search and keyword search.
+- notes
+- transcripts
+- loose articles
+- raw text dumps
+- early baseline experiments
 
-This is often better for customer support because user questions usually contain both natural language and exact terms.
+### Main Weakness
 
-Example question:
+The splitter does not understand meaning.
 
-```text
-My A12 headphone shows E104 and cannot charge.
-```
+It may cut through a paragraph, a table, a list, or a section. That can separate a rule from its condition.
 
-This question contains:
-
-- `A12 headphone`: product identifier.
-- `E104`: exact error code.
-- `cannot charge`: symptom meaning.
-
-Vector search helps with the symptom. Keyword search helps with the product and error code.
-
-A simplified hybrid flow:
+For example, it may keep this in one chunk:
 
 ```text
-User question
-  -> run vector search
-  -> run keyword search
-  -> merge candidates
-  -> score or rerank candidates
-  -> return final context
+Customers can request a refund within 14 days after purchase.
 ```
 
-| Search Type | Best At | Weak At |
+But the next chunk may contain the condition:
+
+```text
+This only applies if they have completed less than 20% of the course content.
+```
+
+Each chunk is now incomplete.
+
+## Strategy 2: Fixed-Size With Overlap
+
+Fixed-size with overlap is an improvement over pure fixed-size chunking.
+
+Instead of cutting the text into isolated blocks, each chunk shares some text with the previous chunk.
+
+Example:
+
+| Chunk | Content Range |
+| --- | --- |
+| Chunk 1 | Tokens 1-500 |
+| Chunk 2 | Tokens 451-950 |
+| Chunk 3 | Tokens 901-1400 |
+
+The overlap reduces the risk of cutting important context at the boundary.
+
+### When It Works
+
+Use fixed-size with overlap when:
+
+- you need a fast baseline
+- the source text is not well structured
+- the documents are long
+- answers may appear near chunk boundaries
+- you want predictable chunk length
+
+This is often the first practical strategy because it is simple, stable, and easy to compare.
+
+### Main Weakness
+
+Overlap increases storage and retrieval noise.
+
+The same sentence may appear in multiple chunks. This can cause duplicate retrieval results and waste context window budget.
+
+## Strategy 3: Paragraph-Based Chunking
+
+Paragraph-based chunking splits text by natural paragraph boundaries.
+
+This strategy respects the author's original writing structure better than fixed-size splitting.
+
+### When It Works
+
+Use paragraph-based chunking for:
+
+- blog posts
+- essays
+- documentation pages
+- policy text
+- explanation-heavy content
+
+Paragraphs usually contain one local idea. That makes them good candidates for embedding and retrieval.
+
+### Main Weakness
+
+Paragraph length is not consistent.
+
+Some paragraphs are too short to be useful. Some are too long and contain multiple ideas. A production system often needs extra rules, such as merging short paragraphs or splitting very long paragraphs.
+
+## Strategy 4: Heading-Aware Chunking
+
+Heading-aware chunking uses document titles and section headings to guide the split.
+
+Instead of treating text as one flat stream, it keeps the section structure.
+
+Example chunk format:
+
+```text
+Document: Refund and Cancellation Policy
+Section: Subscription Cancellation
+
+Monthly subscriptions can be cancelled at any time. The cancellation will stop the next billing cycle, but it does not refund the current active month.
+```
+
+This is usually stronger than plain paragraph chunking because the heading becomes part of the context.
+
+### When It Works
+
+Use heading-aware chunking for:
+
+- API documentation
+- product manuals
+- policy documents
+- technical guides
+- knowledge base articles
+- structured Markdown or HTML pages
+
+This strategy works well when the document already has meaningful headings.
+
+### Main Weakness
+
+It depends on good parsing.
+
+If the parser fails to detect headings, the chunker will build bad chunks. Heading-aware chunking is only as good as the parsed structure it receives.
+
+## Strategy 5: Recursive Chunking
+
+Recursive chunking tries to split text using a hierarchy of separators.
+
+A common order looks like this:
+
+1. section
+2. paragraph
+3. sentence
+4. token limit
+
+The splitter first tries to preserve larger meaningful units. If a unit is too large, it recursively splits it into smaller units.
+
+### When It Works
+
+Use recursive chunking when you want a strong general-purpose default.
+
+It works well for many document types because it tries to respect structure while still enforcing a size limit.
+
+Use it for:
+
+- mixed Markdown documents
+- documentation pages
+- support articles
+- semi-structured text
+- early production RAG systems
+
+### Main Weakness
+
+It is still rule-based.
+
+It does not truly understand meaning. It only follows split rules. If the document structure is messy, recursive chunking may still produce weak chunks.
+
+## Strategy 6: Semantic Chunking
+
+Semantic chunking splits text based on meaning instead of only size or separators.
+
+The idea is to group sentences or paragraphs that are semantically close, then start a new chunk when the topic shifts.
+
+### When It Works
+
+Use semantic chunking when:
+
+- documents contain long sections with multiple topics
+- paragraph boundaries are weak
+- the same section mixes several different concepts
+- retrieval quality is poor with rule-based splitting
+
+Semantic chunking can produce chunks that feel more natural to the embedding model because each chunk is more topically focused.
+
+### Main Weakness
+
+It is more expensive and less predictable.
+
+It may require embeddings or model calls during indexing. It can also be harder to debug because chunk boundaries are generated by similarity behavior, not simple rules.
+
+## Strategy 7: Parent-Child Chunking
+
+Parent-child chunking separates the retrieval unit from the context unit.
+
+The child chunk is small and searchable. The parent chunk is larger and used for final context.
+
+Example:
+
+| Unit | Purpose |
+| --- | --- |
+| Child chunk | Used for embedding and retrieval |
+| Parent chunk | Returned to the LLM after child match |
+
+This solves a common problem: small chunks retrieve well, but large chunks answer better.
+
+### When It Works
+
+Use parent-child chunking when:
+
+- small chunks improve search accuracy
+- answers need surrounding context
+- sections are too large for direct embedding
+- the LLM needs a full policy rule, not one isolated sentence
+
+For example, the retriever may match the child sentence about "no refund for current active month", but the system can return the full "Subscription Cancellation" section as parent context.
+
+### Main Weakness
+
+It needs more metadata and careful linking.
+
+Every child chunk must know its parent. If the relationship is wrong, retrieval may find the right sentence but return the wrong surrounding context.
+
+## Strategy 8: Table-Aware Chunking
+
+Table-aware chunking preserves table rows, columns, and labels.
+
+This matters because flattening a table into plain text can destroy the meaning.
+
+Bad table chunk:
+
+```text
+Single Course 14 days Less than 20% completed Monthly Subscription Before next billing cycle No refund for current active month
+```
+
+Better table chunk:
+
+```text
+Refund Summary
+Purchase Type: Single Course
+Refund Window: 14 days
+Important Condition: Less than 20% completed
+```
+
+### When It Works
+
+Use table-aware chunking for:
+
+- pricing tables
+- policy summaries
+- comparison tables
+- product spec sheets
+- financial reports
+- configuration matrices
+
+### Main Weakness
+
+Table chunking needs custom logic.
+
+Some tables should be chunked by row. Some should be chunked as a full table. Some need both: one chunk for each row and one chunk for the whole table summary.
+
+## How to Select the Right Strategy
+
+The correct chunking strategy depends on the shape of the source document and the type of question you expect.
+
+| Situation | Better Strategy | Reason |
 | --- | --- | --- |
-| Vector search | Meaning and paraphrase | Exact IDs and codes |
-| Keyword search | Exact terms | Different wording |
-| Hybrid search | Mixed questions | Requires scoring logic |
+| Plain long text | Fixed-size with overlap | Fast baseline and predictable size |
+| Markdown or HTML docs | Heading-aware or recursive | Preserves document structure |
+| Policy documents | Heading-aware with parent-child | Rules need section context |
+| Tables and specs | Table-aware | Preserves row-column meaning |
+| Mixed-topic long sections | Semantic chunking | Splits by topic shift |
+| FAQ pages | Question-answer pair chunking | Each pair is already a retrieval unit |
+| Code documentation | Heading-aware with code block preservation | Avoids separating code from explanation |
+| Large knowledge base | Recursive plus metadata filtering | Balances structure and scale |
 
-Hybrid search improves retrieval accuracy when the question contains both semantic intent and exact identifiers.
+A good selection process usually starts simple, then becomes more specific after evaluation.
 
 <CardGrid columns={2}>
-  <InfoCard title="Good Hybrid Use Case">
-    A user asks about a product model, an error code, and a natural-language symptom in the same question.
+  <InfoCard title="Start With a Baseline">
+    Use recursive or fixed-size with overlap first. Measure whether the correct answer appears in top-k retrieval.
   </InfoCard>
 
-  <InfoCard title="Bad Hybrid Setup">
-    If merge scoring is poor, keyword results may dominate semantic results, or vector results may bury exact matches.
+  <InfoCard title="Inspect Failures">
+    If the correct content exists but is not retrieved, inspect whether the chunk is too large, too small, or missing context.
+  </InfoCard>
+
+  <InfoCard title="Use Structure When Available">
+    If the source has headings, tables, or sections, preserve them instead of flattening everything.
+  </InfoCard>
+
+  <InfoCard title="Add Complexity Only When Needed">
+    Semantic or parent-child chunking is useful, but it adds indexing cost and debugging complexity.
   </InfoCard>
 </CardGrid>
 
-Hybrid search is not automatically better. It needs a clear scoring or reranking step so the final context is not just a larger pile of candidates.
+## Why There Is No Best Strategy
 
-## Strategy 5: Top-k Controls Coverage and Noise
+There is no best chunking strategy because chunking is a trade-off.
 
-Top-k means how many chunks the retriever returns.
+Each strategy optimizes for a different kind of retrieval behavior.
 
-If `top_k` is too small, the system may miss important evidence. If `top_k` is too large, the LLM prompt may contain too much noise.
-
-Example:
-
-```text
-top_k = 2
-```
-
-This may be fast and focused, but it may miss warranty exceptions.
-
-```text
-top_k = 12
-```
-
-This may include more evidence, but it may also add unrelated FAQ content that distracts the LLM.
-
-| Top-k Choice | Accuracy Effect | Risk |
+| Trade-Off | Small Chunk | Large Chunk |
 | --- | --- | --- |
-| Very small | High focus | Missing required context |
-| Medium | Balanced | Needs good ranking |
-| Very large | Better coverage | More noise and higher token cost |
+| Retrieval precision | Usually higher | Usually lower |
+| Context completeness | Usually lower | Usually higher |
+| Embedding noise | Lower | Higher |
+| Risk of missing condition | Higher | Lower |
+| Context window cost | Lower | Higher |
 
-A useful pattern is to retrieve more candidates first, then rerank and keep fewer final chunks:
+Small chunks are easier to match but may lose the surrounding condition. Large chunks preserve context but may dilute the embedding.
 
-```text
-Retrieve top 20 candidates
-  -> rerank
-  -> keep top 4 final chunks
-  -> send final chunks to LLM
-```
+The best strategy for one document type can be bad for another. A support FAQ, an API reference, a legal policy, and a product table should not be chunked the same way.
 
-This separates candidate discovery from final context selection.
+The practical question is not "Which chunking strategy is best?" The better question is "Which failure mode am I trying to reduce?"
 
-For customer support, top-k should depend on question type:
+## Reusable Example: Chunking the Policy Document
 
-| Question Type | Suggested Retrieval Shape |
-| --- | --- |
-| Direct FAQ question | Small top-k |
-| Warranty or return policy | Medium top-k with metadata filters |
-| Troubleshooting question | Medium top-k, possibly hybrid search |
-| Multi-condition case | Larger candidate pool, then rerank |
-| Broad comparison | Query decomposition plus controlled final context |
-
-Top-k is not only a performance setting. It changes what the LLM sees.
-
-## Strategy 6: Reranking Improves Final Context Quality
-
-First-stage retrieval is usually rough. It finds candidate chunks that might be relevant. Reranking evaluates those candidates again and places the strongest evidence at the top.
-
-A reranking flow:
+From the previous log, we used this document:
 
 ```text
-User question
-  -> retrieve top 20 candidate chunks
-  -> rerank candidates by relevance
-  -> keep top 4 chunks
-  -> build LLM prompt
+Document Title: Refund and Cancellation Policy
+Product: LearnPro Online Course Platform
+Version: 2026.04
+Owner: Billing Team
+
+1. General Refund Rule
+Customers can request a refund within 14 days after purchase if they have completed less than 20% of the course content.
+
+2. Digital Course Activation
+Once a customer downloads course materials or receives a completion certificate, the purchase is no longer refundable.
+
+3. Subscription Cancellation
+Monthly subscriptions can be cancelled at any time. The cancellation will stop the next billing cycle, but it does not refund the current active month.
+
+4. Enterprise Customers
+Enterprise customers with custom contracts should contact the account manager. Their refund terms follow the signed contract instead of the standard policy.
+
+5. Support Contact
+For billing issues, customers should contact billing-support@learnpro.example.
+
+Refund Summary:
+Purchase Type | Refund Window | Important Condition
+Single Course | 14 days | Less than 20% completed
+Monthly Subscription | Before next billing cycle | No refund for current active month
+Enterprise Contract | Based on contract | Contact account manager
 ```
 
-Reranking helps when the correct chunk exists in the candidate list but is not ranked high enough.
+For this document, a good first strategy is heading-aware chunking with table-aware handling.
 
-Example failure without reranking:
+Example chunk:
 
-| Rank | Retrieved Chunk |
-| --- | --- |
-| 1 | General warranty overview |
-| 2 | Product marketing description |
-| 3 | Generic charging FAQ |
-| 4 | Accessory compatibility note |
-| 5 | Exact A12 battery warranty exclusion |
-
-If only the top four chunks enter the prompt, the exact warranty exclusion is missed.
-
-After reranking:
-
-| Rank | Retrieved Chunk |
-| --- | --- |
-| 1 | Exact A12 battery warranty exclusion |
-| 2 | A12 warranty coverage duration |
-| 3 | E104 charging troubleshooting |
-| 4 | Proof-of-purchase requirement |
-
-Reranking improves top-k quality. It does not replace indexing. It cannot rank a correct chunk that was never retrieved in the candidate set.
-
-<CardGrid columns={2}>
-  <InfoCard title="Accuracy Benefit">
-    Reranking improves the chance that the most useful evidence reaches the LLM prompt.
-  </InfoCard>
-
-  <InfoCard title="Cost Trade-off">
-    Reranking adds latency and may add model cost, especially if reranking many candidates.
-  </InfoCard>
-</CardGrid>
-
-Use reranking when raw retrieval can find the right candidates but often orders them badly.
-
-## Strategy 7: Callback Retrieval Recovers From Weak Search
-
-Callback retrieval means the system tries again when the first retrieval attempt is weak.
-
-The first search may fail because:
-
-- The user's wording is vague.
-- The question uses slang.
-- The query contains multiple topics.
-- The wrong filter was inferred.
-- The search result score is too low.
-- The retrieved chunks are too generic.
-
-A callback retrieval flow:
-
-```text
-User question
-  -> first retrieval
-  -> evaluate retrieval quality
-  -> if weak, rewrite query or broaden filters
-  -> retrieve again
-  -> merge or replace result set
+```json
+{
+  "chunk_id": "doc_refund_policy_learnpro_2026_04__subscription_cancellation",
+  "document_id": "doc_refund_policy_learnpro_2026_04",
+  "title": "Refund and Cancellation Policy",
+  "section": "Subscription Cancellation",
+  "text": "Monthly subscriptions can be cancelled at any time. The cancellation will stop the next billing cycle, but it does not refund the current active month.",
+  "metadata": {
+    "product": "LearnPro Online Course Platform",
+    "domain": "billing",
+    "document_type": "policy",
+    "version": "2026.04"
+  }
+}
 ```
 
-Callback triggers can include:
+For the table, row-level chunks can make retrieval more precise:
 
-| Trigger | Meaning |
-| --- | --- |
-| No result above threshold | Search likely failed |
-| Top result is too generic | Need more specific query |
-| Results conflict | Need stricter metadata filters |
-| Results are from wrong document type | Intent detection may be wrong |
-| User asks a multi-part question | Need decomposition |
-
-Example:
-
-```text
-Original query:
-opened product refund
+```json
+{
+  "chunk_id": "doc_refund_policy_learnpro_2026_04__refund_summary__monthly_subscription",
+  "document_id": "doc_refund_policy_learnpro_2026_04",
+  "title": "Refund and Cancellation Policy",
+  "section": "Refund Summary",
+  "text": "Refund Summary. Purchase Type: Monthly Subscription. Refund Window: Before next billing cycle. Important Condition: No refund for current active month.",
+  "metadata": {
+    "product": "LearnPro Online Course Platform",
+    "domain": "billing",
+    "document_type": "policy",
+    "version": "2026.04",
+    "block_type": "table_row"
+  }
+}
 ```
 
-Callback rewrite:
+This structure keeps the chunk focused, traceable, and useful for retrieval.
 
-```text
-return policy opened item defective product eligibility refund timeline
-```
+## What Is Commonly Used Now
 
-This gives the retriever more policy-related terms and may find a better chunk.
+In many practical RAG systems, the most common starting point is still recursive chunking or fixed-size chunking with overlap.
 
-However, callback retrieval needs stop rules:
+The reason is not that it is always the best. The reason is that it is easy to implement, easy to compare, and good enough for many early systems.
 
-- Maximum retry count.
-- Similarity score threshold.
-- Duplicate-result detection.
-- Maximum latency budget.
-- Fallback response when evidence is still missing.
+A more mature setup often moves toward:
 
-The fallback should not be a guessed answer. If retrieval fails, the system should say that the available knowledge base does not contain enough evidence.
+- recursive chunking for general documents
+- heading-aware chunking for structured documentation
+- table-aware chunking for tabular content
+- parent-child chunking when small retrieval units need larger answer context
 
-## Strategy 8: Query Decomposition Handles Multi-Part Questions
-
-Some customer questions contain multiple conditions. One search may not retrieve enough evidence.
-
-Example:
-
-```text
-My item arrived damaged, but I already opened it and used it once. Can I return it or should I claim warranty?
-```
-
-This question requires several evidence points:
-
-- Damaged item policy.
-- Opened item return policy.
-- Used item restriction.
-- Warranty eligibility.
-- Required evidence.
-- Time window.
-
-Query decomposition breaks one complex question into smaller searches:
-
-```text
-Original question
-  -> damaged item return policy
-  -> opened item return restriction
-  -> used item eligibility
-  -> warranty claim condition
-  -> evidence requirement
-```
-
-Then the system merges the evidence and passes the final selected context to the LLM.
-
-| Without Decomposition | With Decomposition |
-| --- | --- |
-| May retrieve only one policy area | Retrieves multiple required evidence areas |
-| Faster | Slower |
-| Simpler to debug | More complex |
-| Good for direct questions | Better for conditional questions |
-
-Query decomposition is not needed for every question. It is useful when the answer depends on several policies or conditions.
-
-Good triggers:
-
-- The user asks "A or B?"
-- The question includes "but", "also", "unless", "after", or "before".
-- The question combines product issue and policy eligibility.
-- The first retrieval returns only partial evidence.
-- The answer requires comparison or decision logic.
-
-The risk is over-retrieval. Too many sub-queries can create too much context and confuse the generation layer. Decomposition should produce focused sub-questions, not a broad research dump.
-
-## How to Evaluate Retrieval Quality
-
-Retrieval should be evaluated before prompt design.
-
-A practical evaluation set contains real or realistic customer questions, plus expected evidence.
-
-| Test Question | Expected Evidence |
-| --- | --- |
-| Can I return an opened item? | Opened-item return policy and exception |
-| What does E104 mean? | E104 troubleshooting section |
-| Is water damage covered? | Warranty exclusion section |
-| How long does refund processing take? | Refund timeline |
-| My A12 cannot charge after ten months. | A12 warranty and charging failure rules |
-
-For each test question, inspect the retrieved chunks.
-
-The checks are:
-
-| Check | What It Reveals |
-| --- | --- |
-| Did the expected chunk appear? | Recall |
-| Was it near the top? | Ranking quality |
-| Were irrelevant chunks included? | Precision |
-| Did metadata filters work? | Scope control |
-| Was the result current? | Version control |
-| Did the result contain enough context? | Context completeness |
-
-A simple retrieval evaluation can be done manually at first.
-
-Example retrieval log:
-
-```text
-Question:
-Can I return an opened item?
-
-Expected:
-Active Malaysia return policy, opened-item section.
-
-Retrieved:
-1. Active Malaysia return policy, opened-item section.
-2. Active Malaysia refund timeline.
-3. Deprecated Singapore return policy.
-4. Generic customer satisfaction FAQ.
-```
-
-This result is partially good. The correct chunk appears at rank 1, but deprecated Singapore policy should not appear at all. That suggests a metadata filtering issue.
-
-## A Practical Retrieval Workflow
-
-A stable retrieval workflow should be built in layers.
-
-<CardGrid columns={2}>
-  <InfoCard title="1. Start With Filtered Vector Search">
-    Use metadata filters for product, region, language, status, and document type before trusting semantic similarity.
-  </InfoCard>
-
-  <InfoCard title="2. Add Keyword Matching">
-    Add exact matching for error codes, product IDs, model names, policy terms, and other identifiers.
-  </InfoCard>
-
-  <InfoCard title="3. Combine Into Hybrid Search">
-    Merge semantic and keyword candidates when questions contain both natural language and exact terms.
-  </InfoCard>
-
-  <InfoCard title="4. Tune Top-k">
-    Retrieve enough candidates to avoid missing evidence, but keep final context small enough to avoid noise.
-  </InfoCard>
-
-  <InfoCard title="5. Add Reranking">
-    Use reranking when correct chunks exist in candidates but do not reliably appear in the final top results.
-  </InfoCard>
-
-  <InfoCard title="6. Add Callback Retrieval">
-    Retry only when first retrieval is weak, incomplete, or below a confidence threshold.
-  </InfoCard>
-</CardGrid>
-
-Do not start with agentic search or complex decomposition. First make the basic retrieval path measurable and inspectable.
+So the common path is: start with a simple baseline, evaluate retrieval failures, then add structure-aware chunking where the data clearly needs it.
 
 ## The Main Principle
 
-Retrieval is the evidence selection layer of RAG.
+Chunking is not about cutting text into equal pieces. It is about choosing the right retrieval unit.
 
-Indexing makes knowledge searchable. Retrieval chooses which knowledge reaches the LLM. The LLM then writes from whatever retrieval provides. If retrieval selects the wrong policy, wrong product, wrong region, or incomplete evidence, the final answer becomes unstable even when the prompt is well written.
+There is no universal best strategy because different documents fail in different ways. Some need smaller chunks for precision. Some need larger chunks for context. Some need headings. Some need table preservation. Some need parent-child relationships.
 
-The practical rule is:
-
-```text
-First retrieve the right candidate evidence.
-Then rank the best evidence near the top.
-Then send only clean, relevant, current context to the LLM.
-```
-
-For this series, log 3 focuses only on retrieval. Log 4 should focus on the LLM layer: prompt design, context formatting, answer grounding, refusal behavior, and guardrails.
+The practical rule is simple: choose the chunking strategy based on the failure you want to reduce, then prove it with retrieval evaluation.
 
 </Lang>
 
 <Lang lang="zh">
 
-Retrieval 是 RAG 系统的线上搜索阶段。Indexing 负责把知识库准备好，但 retrieval 决定某一次用户提问时，哪些知识片段会真正被送进 LLM。如果 retrieval 返回的是弱证据，LLM 依然可以写出流畅答案，但这个答案不会稳定地基于正确客服资料。
+Chunking 是把 parsed document 转换成可搜索单元的步骤。RAG 系统一般不会直接检索整份文档，而是检索 chunk。所以 chunking 会直接影响 retriever 找到什么、reranker 比较什么，以及 LLM 最后能拿到什么上下文。
 
 ## 简短答案
 
-Retrieval 控制 **哪些 indexed chunks 会进入 LLM**。
+没有一个永远最好的 chunking strategy。
 
-Indexing 决定什么内容可以被搜索。Retrieval 决定什么内容会被选中。在客服 RAG 系统中，这一层负责根据用户问题找到最相关的政策、说明书章节、FAQ 答案、故障处理步骤或 ticket 参考。
+好的 chunking strategy 取决于：
 
-| Retrieval 策略 | 控制什么 | 对准确率的影响 |
-| --- | --- | --- |
-| Vector search | 匹配语义相似度 | 用户表达不同也能找到相关内容 |
-| Metadata filtering | 限制搜索范围 | 避免错产品、错地区、错版本、错语言 |
-| Keyword search | 匹配精确词 | 处理错误码、SKU、政策名和 ID |
-| Hybrid search | 结合向量和关键词搜索 | 同时改善语义匹配和精确匹配 |
-| Top-k control | 决定返回多少 chunks | 平衡证据覆盖和噪音 |
-| Reranking | 重新排序候选 chunks | 提高最终上下文质量 |
-| Callback retrieval | 搜索结果弱时重试 | 救回第一次失败的查询 |
-| Query decomposition | 拆解复杂问题 | 改善多条件问题回答 |
+- 文档结构
+- 文档长度
+- 问题类型
+- 检索方式
+- embedding model
+- metadata 质量
+- 回答格式
+- context window 预算
 
-实用规则是：
-
-```text
-Retrieval 不只是搜索。
-Retrieval 是证据选择。
-```
-
-如果正确证据没有进入 prompt，LLM 层很难稳定修复答案。
-
-## RAG 里的 Retrieval 是什么
-
-Retrieval 发生在 indexing 之后、generation 之前。
-
-系统已经有 indexed chunks。每个 chunk 可能包含正文、embedding、metadata、来源、版本和状态。用户提问后，retrieval 会搜索这个知识库，并选择最适合的候选 chunks。
-
-简化流程如下：
-
-```text
-用户问题
-  -> 理解查询意图
-  -> 应用 metadata filters
-  -> 执行 vector、keyword 或 hybrid search
-  -> 收集候选 chunks
-  -> rerank 候选结果
-  -> 把最终上下文送给 LLM
-```
-
-例如用户问：
-
-```text
-我的 A12 耳机出现 E104，而且不能充电。这个可以保修吗？
-```
-
-好的 retrieval 应该找出：
-
-- A12 耳机保修政策。
-- E104 故障处理章节。
-- 电池或充电故障规则。
-- 保修排除条件。
-- 用户所在地区的有效政策。
-
-Retriever 不应该返回：
-
-- 其他产品的政策。
-- 其他国家的政策。
-- 已归档的保修文件。
-- 没有保修条件的泛用充电文章。
-- 相似但无关的错误码说明。
-
-所以 retrieval 是 correctness 的一部分，不只是 performance 优化。
-
-## 策略一：Metadata Filtering 控制搜索范围
-
-Metadata filtering 通常应该发生在搜索前或搜索过程中。它可以防止明显错误的文档和正确文档竞争。
-
-客服 RAG 常见 filters：
-
-| Filter | 例子 | 为什么重要 |
-| --- | --- | --- |
-| `product_id` | `A12_HEADPHONE` | 避免回答错产品 |
-| `region` | `MY` | 避免使用错误国家政策 |
-| `language` | `zh` | 匹配用户语言 |
-| `document_type` | `warranty_policy` | 匹配问题意图 |
-| `status` | `active` | 排除草稿和过期文件 |
-| `version` | `2026-02` | 控制政策新旧 |
-
-如果没有 filtering，语义搜索可能返回文字上很像、但业务上不能用的内容。
-
-用户问题例子：
-
-```text
-在马来西亚，拆封商品可以退货吗？
-```
-
-错误候选结果：
-
-```text
-新加坡退货政策，deprecated version。
-拆封商品十四天内可以退货。
-```
-
-更好的候选结果：
-
-```text
-马来西亚退货政策，active version。
-拆封商品只有在有缺陷时才可退货。
-```
-
-两个 chunks 都和拆封退货语义相关。Metadata 决定哪个才有效。
+实际目标不是找到完美的 chunk size。真正目标是让每个 chunk 同时具备两个条件：可以被准确检索，并且包含足够上下文来回答问题。
 
 <CardGrid columns={2}>
-  <InfoCard title="准确率收益">
-    Filtering 会提高 precision，因为它先移除不应该回答这个问题的 chunks。
+  <InfoCard title="太小">
+    chunk 可能可以匹配 query，但没有足够上下文让模型正确回答。
   </InfoCard>
 
-  <InfoCard title="主要风险">
-    如果 metadata 缺失或不一致，filter 可能误删正确文档，也可能放进错误文档。
+  <InfoCard title="太大">
+    chunk 可能包含答案，但因为混入太多无关信息，embedding 会变得不够聚焦。
   </InfoCard>
 </CardGrid>
 
-好的 retrieval 系统不应该让 LLM 自己判断 active 和 deprecated 政策。它应该阻止 deprecated 政策进入 prompt。
+## 为什么 Chunking 重要
 
-## 策略二：Vector Search 处理语义相似
+Chunking 控制的是检索单位。
 
-Vector search 匹配的是意思，而不是完全相同的字。
+如果正确答案被切到多个 chunk 里，retrieval 可能只拿到一半证据。如果无关规则被混在同一个 chunk 里，LLM 可能会读到互相冲突的上下文。
 
-这很重要，因为用户描述问题的方式，常常和文档写法不同。
+Chunking 不只是存储问题。它会影响整条 RAG pipeline。
 
-用户写法：
-
-```text
-我的设备一直自己关机。
-```
-
-文档写法：
-
-```text
-当电池保护电路被触发时，设备可能发生异常断电。
-```
-
-关键词搜索可能找不到，因为用词不同。Vector search 则可能根据语义找到相关故障处理章节。
-
-Vector search 适合：
-
-- 症状描述。
-- 自然语言问题。
-- 用不同词表达的政策问题。
-- 比较宽泛的故障排查。
-- 用户使用口语化表达的消息。
-
-但是 vector search 不完美。
-
-| Vector Search 优点 | Vector Search 弱点 |
+| 阶段 | Chunking 如何影响它 |
 | --- | --- |
-| 可以找到语义相近文本 | 可能漏掉精确代码或 ID |
-| 适合自然语言 | 可能找到相似但错误的政策 |
-| 能处理 paraphrase | 需要 metadata filtering 配合 |
-| 适合宽泛问题 | 文档重叠时容易产生噪音 |
+| Embedding | 向量表示的是 chunk，不是整份文档 |
+| Retrieval | 搜索是根据 chunk-level similarity 返回结果 |
+| Reranking | 候选 chunk 会和用户问题比较 |
+| LLM Context | 模型只能看到被选中的 chunks |
+| Debugging | 工程师检查的是 chunk-level evidence |
 
-对于客服 RAG，vector search 通常应该和 filters 一起使用。当业务规则依赖地区、产品、状态或版本时，单靠语义相似度不够。
+差的 chunking strategy 会让好的 retriever 看起来很差。它也可能让 LLM 看起来不稳定，但真正问题其实是答案和上下文被切坏了。
 
-## 策略三：Keyword Search 处理精确词
+## 策略一：固定大小切片
 
-Keyword search 匹配精确词、代码和标识符。
-
-客服问题经常包含一些必须精确匹配的值：
-
-- 错误码。
-- 产品 SKU。
-- 订单 ID。
-- 政策名称。
-- 功能名称。
-- 型号。
-- 保修代码。
+固定大小切片会按照固定字符数、词数或 token 数来切文本。
 
 例子：
 
-```text
-为什么我的设备显示 E104？
-```
-
-`E104` 应该被精确匹配。纯 embedding search 不一定知道 `E104` 是关键标识符，可能返回一般错误文章，而不是精确错误码章节。
-
-Keyword search 适合：
-
-| 用户输入 | 为什么 keyword search 有用 |
+| 设置 | 含义 |
 | --- | --- |
-| `E104` | 精确错误码匹配 |
-| `A12 Pro Max` | 精确型号匹配 |
-| `refund exception clause` | 精确政策短语 |
-| `ORDER-9912` | 精确记录 ID |
-| `battery calibration mode` | 精确功能名 |
+| Chunk size | 500 tokens |
+| Overlap | 50 tokens |
+| Split rule | 一直切到文档结束 |
 
-Keyword search 本身也有限制。如果用户说 `不能充电`，文档写的是 `charging failure`，纯关键词匹配可能找不到最好结果。
+这是最简单的策略。它容易实现，也容易测试。
 
-实用规则：
+### 什么时候适合
+
+固定大小切片适合文档结构不明显的纯文本。
+
+适合用于：
+
+- 笔记
+- transcript
+- 普通文章
+- 原始文本 dump
+- 早期 baseline 实验
+
+### 主要弱点
+
+splitter 不理解语义。
+
+它可能会切断段落、表格、列表或章节。这样会把规则和条件分开。
+
+比如它可能把这句话放在一个 chunk：
 
 ```text
-用 vector search 找意思。
-用 keyword search 找精确标识符。
+Customers can request a refund within 14 days after purchase.
 ```
 
-## 策略四：Hybrid Search 结合语义和精确匹配
+但条件被切到下一个 chunk：
 
-Hybrid search 是把 vector search 和 keyword search 结合起来。
+```text
+This only applies if they have completed less than 20% of the course content.
+```
 
-这通常更适合客服系统，因为用户问题经常同时包含自然语言和精确词。
+这样每个 chunk 都不完整。
+
+## 策略二：固定大小加 Overlap
+
+固定大小加 overlap 是纯固定切片的改良版。
+
+它不会把每个 chunk 完全隔开，而是让相邻 chunk 共享一部分文本。
 
 例子：
 
+| Chunk | Content Range |
+| --- | --- |
+| Chunk 1 | Tokens 1-500 |
+| Chunk 2 | Tokens 451-950 |
+| Chunk 3 | Tokens 901-1400 |
+
+overlap 可以降低重要上下文刚好被切断的风险。
+
+### 什么时候适合
+
+适合在这些情况使用：
+
+- 需要快速 baseline
+- source text 结构不明显
+- 文档很长
+- 答案可能出现在 chunk 边界附近
+- 希望 chunk 长度可预测
+
+这通常是第一个实用策略，因为它简单、稳定，也容易比较。
+
+### 主要弱点
+
+overlap 会增加存储量和检索噪音。
+
+同一句话可能出现在多个 chunk 里。这会导致重复检索结果，也会浪费 context window。
+
+## 策略三：按段落切片
+
+按段落切片会根据自然段落边界来切文本。
+
+这个策略比固定大小切片更尊重作者原本的写作结构。
+
+### 什么时候适合
+
+适合用于：
+
+- blog posts
+- essays
+- documentation pages
+- policy text
+- 解释型内容
+
+段落通常会表达一个局部想法，所以适合作为 embedding 和 retrieval 的单位。
+
+### 主要弱点
+
+段落长度不稳定。
+
+有些段落太短，没有足够信息。有些段落太长，里面包含多个想法。生产系统通常还需要额外规则，比如合并太短的段落，或者继续切开太长的段落。
+
+## 策略四：Heading-Aware Chunking
+
+heading-aware chunking 会使用文档标题和章节标题来决定切片。
+
+它不会把文本当成一条扁平 stream，而是保留 section structure。
+
+chunk 可以长这样：
+
 ```text
-我的 A12 耳机出现 E104，而且不能充电。
+Document: Refund and Cancellation Policy
+Section: Subscription Cancellation
+
+Monthly subscriptions can be cancelled at any time. The cancellation will stop the next billing cycle, but it does not refund the current active month.
 ```
 
-这个问题包含：
+这通常比普通段落切片更强，因为 heading 会变成上下文的一部分。
 
-- `A12 耳机`：产品标识。
-- `E104`：精确错误码。
-- `不能充电`：症状语义。
+### 什么时候适合
 
-Vector search 帮助理解症状。Keyword search 帮助匹配产品和错误码。
+适合用于：
 
-简化 hybrid flow：
+- API documentation
+- product manuals
+- policy documents
+- technical guides
+- knowledge base articles
+- 结构良好的 Markdown 或 HTML 页面
+
+当文档本来就有清楚标题时，这个策略很有用。
+
+### 主要弱点
+
+它依赖好的 parsing。
+
+如果 parser 没有正确识别 heading，chunker 就会产出差的 chunk。heading-aware chunking 的质量取决于 parsed structure 的质量。
+
+## 策略五：Recursive Chunking
+
+recursive chunking 会按照一组层级 separator 逐层切文本。
+
+常见顺序是：
+
+1. section
+2. paragraph
+3. sentence
+4. token limit
+
+splitter 会先尝试保留较大的有意义单位。如果这个单位太大，它再递归切成更小的单位。
+
+### 什么时候适合
+
+如果你想要一个比较强的通用默认策略，可以先用 recursive chunking。
+
+它适合很多文档类型，因为它会尽量保留结构，同时又会强制控制大小。
+
+适合用于：
+
+- 混合 Markdown 文档
+- documentation pages
+- support articles
+- 半结构化文本
+- 早期 production RAG systems
+
+### 主要弱点
+
+它本质上还是 rule-based。
+
+它不是真的理解语义，只是跟着分隔规则走。如果文档结构很乱，recursive chunking 仍然可能产出不好的 chunk。
+
+## 策略六：Semantic Chunking
+
+semantic chunking 会根据语义来切文本，而不是只看大小或 separator。
+
+它的想法是把语义接近的句子或段落放在一起，当主题开始变化时，就切出新的 chunk。
+
+### 什么时候适合
+
+适合在这些情况使用：
+
+- 文档的 section 很长，而且包含多个主题
+- 段落边界不可靠
+- 同一个 section 混合了不同概念
+- rule-based splitting 的检索质量不好
+
+semantic chunking 产出的 chunk 通常会更符合 embedding model 的使用方式，因为每个 chunk 的主题更集中。
+
+### 主要弱点
+
+它更贵，也更不稳定。
+
+它可能需要在 indexing 阶段使用 embedding 或 model call。它也比较难调试，因为 chunk 边界不是简单规则切出来的，而是根据相似度行为生成的。
+
+## 策略七：Parent-Child Chunking
+
+parent-child chunking 会把检索单位和上下文单位分开。
+
+child chunk 小，用来 embedding 和 retrieval。parent chunk 大，用来提供给 LLM 作为最终上下文。
+
+例子：
+
+| 单位 | 目的 |
+| --- | --- |
+| Child chunk | 用来 embedding 和 retrieval |
+| Parent chunk | child 命中后返回给 LLM |
+
+这个策略解决了一个常见问题：小 chunk 好检索，大 chunk 好回答。
+
+### 什么时候适合
+
+适合在这些情况使用：
+
+- 小 chunk 可以提高搜索准确度
+- 答案需要周围上下文
+- section 太大，不适合直接 embedding
+- LLM 需要完整 policy rule，而不是一句孤立文字
+
+比如 retriever 可能命中 “no refund for current active month” 这句 child sentence，但系统可以返回完整的 “Subscription Cancellation” section 作为 parent context。
+
+### 主要弱点
+
+它需要更多 metadata 和更仔细的 linking。
+
+每个 child chunk 都必须知道自己的 parent。如果关系错了，retrieval 可能找到正确句子，但返回错误的上下文。
+
+## 策略八：Table-Aware Chunking
+
+table-aware chunking 会保留表格的 rows、columns 和 labels。
+
+这很重要，因为把表格压成普通文字可能会破坏含义。
+
+差的 table chunk：
 
 ```text
-用户问题
-  -> 执行 vector search
-  -> 执行 keyword search
-  -> 合并候选结果
-  -> 重新评分或 rerank
-  -> 返回最终上下文
+Single Course 14 days Less than 20% completed Monthly Subscription Before next billing cycle No refund for current active month
 ```
 
-| Search 类型 | 擅长 | 不擅长 |
+更好的 table chunk：
+
+```text
+Refund Summary
+Purchase Type: Single Course
+Refund Window: 14 days
+Important Condition: Less than 20% completed
+```
+
+### 什么时候适合
+
+适合用于：
+
+- pricing tables
+- policy summaries
+- comparison tables
+- product spec sheets
+- financial reports
+- configuration matrices
+
+### 主要弱点
+
+table chunking 需要自定义逻辑。
+
+有些表格应该按 row 切。有些应该整张表保留。有些需要两种都做：每一 row 一个 chunk，再额外保留整张表的 summary chunk。
+
+## 如何选择正确策略
+
+正确的 chunking strategy 取决于 source document 的形状，以及你预期用户会问什么类型的问题。
+
+| 情况 | 更适合的策略 | 原因 |
 | --- | --- | --- |
-| Vector search | 意思和 paraphrase | 精确 ID 和代码 |
-| Keyword search | 精确词 | 不同表达方式 |
-| Hybrid search | 混合型问题 | 需要评分逻辑 |
+| 普通长文本 | Fixed-size with overlap | 快速 baseline，长度可预测 |
+| Markdown 或 HTML docs | Heading-aware 或 recursive | 保留文档结构 |
+| Policy documents | Heading-aware with parent-child | 规则通常需要章节上下文 |
+| Tables and specs | Table-aware | 保留行列关系 |
+| 混合主题长章节 | Semantic chunking | 按主题变化切开 |
+| FAQ pages | Question-answer pair chunking | 每组问答本身就是检索单位 |
+| Code documentation | Heading-aware with code block preservation | 避免代码和解释分离 |
+| 大型知识库 | Recursive plus metadata filtering | 平衡结构和规模 |
 
-当问题同时包含语义意图和精确标识符时，hybrid search 能提升 retrieval 准确率。
+好的选择流程通常是先简单，再根据 evaluation 结果变具体。
 
 <CardGrid columns={2}>
-  <InfoCard title="适合 Hybrid 的场景">
-    用户在同一个问题里提到产品型号、错误码，以及自然语言描述的症状。
+  <InfoCard title="先做 Baseline">
+    先用 recursive 或 fixed-size with overlap。检查正确答案是否出现在 top-k retrieval 里。
   </InfoCard>
 
-  <InfoCard title="错误 Hybrid 设置">
-    如果合并评分做得不好，keyword 结果可能压过语义结果，或者 vector 结果可能埋掉精确匹配。
+  <InfoCard title="检查失败案例">
+    如果正确内容存在但没有被检索到，检查 chunk 是太大、太小，还是缺少上下文。
+  </InfoCard>
+
+  <InfoCard title="有结构就保留结构">
+    如果 source 有 headings、tables 或 sections，就不要全部压平成普通文本。
+  </InfoCard>
+
+  <InfoCard title="必要时才增加复杂度">
+    semantic 或 parent-child chunking 有用，但会增加 indexing 成本和 debugging 难度。
   </InfoCard>
 </CardGrid>
 
-Hybrid search 不会自动更好。它需要清楚的 scoring 或 reranking，否则最终上下文只是更大堆的候选资料。
+## 为什么没有最佳策略
 
-## 策略五：Top-k 控制覆盖范围和噪音
+没有最好的 chunking strategy，因为 chunking 本质上是 trade-off。
 
-Top-k 指 retriever 返回多少个 chunks。
+每种策略都在优化不同的 retrieval behavior。
 
-如果 `top_k` 太小，系统可能漏掉重要证据。如果 `top_k` 太大，LLM prompt 里可能塞进太多噪音。
-
-例子：
-
-```text
-top_k = 2
-```
-
-这可能很快、很集中，但可能漏掉保修例外条件。
-
-```text
-top_k = 12
-```
-
-这可能包含更多证据，但也可能带入无关 FAQ，干扰 LLM。
-
-| Top-k 选择 | 准确率影响 | 风险 |
+| Trade-Off | 小 Chunk | 大 Chunk |
 | --- | --- | --- |
-| 很小 | 很集中 | 漏掉必要上下文 |
-| 中等 | 较平衡 | 依赖排序质量 |
-| 很大 | 覆盖更广 | 噪音和 token 成本增加 |
+| Retrieval precision | 通常更高 | 通常更低 |
+| Context completeness | 通常更低 | 通常更高 |
+| Embedding noise | 更低 | 更高 |
+| 漏掉条件的风险 | 更高 | 更低 |
+| Context window cost | 更低 | 更高 |
 
-一个实用模式是先取更多候选，再 rerank 并保留少量最终 chunks：
+小 chunk 更容易匹配，但可能失去周围条件。大 chunk 保留上下文，但可能让 embedding 变得不够聚焦。
 
-```text
-Retrieve top 20 candidates
-  -> rerank
-  -> keep top 4 final chunks
-  -> send final chunks to LLM
-```
+一个策略对某类文档很好，不代表它对所有文档都好。support FAQ、API reference、legal policy 和 product table 不应该用完全一样的切法。
 
-这会把候选发现和最终上下文选择分开。
+所以真正的问题不是 “哪个 chunking strategy 最好？” 更好的问题是 “我现在想减少哪一种失败？”
 
-客服系统中，top-k 应该根据问题类型调整：
+## 可复用例子：切分 Policy Document
 
-| 问题类型 | 建议 retrieval 形态 |
-| --- | --- |
-| 直接 FAQ 问题 | 较小 top-k |
-| 保修或退货政策 | 中等 top-k 加 metadata filters |
-| 故障排查问题 | 中等 top-k，可能使用 hybrid search |
-| 多条件案例 | 较大候选池，然后 rerank |
-| 宽泛比较问题 | Query decomposition 加受控最终上下文 |
-
-Top-k 不只是性能参数。它会改变 LLM 最后看见什么。
-
-## 策略六：Reranking 提高最终上下文质量
-
-第一阶段 retrieval 通常比较粗。它负责找出可能相关的候选 chunks。Reranking 会再次评估这些候选 chunks，并把最强证据排到前面。
-
-Reranking flow：
+上一篇 log 使用了这份文档：
 
 ```text
-用户问题
-  -> retrieve top 20 candidate chunks
-  -> 根据相关度 rerank candidates
-  -> 保留 top 4 chunks
-  -> 构建 LLM prompt
+Document Title: Refund and Cancellation Policy
+Product: LearnPro Online Course Platform
+Version: 2026.04
+Owner: Billing Team
+
+1. General Refund Rule
+Customers can request a refund within 14 days after purchase if they have completed less than 20% of the course content.
+
+2. Digital Course Activation
+Once a customer downloads course materials or receives a completion certificate, the purchase is no longer refundable.
+
+3. Subscription Cancellation
+Monthly subscriptions can be cancelled at any time. The cancellation will stop the next billing cycle, but it does not refund the current active month.
+
+4. Enterprise Customers
+Enterprise customers with custom contracts should contact the account manager. Their refund terms follow the signed contract instead of the standard policy.
+
+5. Support Contact
+For billing issues, customers should contact billing-support@learnpro.example.
+
+Refund Summary:
+Purchase Type | Refund Window | Important Condition
+Single Course | 14 days | Less than 20% completed
+Monthly Subscription | Before next billing cycle | No refund for current active month
+Enterprise Contract | Based on contract | Contact account manager
 ```
 
-当正确 chunk 已经存在于候选列表中，但排名不够高时，reranking 很有用。
+对这份文档来说，比较好的第一版策略是 heading-aware chunking 加 table-aware handling。
 
-没有 reranking 的失败例子：
+section chunk 可以长这样：
 
-| 排名 | Retrieved Chunk |
-| --- | --- |
-| 1 | 一般保修简介 |
-| 2 | 产品营销描述 |
-| 3 | 泛用充电 FAQ |
-| 4 | 配件兼容说明 |
-| 5 | 精确 A12 电池保修排除条款 |
-
-如果只有前四个 chunks 进入 prompt，真正重要的保修排除条款就被漏掉。
-
-Reranking 后：
-
-| 排名 | Retrieved Chunk |
-| --- | --- |
-| 1 | 精确 A12 电池保修排除条款 |
-| 2 | A12 保修期限 |
-| 3 | E104 充电故障处理 |
-| 4 | 购买证明要求 |
-
-Reranking 改善的是 top-k 质量。它不能取代 indexing，也不能排序一个根本没有被检索出来的正确 chunk。
-
-<CardGrid columns={2}>
-  <InfoCard title="准确率收益">
-    Reranking 提高最有用证据进入 LLM prompt 的机会。
-  </InfoCard>
-
-  <InfoCard title="成本取舍">
-    Reranking 会增加延迟。如果 rerank 很多候选，也可能增加模型成本。
-  </InfoCard>
-</CardGrid>
-
-当 raw retrieval 能找到正确候选，但排序经常不稳定时，就适合加入 reranking。
-
-## 策略七：Callback Retrieval 救回弱搜索
-
-Callback retrieval 的意思是，当第一次 retrieval 结果很弱时，系统会再试一次。
-
-第一次搜索可能失败的原因包括：
-
-- 用户表达很模糊。
-- 用户使用口语或 slang。
-- 问题包含多个主题。
-- 系统推断了错误 filter。
-- 搜索结果分数太低。
-- 返回的 chunks 太泛。
-
-Callback retrieval flow：
-
-```text
-用户问题
-  -> 第一次 retrieval
-  -> 评估 retrieval 质量
-  -> 如果结果弱，改写查询或放宽 filters
-  -> 再 retrieval 一次
-  -> 合并或替换结果集
+```json
+{
+  "chunk_id": "doc_refund_policy_learnpro_2026_04__subscription_cancellation",
+  "document_id": "doc_refund_policy_learnpro_2026_04",
+  "title": "Refund and Cancellation Policy",
+  "section": "Subscription Cancellation",
+  "text": "Monthly subscriptions can be cancelled at any time. The cancellation will stop the next billing cycle, but it does not refund the current active month.",
+  "metadata": {
+    "product": "LearnPro Online Course Platform",
+    "domain": "billing",
+    "document_type": "policy",
+    "version": "2026.04"
+  }
+}
 ```
 
-Callback triggers 可以包括：
+对表格来说，row-level chunk 可以让检索更精准：
 
-| Trigger | 意思 |
-| --- | --- |
-| 没有结果超过 threshold | 搜索可能失败 |
-| Top result 太泛 | 需要更具体 query |
-| 结果互相冲突 | 需要更严格 metadata filters |
-| 结果来自错误 document type | 意图识别可能错了 |
-| 用户问多部分问题 | 需要 decomposition |
-
-例子：
-
-```text
-Original query:
-opened product refund
+```json
+{
+  "chunk_id": "doc_refund_policy_learnpro_2026_04__refund_summary__monthly_subscription",
+  "document_id": "doc_refund_policy_learnpro_2026_04",
+  "title": "Refund and Cancellation Policy",
+  "section": "Refund Summary",
+  "text": "Refund Summary. Purchase Type: Monthly Subscription. Refund Window: Before next billing cycle. Important Condition: No refund for current active month.",
+  "metadata": {
+    "product": "LearnPro Online Course Platform",
+    "domain": "billing",
+    "document_type": "policy",
+    "version": "2026.04",
+    "block_type": "table_row"
+  }
+}
 ```
 
-Callback rewrite：
+这种结构让 chunk 保持聚焦、可追踪，也更适合 retrieval。
 
-```text
-return policy opened item defective product eligibility refund timeline
-```
+## 现在常见的做法
 
-这个查询加入更多政策相关词，可能找到更好的 chunk。
+在很多实际 RAG 系统里，最常见的起点仍然是 recursive chunking，或者 fixed-size chunking with overlap。
 
-但是 callback retrieval 需要停止规则：
+原因不是它们永远最好，而是它们容易实现、容易比较，而且对很多早期系统来说已经足够可用。
 
-- 最大 retry 次数。
-- 相似度分数 threshold。
-- 重复结果检测。
-- 最大延迟预算。
-- 仍然找不到证据时 fallback。
+更成熟的系统通常会逐步走向：
 
-Fallback 不应该是猜答案。如果 retrieval 失败，系统应该说明当前知识库没有足够证据。
+- general documents 使用 recursive chunking
+- structured documentation 使用 heading-aware chunking
+- tabular content 使用 table-aware chunking
+- 当小检索单位需要大上下文时，使用 parent-child chunking
 
-## 策略八：Query Decomposition 处理多部分问题
-
-有些客服问题包含多个条件。一次搜索不一定能找出足够证据。
-
-例子：
-
-```text
-我的商品送到时已经损坏，但我已经拆封并使用过一次。现在可以退货，还是应该申请保修？
-```
-
-这个问题需要多个证据点：
-
-- 损坏商品退货政策。
-- 拆封商品退货限制。
-- 已使用商品限制。
-- 保修资格。
-- 需要提供的证据。
-- 时间窗口。
-
-Query decomposition 会把一个复杂问题拆成几个小搜索：
-
-```text
-原始问题
-  -> 损坏商品退货政策
-  -> 拆封商品退货限制
-  -> 已使用商品资格
-  -> 保修申请条件
-  -> 证据要求
-```
-
-然后系统合并证据，再把最终选中的上下文交给 LLM。
-
-| 不拆解 | 拆解后 |
-| --- | --- |
-| 可能只检索到一个政策区域 | 可以检索多个必要证据区域 |
-| 更快 | 更慢 |
-| 更简单 | 更复杂 |
-| 适合直接问题 | 更适合条件型问题 |
-
-Query decomposition 不需要用于所有问题。它适合答案依赖多个政策或条件的情况。
-
-适合触发的信号：
-
-- 用户问 “A or B?”
-- 问题包含 “但是”“也”“除非”“之后”“之前”。
-- 问题同时包含产品故障和政策资格。
-- 第一次 retrieval 只返回部分证据。
-- 答案需要比较或决策逻辑。
-
-风险是过度检索。太多 sub-queries 会制造太多上下文，反而干扰 generation 层。Decomposition 应该产生聚焦的子问题，而不是把系统变成宽泛 research dump。
-
-## 如何评估 Retrieval 质量
-
-Retrieval 应该在 prompt design 之前先被评估。
-
-一个实用 evaluation set 应该包含真实或接近真实的客服问题，以及预期证据。
-
-| 测试问题 | 预期证据 |
-| --- | --- |
-| 拆封商品可以退货吗？ | 拆封商品退货政策和例外 |
-| E104 是什么意思？ | E104 故障处理章节 |
-| 进水损坏保修吗？ | 保修排除条款 |
-| 退款处理需要多久？ | 退款时间说明 |
-| 我的 A12 十个月后不能充电。 | A12 保修和充电故障规则 |
-
-对每个测试问题，检查实际 retrieved chunks。
-
-检查项目：
-
-| 检查 | 揭示什么 |
-| --- | --- |
-| 预期 chunk 有没有出现 | Recall |
-| 是否排在前面 | Ranking quality |
-| 是否包含无关 chunks | Precision |
-| Metadata filters 是否生效 | Scope control |
-| 结果是否当前有效 | Version control |
-| 结果是否包含足够上下文 | Context completeness |
-
-早期可以手动做 retrieval evaluation。
-
-Example retrieval log：
-
-```text
-Question:
-Can I return an opened item?
-
-Expected:
-Active Malaysia return policy, opened-item section.
-
-Retrieved:
-1. Active Malaysia return policy, opened-item section.
-2. Active Malaysia refund timeline.
-3. Deprecated Singapore return policy.
-4. Generic customer satisfaction FAQ.
-```
-
-这个结果部分正确。正确 chunk 排在第一，但 deprecated Singapore policy 不应该出现。这说明 metadata filtering 有问题。
-
-## 实际 Retrieval 工作流
-
-稳定的 retrieval workflow 应该分层建立。
-
-<CardGrid columns={2}>
-  <InfoCard title="1. 从 Filtered Vector Search 开始">
-    先根据产品、地区、语言、状态和文档类型过滤，再使用语义相似度。
-  </InfoCard>
-
-  <InfoCard title="2. 加入 Keyword Matching">
-    为错误码、产品 ID、型号、政策词和其他标识符加入精确匹配。
-  </InfoCard>
-
-  <InfoCard title="3. 组合成 Hybrid Search">
-    当问题同时包含自然语言和精确词时，合并语义候选和关键词候选。
-  </InfoCard>
-
-  <InfoCard title="4. 调整 Top-k">
-    候选数量要足够避免漏证据，但最终上下文要小到不会制造噪音。
-  </InfoCard>
-
-  <InfoCard title="5. 加入 Reranking">
-    当正确 chunks 已经在候选结果里，但不能稳定排进最终 top 结果时，加入 reranking。
-  </InfoCard>
-
-  <InfoCard title="6. 加入 Callback Retrieval">
-    只有当第一次 retrieval 弱、不完整或低于 confidence threshold 时才重试。
-  </InfoCard>
-</CardGrid>
-
-不要一开始就做 agentic search 或复杂 decomposition。先让基础 retrieval path 可以被测量、可以被检查。
+所以常见路线是：先用简单 baseline，评估 retrieval failure，再在资料明显需要结构时加入 structure-aware chunking。
 
 ## 核心原则
 
-Retrieval 是 RAG 的证据选择层。
+Chunking 不是把文字平均切开。它是在选择正确的 retrieval unit。
 
-Indexing 让知识变得可搜索。Retrieval 决定哪些知识会进入 LLM。LLM 之后只能根据 retrieval 给它的内容来写。如果 retrieval 选了错误政策、错误产品、错误地区或不完整证据，就算 prompt 写得不错，最终答案也会不稳定。
+没有通用最佳策略，因为不同文档的失败方式不同。有些需要小 chunk 提高 precision。有些需要大 chunk 保留 context。有些需要 headings。有些需要保留表格。有些需要 parent-child 关系。
 
-实用规则是：
-
-```text
-先检索到正确候选证据。
-再让最好证据排在前面。
-最后只把干净、相关、当前有效的上下文交给 LLM。
-```
-
-在这个系列里，log 3 只关注 retrieval。Log 4 应该专门关注 LLM 层：prompt design、context formatting、answer grounding、拒答行为和 guardrails。
+实用规则很简单：根据你想减少的失败类型选择 chunking strategy，然后用 retrieval evaluation 证明它真的有效。
 
 </Lang>
