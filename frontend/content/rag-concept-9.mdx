@@ -1,0 +1,1093 @@
+---
+title: "RAG Debugging System Design"
+category: "Software Development"
+createdAt: "2026-06-06"
+summary: "A practical guide to designing a RAG debugging system that can locate failures across indexing, retrieval, reranking, and LLM generation."
+readTime: "9 min read"
+tags:
+  - "RAG"
+  - "Backend"
+  - "AI"
+  - "System Design"
+featured: false
+series:
+  title: "Step By Step Build Your RAG"
+  slug: "step-by-step-build-your-rag"
+  order: 9
+---
+
+<Lang lang="en">
+
+A RAG debugging system is the observability layer for the whole RAG pipeline. It helps us identify where an answer failed: source data, parsing, chunking, metadata, vector storage, retrieval, reranking, prompt design, or LLM generation. Without debugging design, every bad answer looks like "the model is wrong", which is too vague to fix.
+
+## Short Answer
+
+RAG debugging means making every stage of the pipeline inspectable.
+
+A practical RAG system should be able to answer these questions:
+
+<CardGrid columns={2}>
+  <InfoCard title="1. Source Exists">
+    Does the correct answer exist in the original source data?
+  </InfoCard>
+
+  <InfoCard title="2. Parsed Correctly">
+    Did parsing extract the correct text, table, heading, or metadata?
+  </InfoCard>
+
+  <InfoCard title="3. Chunked Correctly">
+    Did the correct information appear inside a useful chunk?
+  </InfoCard>
+
+  <InfoCard title="4. Retrieved Correctly">
+    Did retrieval return the correct chunk in top-k?
+  </InfoCard>
+
+  <InfoCard title="5. Reranked Correctly">
+    Did reranking move the correct chunk up or push it down?
+  </InfoCard>
+
+  <InfoCard title="6. Generated Correctly">
+    Did the LLM use the evidence correctly and follow the prompt rules?
+  </InfoCard>
+</CardGrid>
+
+The goal is not only to collect logs. The goal is to make failure location obvious.
+
+## Why Debugging Is Important
+
+RAG has many failure points.
+
+When the final answer is wrong, the problem may come from several different stages:
+
+| Failure Location | Example |
+| --- | --- |
+| Source data | The answer does not exist in the source document |
+| Parsing | The correct paragraph was skipped or table was flattened badly |
+| Chunking | The answer and its condition were split apart |
+| Metadata | The correct chunk was filtered out by wrong product or version |
+| Embedding | The query and chunk were not semantically close |
+| Vector database | The record was not stored or indexed correctly |
+| Retrieval | The correct chunk did not appear in top-k |
+| Reranking | The correct chunk was retrieved but ranked too low |
+| Prompt | The model was not told how to handle missing evidence |
+| LLM generation | The model ignored evidence or over-inferred |
+
+Without a debugging system, the team may guess. Guessing creates random fixes.
+
+A team may change the prompt when the real issue is chunking. Or change the embedding model when the real issue is metadata filtering. Or blame the LLM when the correct chunk never reached the context.
+
+Debugging design prevents this waste.
+
+## The Core Debugging Principle
+
+The core principle is simple:
+
+```text
+Every RAG stage should produce an inspectable artifact.
+```
+
+That means every stage should have output that can be saved, reviewed, compared, and evaluated.
+
+| Stage | Inspectable Artifact |
+| --- | --- |
+| Source ingestion | Source document ID and raw content reference |
+| Parsing | Parsed document object |
+| Chunking | Chunk list with structure and metadata |
+| Embedding | Embedding model, vector ID, dimension, timestamp |
+| Storage | Stored record with payload and metadata |
+| Retrieval | Query, filters, top-k chunks, scores |
+| Reranking | Candidate list before and after reranking |
+| Prompting | Final prompt sent to the model |
+| Generation | Final answer, citations, confidence, missing-info signal |
+
+If a stage has no artifact, it becomes hard to debug.
+
+Good debugging is not added at the end. It should be part of pipeline design from the beginning.
+
+## Debugging Layer 1: Source Coverage
+
+Source coverage checks whether the answer exists in the original data.
+
+This should be the first question:
+
+```text
+Does the correct answer exist in the source documents?
+```
+
+If the source does not contain the answer, retrieval and prompt design cannot fix it.
+
+Example failure:
+
+```text
+User asks:
+"Can enterprise customers get refunds after 30 days?"
+
+Source document only says:
+"Enterprise customers with custom contracts should contact the account manager."
+```
+
+In this case, the source does not contain the exact refund rule. The correct behavior is to say the available context is insufficient.
+
+Source coverage should track:
+
+- document ID
+- source URI
+- document version
+- ingestion time
+- owner
+- domain
+- whether the document is active, archived, or draft
+
+This helps distinguish between a model failure and a data coverage failure.
+
+## Debugging Layer 2: Parsing Coverage
+
+Parsing coverage checks whether the useful source content was extracted correctly.
+
+A document may contain the right answer, but the parser may fail to extract it.
+
+Common parsing failures:
+
+| Source Format | Parsing Risk |
+| --- | --- |
+| PDF | Broken line order, missing tables, repeated headers |
+| HTML | Navigation text mixed with content |
+| Markdown | Code blocks or headings parsed incorrectly |
+| Tables | Row-column relationship lost |
+| Scanned documents | Text extraction incomplete |
+| Database records | Fields mapped incorrectly |
+
+Parsing debug logs should store the parsed object.
+
+For example:
+
+```json
+{
+  "document_id": "doc_refund_policy_learnpro_2026_04",
+  "parser_version": "parser_policy_v1",
+  "parse_status": "success",
+  "sections_detected": 6,
+  "tables_detected": 1,
+  "warnings": []
+}
+```
+
+If parsing drops the table or merges unrelated sections, retrieval may fail later.
+
+The failure looks like retrieval, but the root cause is parsing.
+
+## Debugging Layer 3: Chunk Coverage
+
+Chunk coverage checks whether the correct information exists inside the generated chunks.
+
+The key question:
+
+```text
+Did the correct answer appear in at least one chunk?
+```
+
+A bad chunk may be:
+
+- too small
+- too large
+- missing the heading
+- missing the condition
+- mixed with unrelated rules
+- separated from its table header
+- disconnected from source metadata
+
+Example chunking failure:
+
+```text
+Chunk A:
+Customers can request a refund within 14 days after purchase.
+
+Chunk B:
+This only applies if they have completed less than 20% of the course content.
+```
+
+Neither chunk is fully safe alone. The rule and condition are separated.
+
+A useful chunk debug record should include:
+
+```json
+{
+  "chunk_id": "doc_refund_policy_learnpro_2026_04__general_refund_rule",
+  "document_id": "doc_refund_policy_learnpro_2026_04",
+  "chunk_strategy": "heading_aware_table_aware_v1",
+  "section": "General Refund Rule",
+  "text": "Customers can request a refund within 14 days after purchase if they have completed less than 20% of the course content.",
+  "metadata": {
+    "product": "LearnPro Online Course Platform",
+    "domain": "billing",
+    "version": "2026.04"
+  }
+}
+```
+
+If the correct information is not inside any chunk, retrieval cannot find it.
+
+## Debugging Layer 4: Retrieval Evaluation
+
+Retrieval evaluation checks whether the correct chunk is returned for the user query.
+
+The main question:
+
+```text
+Did the correct chunk appear in top-k?
+```
+
+Useful metrics include:
+
+| Metric | Meaning |
+| --- | --- |
+| recall@k | Did the correct chunk appear within top-k? |
+| precision@k | How many returned chunks were useful? |
+| MRR | How high was the first correct chunk ranked? |
+| hit rate | Did retrieval find at least one correct chunk? |
+| filtered recall | Did metadata filtering remove the correct chunk? |
+
+A useful retrieval debug record should store:
+
+```json
+{
+  "question": "Can I cancel my monthly subscription and get a refund for this month?",
+  "retrieval_strategy": "metadata_filtered_hybrid",
+  "filters": {
+    "product": "LearnPro Online Course Platform",
+    "domain": "billing",
+    "language": "en"
+  },
+  "top_k": 5,
+  "results": [
+    {
+      "rank": 1,
+      "chunk_id": "doc_refund_policy_learnpro_2026_04__general_refund_rule",
+      "score": 0.82,
+      "section": "General Refund Rule"
+    },
+    {
+      "rank": 2,
+      "chunk_id": "doc_refund_policy_learnpro_2026_04__subscription_cancellation",
+      "score": 0.79,
+      "section": "Subscription Cancellation"
+    }
+  ]
+}
+```
+
+This tells us whether retrieval found the right evidence and how high it ranked.
+
+If the correct chunk is not in top-k, fix retrieval, metadata, chunking, embedding, or indexing before blaming the LLM.
+
+## Debugging Layer 5: Reranking Evaluation
+
+Reranking evaluation checks whether reranking improves evidence order.
+
+The key question:
+
+```text
+Did reranking move the most answerable chunk upward?
+```
+
+A useful reranking debug record stores before and after lists.
+
+```json
+{
+  "question": "Can I cancel my monthly subscription and get a refund for this month?",
+  "before_rerank": [
+    {
+      "rank": 1,
+      "chunk_id": "doc_refund_policy_learnpro_2026_04__general_refund_rule",
+      "section": "General Refund Rule"
+    },
+    {
+      "rank": 2,
+      "chunk_id": "doc_refund_policy_learnpro_2026_04__subscription_cancellation",
+      "section": "Subscription Cancellation"
+    }
+  ],
+  "after_rerank": [
+    {
+      "rank": 1,
+      "chunk_id": "doc_refund_policy_learnpro_2026_04__subscription_cancellation",
+      "section": "Subscription Cancellation"
+    },
+    {
+      "rank": 2,
+      "chunk_id": "doc_refund_policy_learnpro_2026_04__general_refund_rule",
+      "section": "General Refund Rule"
+    }
+  ],
+  "reranker": "cross_encoder_v1"
+}
+```
+
+This makes the reranking effect visible.
+
+If reranking pushes the correct chunk down, the reranker is harming the system. If the correct chunk was never retrieved, reranking cannot help.
+
+## Debugging Layer 6: Prompt and Generation Trace
+
+The final stage checks what the LLM actually saw and how it answered.
+
+The key questions:
+
+```text
+What context did the model receive?
+What prompt rules were active?
+Did the model follow them?
+```
+
+A useful generation trace should store:
+
+- user question
+- selected chunks
+- source metadata
+- final prompt
+- model name
+- model parameters
+- final answer
+- cited sources
+- unsupported claims
+- refusal or insufficient-context signal
+
+Example trace:
+
+```json
+{
+  "question": "Can I cancel my monthly subscription and get a refund for this month?",
+  "model": "answer_model_v1",
+  "selected_chunks": [
+    "doc_refund_policy_learnpro_2026_04__subscription_cancellation"
+  ],
+  "prompt_template": "support_strict_grounding_v1",
+  "answer": "You can cancel your monthly subscription at any time, but the current active month is not refunded.",
+  "sources": [
+    {
+      "title": "Refund and Cancellation Policy",
+      "section": "Subscription Cancellation",
+      "version": "2026.04"
+    }
+  ],
+  "grounding_status": "supported"
+}
+```
+
+This allows us to distinguish between two different failures:
+
+| Case | Meaning |
+| --- | --- |
+| Correct context was not provided | Retrieval or context selection failure |
+| Correct context was provided but ignored | Prompt or LLM generation failure |
+
+That distinction is critical.
+
+## A Practical Failure Diagnosis Workflow
+
+When a RAG answer is wrong, debug it in order.
+
+<CardGrid columns={2}>
+  <InfoCard title="1. Check Source">
+    Confirm whether the answer exists in the original source document.
+  </InfoCard>
+
+  <InfoCard title="2. Check Parsing">
+    Confirm whether the correct text, table, and headings were extracted.
+  </InfoCard>
+
+  <InfoCard title="3. Check Chunking">
+    Confirm whether the answer exists inside a complete and useful chunk.
+  </InfoCard>
+
+  <InfoCard title="4. Check Metadata">
+    Confirm whether product, version, language, permission, and domain fields are correct.
+  </InfoCard>
+
+  <InfoCard title="5. Check Retrieval">
+    Confirm whether the correct chunk appears in top-k before reranking.
+  </InfoCard>
+
+  <InfoCard title="6. Check Reranking">
+    Confirm whether reranking moves the correct chunk up or down.
+  </InfoCard>
+
+  <InfoCard title="7. Check Prompt">
+    Confirm whether the final prompt contains the right evidence and rules.
+  </InfoCard>
+
+  <InfoCard title="8. Check Answer">
+    Confirm whether the final answer is grounded in the selected evidence.
+  </InfoCard>
+</CardGrid>
+
+This order matters because downstream stages depend on upstream stages.
+
+Do not debug the prompt first if the correct chunk was never retrieved.
+
+## Debugging the Reusable Refund Policy Example
+
+Use the same question from previous logs:
+
+```text
+Can I cancel my monthly subscription and get a refund for this month?
+```
+
+Expected answer:
+
+```text
+The user can cancel the monthly subscription at any time, but the current active month is not refunded.
+```
+
+A debugging table can look like this:
+
+| Stage | Check | Expected Result |
+| --- | --- | --- |
+| Source | Does the subscription rule exist? | Yes |
+| Parsing | Was the subscription section extracted? | Yes |
+| Chunking | Is the full rule in one chunk or parent context? | Yes |
+| Metadata | Is product = LearnPro and domain = billing? | Yes |
+| Retrieval | Is subscription cancellation in top-k? | Yes |
+| Reranking | Is it ranked above general refund rule? | Yes |
+| Prompt | Is strict grounding active? | Yes |
+| Generation | Does answer cite correct section? | Yes |
+
+If any row fails, that row becomes the next engineering task.
+
+For example:
+
+| Failed Row | Likely Fix |
+| --- | --- |
+| Parsing failed | Improve parser or table extraction |
+| Chunking failed | Use heading-aware or parent-child chunking |
+| Metadata failed | Fix ingestion metadata mapping |
+| Retrieval failed | Add hybrid search or adjust filters |
+| Reranking failed | Tune reranker or add rule-based boost |
+| Prompt failed | Add stricter grounding and unknown handling |
+| Generation failed | Improve prompt or model selection |
+
+This turns one vague bad answer into a concrete pipeline diagnosis.
+
+## What to Log in Production
+
+A production RAG system should log enough to debug without exposing sensitive data unnecessarily.
+
+Important logs include:
+
+| Log Type | What to Store |
+| --- | --- |
+| Query log | user question, timestamp, user scope |
+| Retrieval log | strategy, filters, top-k results, scores |
+| Reranking log | before and after ranking |
+| Context log | selected chunks and source metadata |
+| Prompt log | prompt template version and final prompt reference |
+| Answer log | final answer, citations, grounding status |
+| Feedback log | user rating, correction, expected answer |
+| Pipeline version log | parser, chunker, embedding model, retriever, reranker, prompt version |
+
+Be careful with privacy and permissions.
+
+For sensitive systems, store references and hashes where possible. Do not casually log private user content into broad-access observability tools.
+
+## Common Debugging Mistakes
+
+Many RAG teams fail because they only inspect the final answer.
+
+| Mistake | Result |
+| --- | --- |
+| Blaming the LLM first | Real indexing or retrieval issue remains unfixed |
+| No source coverage check | Missing data is mistaken as model failure |
+| No chunk inspection | Bad chunking hides behind retrieval metrics |
+| No metadata audit | Wrong filters silently remove correct chunks |
+| Only checking top 5 | Correct chunk may exist in top 50 |
+| No before/after reranking record | Reranker impact is unknown |
+| No prompt versioning | Prompt changes cannot be compared |
+| No evaluation set | Improvements cannot be proven |
+
+The most dangerous mistake is changing multiple pipeline stages at once.
+
+If chunking, embedding, retrieval, and prompt all change together, the team cannot know what actually improved or broke the system.
+
+## Minimum Debugging System
+
+A minimum useful debugging system does not need to be complicated.
+
+Start with this:
+
+```text
+question_id
+user_question
+expected_answer
+source_document_id
+expected_chunk_id
+retrieval_strategy
+metadata_filters
+retrieved_top_k
+reranked_top_k
+selected_context
+prompt_template_version
+model_answer
+source_citations
+grounding_status
+```
+
+This is enough to run basic failure analysis.
+
+It can answer:
+
+- Did the correct chunk exist?
+- Did retrieval find it?
+- Did reranking prioritize it?
+- Did the prompt include it?
+- Did the model use it?
+
+Once this exists, every improvement can be measured more clearly.
+
+## The Main Principle
+
+RAG debugging is pipeline debugging.
+
+A wrong answer is not one problem. It is a symptom. The failure may happen in source coverage, parsing, chunking, metadata, storage, retrieval, reranking, prompt design, or generation.
+
+The practical rule is simple: make every stage inspectable. If the correct evidence disappears, the debugging system should show exactly where it disappeared.
+
+</Lang>
+
+<Lang lang="zh">
+
+RAG debugging system 是整条 RAG pipeline 的 observability layer。它帮助我们判断答案错误到底发生在哪里：source data、parsing、chunking、metadata、vector storage、retrieval、reranking、prompt design，还是 LLM generation。没有 debugging design，每个坏答案都会看起来像 “模型错了”，但这个说法太模糊，无法真正修复问题。
+
+## 简短答案
+
+RAG debugging 的意思，是让 pipeline 的每个阶段都可以被检查。
+
+一个实用的 RAG 系统应该能回答这些问题：
+
+<CardGrid columns={2}>
+  <InfoCard title="1. Source Exists">
+    正确答案是否存在于原始资料里？
+  </InfoCard>
+
+  <InfoCard title="2. Parsed Correctly">
+    parsing 有没有抽出正确文本、表格、标题或 metadata？
+  </InfoCard>
+
+  <InfoCard title="3. Chunked Correctly">
+    正确信息有没有出现在一个有用的 chunk 里？
+  </InfoCard>
+
+  <InfoCard title="4. Retrieved Correctly">
+    retrieval 有没有在 top-k 里返回正确 chunk？
+  </InfoCard>
+
+  <InfoCard title="5. Reranked Correctly">
+    reranking 有没有把正确 chunk 往前排，还是往后推？
+  </InfoCard>
+
+  <InfoCard title="6. Generated Correctly">
+    LLM 有没有正确使用 evidence，并遵守 prompt rules？
+  </InfoCard>
+</CardGrid>
+
+目标不只是收集 logs。目标是让 failure location 变得明显。
+
+## 为什么 Debugging 很重要
+
+RAG 有很多失败点。
+
+当最终答案错误时，问题可能来自很多不同阶段：
+
+| Failure Location | Example |
+| --- | --- |
+| Source data | source document 里根本没有答案 |
+| Parsing | 正确 paragraph 被跳过，或 table 被错误 flatten |
+| Chunking | 答案和条件被切开 |
+| Metadata | 正确 chunk 被错误 product 或 version filter 掉 |
+| Embedding | query 和 chunk 的语义距离不够近 |
+| Vector database | record 没有正确存储或建立 index |
+| Retrieval | 正确 chunk 没有出现在 top-k |
+| Reranking | 正确 chunk 被 retrieved，但排名太低 |
+| Prompt | 模型没有被告知如何处理 missing evidence |
+| LLM generation | 模型忽略 evidence 或过度推断 |
+
+如果没有 debugging system，团队只能猜。猜测会导致随机修复。
+
+团队可能在真正问题是 chunking 时去改 prompt。也可能在真正问题是 metadata filtering 时去换 embedding model。或者在正确 chunk 根本没进入 context 时，就怪 LLM。
+
+Debugging design 可以避免这种浪费。
+
+## 核心 Debugging 原则
+
+核心原则很简单：
+
+```text
+Every RAG stage should produce an inspectable artifact.
+```
+
+也就是说，每个阶段都应该有可以保存、查看、比较和评估的输出。
+
+| Stage | Inspectable Artifact |
+| --- | --- |
+| Source ingestion | Source document ID and raw content reference |
+| Parsing | Parsed document object |
+| Chunking | Chunk list with structure and metadata |
+| Embedding | Embedding model, vector ID, dimension, timestamp |
+| Storage | Stored record with payload and metadata |
+| Retrieval | Query, filters, top-k chunks, scores |
+| Reranking | Candidate list before and after reranking |
+| Prompting | Final prompt sent to the model |
+| Generation | Final answer, citations, confidence, missing-info signal |
+
+如果某个阶段没有 artifact，它就很难 debug。
+
+好的 debugging 不是最后才补上。它应该从 pipeline design 一开始就被考虑进去。
+
+## Debugging Layer 1：Source Coverage
+
+Source coverage 检查正确答案是否存在于原始资料里。
+
+第一个问题应该是：
+
+```text
+Does the correct answer exist in the source documents?
+```
+
+如果 source 里没有答案，retrieval 和 prompt design 都修不了。
+
+失败例子：
+
+```text
+User asks:
+"Can enterprise customers get refunds after 30 days?"
+
+Source document only says:
+"Enterprise customers with custom contracts should contact the account manager."
+```
+
+这种情况下，source 没有给出确切 refund rule。正确行为是说明 available context insufficient。
+
+Source coverage 应该记录：
+
+- document ID
+- source URI
+- document version
+- ingestion time
+- owner
+- domain
+- document 是 active、archived，还是 draft
+
+这可以帮助我们区分 model failure 和 data coverage failure。
+
+## Debugging Layer 2：Parsing Coverage
+
+Parsing coverage 检查有用的 source content 是否被正确抽取。
+
+文档里可能有正确答案，但 parser 可能没有抽出来。
+
+常见 parsing failures：
+
+| Source Format | Parsing Risk |
+| --- | --- |
+| PDF | line order 错、tables missing、重复 headers |
+| HTML | navigation text 混入正文 |
+| Markdown | code blocks 或 headings 解析错误 |
+| Tables | row-column relationship 丢失 |
+| Scanned documents | text extraction 不完整 |
+| Database records | fields mapping 错误 |
+
+Parsing debug logs 应该保存 parsed object。
+
+例如：
+
+```json
+{
+  "document_id": "doc_refund_policy_learnpro_2026_04",
+  "parser_version": "parser_policy_v1",
+  "parse_status": "success",
+  "sections_detected": 6,
+  "tables_detected": 1,
+  "warnings": []
+}
+```
+
+如果 parsing 丢掉 table，或者把无关 sections 合并，后面的 retrieval 可能会失败。
+
+这个失败看起来像 retrieval 问题，但 root cause 是 parsing。
+
+## Debugging Layer 3：Chunk Coverage
+
+Chunk coverage 检查正确信息是否存在于生成出来的 chunks 里。
+
+关键问题：
+
+```text
+Did the correct answer appear in at least one chunk?
+```
+
+坏 chunk 可能是：
+
+- 太小
+- 太大
+- 缺少 heading
+- 缺少 condition
+- 混入无关 rules
+- 和 table header 分离
+- 和 source metadata 断开
+
+chunking failure 例子：
+
+```text
+Chunk A:
+Customers can request a refund within 14 days after purchase.
+
+Chunk B:
+This only applies if they have completed less than 20% of the course content.
+```
+
+这两个 chunk 单独看都不够安全。规则和条件被分开了。
+
+有用的 chunk debug record 应该包含：
+
+```json
+{
+  "chunk_id": "doc_refund_policy_learnpro_2026_04__general_refund_rule",
+  "document_id": "doc_refund_policy_learnpro_2026_04",
+  "chunk_strategy": "heading_aware_table_aware_v1",
+  "section": "General Refund Rule",
+  "text": "Customers can request a refund within 14 days after purchase if they have completed less than 20% of the course content.",
+  "metadata": {
+    "product": "LearnPro Online Course Platform",
+    "domain": "billing",
+    "version": "2026.04"
+  }
+}
+```
+
+如果正确信息没有出现在任何 chunk 里，retrieval 就不可能找到它。
+
+## Debugging Layer 4：Retrieval Evaluation
+
+Retrieval evaluation 检查正确 chunk 是否会被用户 query 找回来。
+
+主要问题：
+
+```text
+Did the correct chunk appear in top-k?
+```
+
+有用 metrics 包括：
+
+| Metric | Meaning |
+| --- | --- |
+| recall@k | correct chunk 是否出现在 top-k |
+| precision@k | 返回 chunks 里有多少是有用的 |
+| MRR | 第一个 correct chunk 排得多高 |
+| hit rate | retrieval 有没有找到至少一个 correct chunk |
+| filtered recall | metadata filtering 是否移除了 correct chunk |
+
+有用的 retrieval debug record 应该保存：
+
+```json
+{
+  "question": "Can I cancel my monthly subscription and get a refund for this month?",
+  "retrieval_strategy": "metadata_filtered_hybrid",
+  "filters": {
+    "product": "LearnPro Online Course Platform",
+    "domain": "billing",
+    "language": "en"
+  },
+  "top_k": 5,
+  "results": [
+    {
+      "rank": 1,
+      "chunk_id": "doc_refund_policy_learnpro_2026_04__general_refund_rule",
+      "score": 0.82,
+      "section": "General Refund Rule"
+    },
+    {
+      "rank": 2,
+      "chunk_id": "doc_refund_policy_learnpro_2026_04__subscription_cancellation",
+      "score": 0.79,
+      "section": "Subscription Cancellation"
+    }
+  ]
+}
+```
+
+这能告诉我们 retrieval 是否找到了正确 evidence，以及它排多高。
+
+如果 correct chunk 没有在 top-k 里，应该先修 retrieval、metadata、chunking、embedding 或 indexing，不要先怪 LLM。
+
+## Debugging Layer 5：Reranking Evaluation
+
+Reranking evaluation 检查 reranking 是否改善 evidence order。
+
+关键问题：
+
+```text
+Did reranking move the most answerable chunk upward?
+```
+
+有用的 reranking debug record 会保存 before 和 after lists。
+
+```json
+{
+  "question": "Can I cancel my monthly subscription and get a refund for this month?",
+  "before_rerank": [
+    {
+      "rank": 1,
+      "chunk_id": "doc_refund_policy_learnpro_2026_04__general_refund_rule",
+      "section": "General Refund Rule"
+    },
+    {
+      "rank": 2,
+      "chunk_id": "doc_refund_policy_learnpro_2026_04__subscription_cancellation",
+      "section": "Subscription Cancellation"
+    }
+  ],
+  "after_rerank": [
+    {
+      "rank": 1,
+      "chunk_id": "doc_refund_policy_learnpro_2026_04__subscription_cancellation",
+      "section": "Subscription Cancellation"
+    },
+    {
+      "rank": 2,
+      "chunk_id": "doc_refund_policy_learnpro_2026_04__general_refund_rule",
+      "section": "General Refund Rule"
+    }
+  ],
+  "reranker": "cross_encoder_v1"
+}
+```
+
+这样 reranking 的影响才看得见。
+
+如果 reranking 把 correct chunk 往后推，说明 reranker 正在伤害系统。如果 correct chunk 从来没有被 retrieved，reranking 就帮不上忙。
+
+## Debugging Layer 6：Prompt and Generation Trace
+
+最后一层检查 LLM 实际看到了什么，以及它怎么回答。
+
+关键问题：
+
+```text
+What context did the model receive?
+What prompt rules were active?
+Did the model follow them?
+```
+
+有用的 generation trace 应该保存：
+
+- user question
+- selected chunks
+- source metadata
+- final prompt
+- model name
+- model parameters
+- final answer
+- cited sources
+- unsupported claims
+- refusal or insufficient-context signal
+
+示例 trace：
+
+```json
+{
+  "question": "Can I cancel my monthly subscription and get a refund for this month?",
+  "model": "answer_model_v1",
+  "selected_chunks": [
+    "doc_refund_policy_learnpro_2026_04__subscription_cancellation"
+  ],
+  "prompt_template": "support_strict_grounding_v1",
+  "answer": "You can cancel your monthly subscription at any time, but the current active month is not refunded.",
+  "sources": [
+    {
+      "title": "Refund and Cancellation Policy",
+      "section": "Subscription Cancellation",
+      "version": "2026.04"
+    }
+  ],
+  "grounding_status": "supported"
+}
+```
+
+这可以帮我们区分两个不同失败：
+
+| Case | Meaning |
+| --- | --- |
+| Correct context was not provided | retrieval 或 context selection failure |
+| Correct context was provided but ignored | prompt 或 LLM generation failure |
+
+这个区别非常关键。
+
+## 实用 Failure Diagnosis Workflow
+
+当 RAG 答案错了，按顺序 debug。
+
+<CardGrid columns={2}>
+  <InfoCard title="1. Check Source">
+    确认答案是否存在于原始 source document。
+  </InfoCard>
+
+  <InfoCard title="2. Check Parsing">
+    确认正确 text、table 和 headings 是否被抽取出来。
+  </InfoCard>
+
+  <InfoCard title="3. Check Chunking">
+    确认答案是否存在于完整且有用的 chunk 里。
+  </InfoCard>
+
+  <InfoCard title="4. Check Metadata">
+    确认 product、version、language、permission 和 domain fields 是否正确。
+  </InfoCard>
+
+  <InfoCard title="5. Check Retrieval">
+    确认 correct chunk 在 reranking 之前是否出现在 top-k。
+  </InfoCard>
+
+  <InfoCard title="6. Check Reranking">
+    确认 reranking 把 correct chunk 往前排还是往后排。
+  </InfoCard>
+
+  <InfoCard title="7. Check Prompt">
+    确认 final prompt 是否包含正确 evidence 和 rules。
+  </InfoCard>
+
+  <InfoCard title="8. Check Answer">
+    确认 final answer 是否基于 selected evidence。
+  </InfoCard>
+</CardGrid>
+
+这个顺序很重要，因为下游阶段依赖上游阶段。
+
+如果 correct chunk 根本没有被 retrieved，不要先 debug prompt。
+
+## Debugging 可复用 Refund Policy 例子
+
+继续使用前几篇 log 的问题：
+
+```text
+Can I cancel my monthly subscription and get a refund for this month?
+```
+
+预期答案：
+
+```text
+The user can cancel the monthly subscription at any time, but the current active month is not refunded.
+```
+
+debugging table 可以长这样：
+
+| Stage | Check | Expected Result |
+| --- | --- | --- |
+| Source | Does the subscription rule exist? | Yes |
+| Parsing | Was the subscription section extracted? | Yes |
+| Chunking | Is the full rule in one chunk or parent context? | Yes |
+| Metadata | Is product = LearnPro and domain = billing? | Yes |
+| Retrieval | Is subscription cancellation in top-k? | Yes |
+| Reranking | Is it ranked above general refund rule? | Yes |
+| Prompt | Is strict grounding active? | Yes |
+| Generation | Does answer cite correct section? | Yes |
+
+如果任何一行失败，那一行就是下一个 engineering task。
+
+例如：
+
+| Failed Row | Likely Fix |
+| --- | --- |
+| Parsing failed | Improve parser or table extraction |
+| Chunking failed | Use heading-aware or parent-child chunking |
+| Metadata failed | Fix ingestion metadata mapping |
+| Retrieval failed | Add hybrid search or adjust filters |
+| Reranking failed | Tune reranker or add rule-based boost |
+| Prompt failed | Add stricter grounding and unknown handling |
+| Generation failed | Improve prompt or model selection |
+
+这会把一个模糊的 bad answer，变成具体的 pipeline diagnosis。
+
+## Production 应该记录什么
+
+Production RAG 系统应该记录足够用于 debug 的资料，但也要避免不必要地暴露敏感数据。
+
+重要 logs 包括：
+
+| Log Type | What to Store |
+| --- | --- |
+| Query log | user question, timestamp, user scope |
+| Retrieval log | strategy, filters, top-k results, scores |
+| Reranking log | before and after ranking |
+| Context log | selected chunks and source metadata |
+| Prompt log | prompt template version and final prompt reference |
+| Answer log | final answer, citations, grounding status |
+| Feedback log | user rating, correction, expected answer |
+| Pipeline version log | parser, chunker, embedding model, retriever, reranker, prompt version |
+
+注意 privacy 和 permission。
+
+对于敏感系统，尽量存 references 和 hashes。不要随便把私人用户内容写入所有人都能访问的 observability tools。
+
+## 常见 Debugging 错误
+
+很多 RAG 团队失败，是因为他们只检查最终答案。
+
+| Mistake | Result |
+| --- | --- |
+| 先怪 LLM | 真正的 indexing 或 retrieval 问题没有被修 |
+| 没有 source coverage check | missing data 被误判成 model failure |
+| 没有 chunk inspection | bad chunking 藏在 retrieval metrics 后面 |
+| 没有 metadata audit | 错误 filters 静悄悄移除 correct chunks |
+| 只检查 top 5 | correct chunk 可能在 top 50 |
+| 没有 before/after reranking record | 不知道 reranker 的影响 |
+| 没有 prompt versioning | prompt changes 无法比较 |
+| 没有 evaluation set | 无法证明改动真的有效 |
+
+最危险的错误是一次改多个 pipeline stages。
+
+如果 chunking、embedding、retrieval 和 prompt 同时改变，团队就不知道到底是什么让系统变好或变坏。
+
+## 最小可用 Debugging System
+
+一个最小可用的 debugging system 不需要很复杂。
+
+先从这些字段开始：
+
+```text
+question_id
+user_question
+expected_answer
+source_document_id
+expected_chunk_id
+retrieval_strategy
+metadata_filters
+retrieved_top_k
+reranked_top_k
+selected_context
+prompt_template_version
+model_answer
+source_citations
+grounding_status
+```
+
+这些已经足够做基础 failure analysis。
+
+它可以回答：
+
+- correct chunk 是否存在？
+- retrieval 有没有找到它？
+- reranking 有没有优先排序它？
+- prompt 有没有包含它？
+- model 有没有使用它？
+
+有了这些，每次改进都能更清楚地被衡量。
+
+## 核心原则
+
+RAG debugging 是 pipeline debugging。
+
+一个错误答案不是单一问题，而是一个症状。失败可能发生在 source coverage、parsing、chunking、metadata、storage、retrieval、reranking、prompt design 或 generation。
+
+实用规则很简单：让每个阶段都可以被检查。如果 correct evidence 消失了，debugging system 应该清楚显示它是在哪个阶段消失的。
+
+</Lang>

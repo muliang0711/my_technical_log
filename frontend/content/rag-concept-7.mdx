@@ -1,0 +1,799 @@
+---
+title: "RAG Reranking"
+category: "Software Development"
+createdAt: "2026-06-06"
+summary: "A practical introduction to reranking in RAG systems, why it is different from retrieval, and when to add it."
+readTime: "8 min read"
+tags:
+  - "RAG"
+  - "Backend"
+  - "AI"
+  - "System Design"
+featured: false
+series:
+  title: "Step By Step Build Your RAG"
+  slug: "step-by-step-build-your-rag"
+  order: 7
+---
+
+<Lang lang="en">
+
+Reranking is the stage after retrieval and before final LLM context selection. Retrieval finds candidate chunks. Reranking reorders those candidates so the most useful evidence moves closer to the top. It does not replace retrieval. It fixes one common retrieval problem: the right chunk may be retrieved, but not ranked high enough to be used.
+
+## Short Answer
+
+Reranking improves the order of retrieved chunks.
+
+A basic RAG retrieval flow may look like this:
+
+```text
+User question
+→ Retrieval
+→ Top 5 chunks
+→ LLM answer
+```
+
+A reranking-based flow usually looks like this:
+
+```text
+User question
+→ Retrieval
+→ Top 30 or Top 50 candidate chunks
+→ Reranking
+→ Best 5 chunks
+→ LLM answer
+```
+
+Retrieval is usually optimized for fast candidate search. Reranking is usually optimized for more careful relevance judgment.
+
+| Stage | Main Job |
+| --- | --- |
+| Retrieval | Quickly find possible evidence |
+| Reranking | Reorder candidates by usefulness |
+| Context selection | Keep only the best chunks for the LLM |
+| LLM generation | Convert selected evidence into an answer |
+
+Reranking is useful when retrieval returns the correct chunk somewhere in the candidate list, but the correct chunk is not near the top.
+
+## Why Reranking Exists
+
+Retrieval is usually a broad search step.
+
+Dense retrieval, keyword retrieval, and hybrid retrieval are designed to find candidates quickly. But fast retrieval scores are not always precise enough for final answer selection.
+
+For example, the user asks:
+
+```text
+Can I cancel my monthly subscription and get a refund for this month?
+```
+
+Retrieval may return these chunks:
+
+| Rank | Retrieved Chunk | Problem |
+| --- | --- | --- |
+| 1 | General Refund Rule | Related to refund, but not subscription-specific |
+| 2 | Support Contact | Mentions billing support, but not the answer |
+| 3 | Subscription Cancellation | Correct answer |
+| 4 | Digital Course Activation | Related to refund, but different case |
+| 5 | Enterprise Customers | Different customer type |
+
+The correct chunk exists at rank 3. If the system only sends top 2 chunks to the LLM, the answer may be wrong or incomplete.
+
+Reranking tries to move `Subscription Cancellation` above weaker candidates.
+
+## Retrieval vs Reranking
+
+Retrieval and reranking are related, but they solve different problems.
+
+| Comparison | Retrieval | Reranking |
+| --- | --- | --- |
+| Search space | Whole index or filtered index | Retrieved candidate list |
+| Main goal | Recall possible evidence | Improve ordering precision |
+| Typical input | Query and indexed chunks | Query and candidate chunks |
+| Typical output | Top-k candidates | Reordered top-k candidates |
+| Cost | Lower per candidate | Higher per candidate |
+| Speed | Faster | Slower |
+| Failure mode | Correct chunk not found | Correct chunk found but ranked poorly |
+
+Retrieval should maximize the chance that the correct evidence enters the candidate pool.
+
+Reranking should maximize the chance that the best evidence appears near the top of the final context.
+
+The two stages should be evaluated separately. If retrieval never returns the correct chunk, reranking cannot fix the system.
+
+## Common Reranking Methods
+
+Reranking can be implemented in several ways.
+
+<CardGrid columns={2}>
+  <InfoCard title="Cross-Encoder Reranking">
+    A model reads the query and each candidate chunk together, then scores relevance. This is usually more accurate than comparing separate embeddings, but it is slower.
+  </InfoCard>
+
+  <InfoCard title="LLM-Based Reranking">
+    An LLM judges which chunks are most useful for answering the question. This is flexible, but cost, latency, and output stability must be controlled.
+  </InfoCard>
+
+  <InfoCard title="Score Fusion">
+    Combines dense score, keyword score, metadata score, and other signals into one ranking score. It is cheaper than model-based reranking but needs tuning.
+  </InfoCard>
+
+  <InfoCard title="Rule-Based Boosting">
+    Boosts or penalizes chunks based on metadata, source priority, freshness, document type, or exact term match. It is simple and explainable.
+  </InfoCard>
+</CardGrid>
+
+A production system may combine multiple methods.
+
+For example, it may use hybrid retrieval first, then rule-based filtering, then cross-encoder reranking on the remaining candidates.
+
+## Cross-Encoder Reranking
+
+Cross-encoder reranking compares the query and candidate chunk together.
+
+Unlike embedding retrieval, where the query and chunk are embedded separately, a cross-encoder reads both at the same time.
+
+Simplified input:
+
+```text
+Query:
+Can I cancel my monthly subscription and get a refund for this month?
+
+Candidate:
+Monthly subscriptions can be cancelled at any time. The cancellation will stop the next billing cycle, but it does not refund the current active month.
+```
+
+The reranker then gives a relevance score.
+
+### When It Works
+
+Cross-encoder reranking is useful when:
+
+- top retrieval results are noisy
+- the correct answer appears in top 20 or top 50 but not top 5
+- the question needs careful matching
+- chunks are short enough to score efficiently
+- accuracy matters more than minimum latency
+
+### Main Weakness
+
+Cross-encoder reranking is slower than normal vector retrieval.
+
+It must score each query-candidate pair. If you rerank 100 candidates for every request, latency and cost may increase.
+
+A common pattern is to retrieve more candidates first, then rerank a limited number:
+
+```text
+Retrieve top 50
+→ Rerank top 50
+→ Keep top 5
+```
+
+## LLM-Based Reranking
+
+LLM-based reranking asks an LLM to judge candidate chunks.
+
+The model may receive the user question and a list of chunks, then return the most relevant chunk IDs.
+
+Example instruction:
+
+```text
+Select the chunks that directly help answer the user question.
+Prefer chunks with exact policy conditions over general related text.
+Return only the selected chunk IDs.
+```
+
+### When It Works
+
+LLM-based reranking is useful when relevance depends on reasoning, not just similarity.
+
+It can help when:
+
+- chunks are complex
+- exact answerability matters
+- retrieved results contain subtle differences
+- business rules need interpretation
+- cross-encoder models are not available
+
+### Main Weakness
+
+LLM-based reranking can be expensive and less deterministic.
+
+It needs strict output format, small candidate sets, and evaluation. Otherwise, the reranker itself becomes another unstable LLM stage.
+
+Use LLM-based reranking carefully. It should improve evidence selection, not become a second answer generator.
+
+## Score Fusion and Rule-Based Reranking
+
+Not every reranker needs to be a model.
+
+A practical system can improve ranking by combining multiple signals:
+
+| Signal | Example |
+| --- | --- |
+| Dense similarity | Vector search score |
+| Keyword score | BM25 or full-text score |
+| Metadata match | Product, domain, language, permission |
+| Freshness | Latest version or updated_at |
+| Source priority | Official docs above old tickets |
+| Exact term match | Error code, API name, policy term |
+
+A simple scoring idea may look like this:
+
+```text
+final_score =
+  dense_score
+  + keyword_score
+  + metadata_boost
+  + freshness_boost
+  + source_priority_boost
+```
+
+This is not always mathematically perfect, but it is inspectable.
+
+### When It Works
+
+Score fusion and rule-based reranking are useful when:
+
+- the system needs predictable behavior
+- metadata quality is good
+- exact terms matter
+- source priority is important
+- model-based reranking is too slow or expensive
+
+### Main Weakness
+
+Manual scoring rules need tuning.
+
+If the metadata boost is too strong, a weak chunk from the correct product may outrank a strong chunk from a better source. If freshness boost is too strong, a new but irrelevant document may rank too high.
+
+Rules should be evaluated against real questions.
+
+## When Reranking Helps
+
+Reranking helps only when retrieval already has enough recall.
+
+The correct chunk must appear in the candidate list.
+
+| Retrieval Result | Can Reranking Help? | Reason |
+| --- | --- | --- |
+| Correct chunk is not in top 50 | No | Reranker cannot score what it never receives |
+| Correct chunk is in top 50 but not top 5 | Yes | Reranker can move it up |
+| Top results are semantically related but not answerable | Yes | Reranker can prefer answerable chunks |
+| Metadata filter removed the correct chunk | No | Filtering failure happens before reranking |
+| Chunks are badly cut | Limited | Reranker cannot recreate missing context |
+
+This is why retrieval evaluation should check recall before reranking.
+
+A good diagnostic question is:
+
+```text
+Does the correct evidence appear anywhere in the retrieved candidate pool?
+```
+
+If yes, reranking may help. If no, fix indexing, chunking, metadata filtering, or retrieval first.
+
+## Select Reranking Based on Data Type
+
+Different data types benefit from different reranking signals.
+
+| Data Type | Useful Reranking Direction | Why |
+| --- | --- | --- |
+| Policy documents | Cross-encoder + metadata freshness | Exact conditions and current version matter |
+| API documentation | Keyword score + exact endpoint boost | Function names and paths need exact match |
+| Error code docs | Exact code boost first | Exact code should dominate semantic similarity |
+| Support tickets | Dense score + recency + product match | Similar wording and current product context matter |
+| Legal documents | Cross-encoder + parent context | Subtle wording and full context matter |
+| Product manuals | Metadata product/version boost | Wrong product version can produce wrong answer |
+| Tables and specs | Table-aware row relevance | Correct row and column labels matter |
+| Meeting notes | Dense score + date filter | Meaning and timeline often matter |
+
+The reranking strategy should match the retrieval risk.
+
+If the risk is wrong version, use metadata freshness. If the risk is wrong API endpoint, use exact term boost. If the risk is subtle answerability, use cross-encoder or LLM-based reranking.
+
+## Reusable Example: Reranking the Refund Policy
+
+Use the same refund policy example from previous logs.
+
+User question:
+
+```text
+Can I cancel my monthly subscription and get a refund for this month?
+```
+
+Initial retrieval result:
+
+```json
+[
+  {
+    "rank": 1,
+    "section": "General Refund Rule",
+    "text": "Customers can request a refund within 14 days after purchase if they have completed less than 20% of the course content."
+  },
+  {
+    "rank": 2,
+    "section": "Support Contact",
+    "text": "For billing issues, customers should contact billing-support@learnpro.example."
+  },
+  {
+    "rank": 3,
+    "section": "Subscription Cancellation",
+    "text": "Monthly subscriptions can be cancelled at any time. The cancellation will stop the next billing cycle, but it does not refund the current active month."
+  }
+]
+```
+
+The first chunk is related to refund, but it answers single-course refund rules. The user asked about monthly subscription cancellation.
+
+A reranker should produce this order:
+
+```json
+[
+  {
+    "rank": 1,
+    "section": "Subscription Cancellation",
+    "reason": "Directly answers monthly subscription cancellation and current month refund."
+  },
+  {
+    "rank": 2,
+    "section": "General Refund Rule",
+    "reason": "Related to refund but applies to course purchase conditions."
+  },
+  {
+    "rank": 3,
+    "section": "Support Contact",
+    "reason": "May be useful fallback but does not answer the policy question."
+  }
+]
+```
+
+After reranking, the LLM receives the most answerable evidence first.
+
+## Practical Reranking Pipeline
+
+A practical reranking pipeline can be built gradually.
+
+| Stage | Setup |
+| --- | --- |
+| Prototype | Dense or hybrid retrieval without reranking |
+| First improvement | Retrieve top 30 or 50, then rerank top 5 |
+| Metadata-heavy system | Add rule-based boosts for product, version, and permission |
+| Technical docs | Add keyword and exact-term boosts |
+| Policy or legal docs | Add cross-encoder reranking |
+| Complex reasoning cases | Consider LLM-based reranking with strict output |
+
+Do not add reranking before you can inspect retrieval results.
+
+First confirm:
+
+- the correct chunk exists in the index
+- the correct chunk appears in a larger top-k candidate set
+- the current top results are less answerable
+- reranking moves the correct chunk upward
+
+Reranking should be measured by evidence quality, not by whether the final answer sounds better.
+
+## Common Mistakes
+
+Reranking mistakes often happen because teams add it before diagnosing retrieval failure.
+
+| Mistake | Result |
+| --- | --- |
+| Reranking top 5 only | Correct chunk may never enter the reranker |
+| Using reranking to fix missing chunks | It cannot fix failed recall |
+| Sending too many candidates to LLM reranker | High cost and unstable results |
+| Ignoring metadata signals | Wrong product, version, or source may rank high |
+| Over-boosting rules | Weak chunks may beat truly relevant chunks |
+| No before/after evaluation | Cannot prove reranking improved evidence quality |
+| Treating reranker as answer generator | Reranking stage becomes hard to control |
+
+The most useful evaluation is simple:
+
+```text
+Before reranking: where is the correct chunk ranked?
+After reranking: where is the correct chunk ranked?
+```
+
+If the correct chunk consistently moves upward, reranking is helping.
+
+## The Main Principle
+
+Reranking is not retrieval replacement. It is candidate ordering correction.
+
+Retrieval should bring enough possible evidence into the candidate pool. Reranking should make the most answerable evidence rise to the top. Context selection should send only the strongest chunks to the LLM.
+
+The practical rule is simple: add reranking when the correct chunks are retrieved but not prioritized. If the correct chunks are not retrieved at all, fix indexing, chunking, metadata, or retrieval first.
+
+</Lang>
+
+<Lang lang="zh">
+
+Reranking 是 retrieval 之后、最终 LLM context selection 之前的阶段。Retrieval 负责找候选 chunks。Reranking 负责重新排序这些候选 chunks，让最有用的证据排到更前面。它不是用来取代 retrieval 的。它主要修复一个常见问题：正确 chunk 已经被检索到了，但排名不够靠前，所以最后没有被 LLM 使用。
+
+## 简短答案
+
+Reranking 会改善 retrieved chunks 的排序。
+
+基础 RAG retrieval flow 可能是这样：
+
+```text
+User question
+→ Retrieval
+→ Top 5 chunks
+→ LLM answer
+```
+
+加入 reranking 后，流程通常是这样：
+
+```text
+User question
+→ Retrieval
+→ Top 30 or Top 50 candidate chunks
+→ Reranking
+→ Best 5 chunks
+→ LLM answer
+```
+
+Retrieval 通常优化的是快速找候选。Reranking 通常优化的是更仔细地判断相关性。
+
+| 阶段 | 主要任务 |
+| --- | --- |
+| Retrieval | 快速找出可能证据 |
+| Reranking | 根据有用程度重排候选 chunks |
+| Context selection | 只保留最好的 chunks 给 LLM |
+| LLM generation | 把选中的证据转换成答案 |
+
+当 retrieval 已经把正确 chunk 找出来，但正确 chunk 没有排在前面时，reranking 就很有用。
+
+## 为什么需要 Reranking
+
+Retrieval 通常是一个较宽的搜索步骤。
+
+Dense retrieval、keyword retrieval 和 hybrid retrieval 都是为了快速找候选。但快速 retrieval score 不一定足够精准，不能直接决定最终要给 LLM 哪些 context。
+
+例如用户问：
+
+```text
+Can I cancel my monthly subscription and get a refund for this month?
+```
+
+Retrieval 可能返回：
+
+| Rank | Retrieved Chunk | 问题 |
+| --- | --- | --- |
+| 1 | General Refund Rule | 和 refund 有关，但不是 subscription-specific |
+| 2 | Support Contact | 提到 billing support，但不是答案 |
+| 3 | Subscription Cancellation | 正确答案 |
+| 4 | Digital Course Activation | 和 refund 有关，但属于不同场景 |
+| 5 | Enterprise Customers | 不同 customer type |
+
+正确 chunk 在 rank 3。如果系统只把 top 2 chunks 给 LLM，答案可能会错或不完整。
+
+Reranking 的目的就是把 `Subscription Cancellation` 排到较弱候选之前。
+
+## Retrieval 和 Reranking 的区别
+
+Retrieval 和 reranking 有关系，但解决的问题不同。
+
+| 对比 | Retrieval | Reranking |
+| --- | --- | --- |
+| Search space | 整个 index 或 filtered index | retrieved candidate list |
+| 主要目标 | recall possible evidence | improve ordering precision |
+| 典型输入 | query 和 indexed chunks | query 和 candidate chunks |
+| 典型输出 | top-k candidates | reordered top-k candidates |
+| 成本 | 每个 candidate 成本较低 | 每个 candidate 成本较高 |
+| 速度 | 更快 | 更慢 |
+| 失败模式 | correct chunk 没被找到 | correct chunk 找到了但排名不好 |
+
+Retrieval 应该最大化正确 evidence 进入 candidate pool 的机会。
+
+Reranking 应该最大化最有用 evidence 出现在 final context 前几名的机会。
+
+这两个阶段应该分开评估。如果 retrieval 从来没有返回正确 chunk，reranking 无法修复系统。
+
+## 常见 Reranking 方法
+
+Reranking 有几种常见实现方式。
+
+<CardGrid columns={2}>
+  <InfoCard title="Cross-Encoder Reranking">
+    模型同时读取 query 和每个 candidate chunk，然后给出 relevance score。通常比单独比较 embedding 更准确，但速度更慢。
+  </InfoCard>
+
+  <InfoCard title="LLM-Based Reranking">
+    让 LLM 判断哪些 chunks 最有助于回答问题。它灵活，但成本、延迟和输出稳定性需要控制。
+  </InfoCard>
+
+  <InfoCard title="Score Fusion">
+    把 dense score、keyword score、metadata score 和其他 signal 合并成一个 ranking score。它比 model-based reranking 便宜，但需要 tuning。
+  </InfoCard>
+
+  <InfoCard title="Rule-Based Boosting">
+    根据 metadata、source priority、freshness、document type 或 exact term match 来 boost 或 penalize chunks。简单，而且可解释。
+  </InfoCard>
+</CardGrid>
+
+生产系统可能会组合多种方式。
+
+例如先做 hybrid retrieval，再做 rule-based filtering，最后对剩余 candidates 做 cross-encoder reranking。
+
+## Cross-Encoder Reranking
+
+Cross-encoder reranking 会把 query 和 candidate chunk 放在一起比较。
+
+不同于 embedding retrieval 把 query 和 chunk 分别 embed，cross-encoder 会同时读取两者。
+
+简化输入：
+
+```text
+Query:
+Can I cancel my monthly subscription and get a refund for this month?
+
+Candidate:
+Monthly subscriptions can be cancelled at any time. The cancellation will stop the next billing cycle, but it does not refund the current active month.
+```
+
+然后 reranker 给出 relevance score。
+
+### 什么时候适合
+
+Cross-encoder reranking 适合这些情况：
+
+- top retrieval results 噪音多
+- 正确答案在 top 20 或 top 50 里，但不在 top 5
+- 问题需要仔细匹配
+- chunks 足够短，可以有效评分
+- accuracy 比最低 latency 更重要
+
+### 主要弱点
+
+Cross-encoder reranking 比普通 vector retrieval 慢。
+
+它必须对每个 query-candidate pair 打分。如果每次 request 都 rerank 100 个 candidates，latency 和 cost 会增加。
+
+常见模式是先多取候选，再 rerank 有限数量：
+
+```text
+Retrieve top 50
+→ Rerank top 50
+→ Keep top 5
+```
+
+## LLM-Based Reranking
+
+LLM-based reranking 会让 LLM 判断 candidate chunks。
+
+模型可能接收用户问题和一组 chunks，然后返回最相关的 chunk IDs。
+
+示例 instruction：
+
+```text
+Select the chunks that directly help answer the user question.
+Prefer chunks with exact policy conditions over general related text.
+Return only the selected chunk IDs.
+```
+
+### 什么时候适合
+
+当相关性判断需要 reasoning，而不只是 similarity 时，LLM-based reranking 可能有用。
+
+它可以帮助这些情况：
+
+- chunks 很复杂
+- 需要判断是否真的 answerable
+- retrieved results 之间差异很细微
+- business rules 需要解释
+- 没有可用的 cross-encoder model
+
+### 主要弱点
+
+LLM-based reranking 可能昂贵，而且不够 deterministic。
+
+它需要严格 output format、小 candidate set 和 evaluation。否则 reranker 本身会变成另一个不稳定的 LLM 阶段。
+
+使用 LLM-based reranking 要谨慎。它应该改善 evidence selection，而不是变成第二个 answer generator。
+
+## Score Fusion 和 Rule-Based Reranking
+
+不是所有 reranker 都需要模型。
+
+一个实用系统可以通过合并多个 signal 来改善排序：
+
+| Signal | Example |
+| --- | --- |
+| Dense similarity | Vector search score |
+| Keyword score | BM25 or full-text score |
+| Metadata match | Product, domain, language, permission |
+| Freshness | Latest version or updated_at |
+| Source priority | Official docs above old tickets |
+| Exact term match | Error code, API name, policy term |
+
+一个简单 scoring 想法可以是：
+
+```text
+final_score =
+  dense_score
+  + keyword_score
+  + metadata_boost
+  + freshness_boost
+  + source_priority_boost
+```
+
+这不一定数学上完美，但它可以检查。
+
+### 什么时候适合
+
+Score fusion 和 rule-based reranking 适合这些情况：
+
+- 系统需要可预测行为
+- metadata quality 好
+- exact terms 很重要
+- source priority 很重要
+- model-based reranking 太慢或太贵
+
+### 主要弱点
+
+手动 scoring rules 需要 tuning。
+
+如果 metadata boost 太强，正确产品下的弱 chunk 可能排过更好来源的强 chunk。如果 freshness boost 太强，新的但不相关的文档可能排太高。
+
+规则必须用真实问题评估。
+
+## 什么时候 Reranking 有帮助
+
+只有当 retrieval 已经有足够 recall 时，reranking 才有帮助。
+
+正确 chunk 必须先出现在 candidate list 里。
+
+| Retrieval Result | Reranking 能帮吗？ | 原因 |
+| --- | --- | --- |
+| Correct chunk 不在 top 50 | 不能 | reranker 无法评分它没收到的内容 |
+| Correct chunk 在 top 50，但不在 top 5 | 可以 | reranker 可以把它往前排 |
+| Top results 语义相关但不能回答 | 可以 | reranker 可以偏好 answerable chunks |
+| Metadata filter 移除了 correct chunk | 不能 | filtering failure 发生在 reranking 之前 |
+| Chunks 切得很差 | 有限 | reranker 无法重建缺失上下文 |
+
+所以 retrieval evaluation 应该先检查 recall，再检查 reranking。
+
+一个好的诊断问题是：
+
+```text
+正确 evidence 有没有出现在 retrieved candidate pool 里面？
+```
+
+如果有，reranking 可能有帮助。如果没有，先修 indexing、chunking、metadata filtering 或 retrieval。
+
+## 根据 Data Type 选择 Reranking
+
+不同数据类型适合不同的 reranking signal。
+
+| Data Type | 有用的 Reranking 方向 | 原因 |
+| --- | --- | --- |
+| Policy documents | Cross-encoder + metadata freshness | 精确条件和当前版本很重要 |
+| API documentation | Keyword score + exact endpoint boost | function names 和 paths 需要精确匹配 |
+| Error code docs | Exact code boost first | exact code 应该压过 semantic similarity |
+| Support tickets | Dense score + recency + product match | 相似 wording 和当前 product context 重要 |
+| Legal documents | Cross-encoder + parent context | 细微 wording 和完整上下文很重要 |
+| Product manuals | Metadata product/version boost | 错误产品版本会产生错误答案 |
+| Tables and specs | Table-aware row relevance | 正确 row 和 column labels 很重要 |
+| Meeting notes | Dense score + date filter | meaning 和 timeline 通常都重要 |
+
+Reranking strategy 应该匹配 retrieval risk。
+
+如果风险是错误版本，就使用 metadata freshness。如果风险是错误 API endpoint，就使用 exact term boost。如果风险是细微 answerability，就用 cross-encoder 或 LLM-based reranking。
+
+## 可复用例子：Reranking Refund Policy
+
+继续使用前几篇 log 的 refund policy 例子。
+
+用户问题：
+
+```text
+Can I cancel my monthly subscription and get a refund for this month?
+```
+
+初始 retrieval result：
+
+```json
+[
+  {
+    "rank": 1,
+    "section": "General Refund Rule",
+    "text": "Customers can request a refund within 14 days after purchase if they have completed less than 20% of the course content."
+  },
+  {
+    "rank": 2,
+    "section": "Support Contact",
+    "text": "For billing issues, customers should contact billing-support@learnpro.example."
+  },
+  {
+    "rank": 3,
+    "section": "Subscription Cancellation",
+    "text": "Monthly subscriptions can be cancelled at any time. The cancellation will stop the next billing cycle, but it does not refund the current active month."
+  }
+]
+```
+
+第一个 chunk 和 refund 有关，但它回答的是 single-course refund rule。用户问的是 monthly subscription cancellation。
+
+reranker 应该产出这个顺序：
+
+```json
+[
+  {
+    "rank": 1,
+    "section": "Subscription Cancellation",
+    "reason": "Directly answers monthly subscription cancellation and current month refund."
+  },
+  {
+    "rank": 2,
+    "section": "General Refund Rule",
+    "reason": "Related to refund but applies to course purchase conditions."
+  },
+  {
+    "rank": 3,
+    "section": "Support Contact",
+    "reason": "May be useful fallback but does not answer the policy question."
+  }
+]
+```
+
+reranking 后，LLM 会优先拿到最能回答问题的 evidence。
+
+## 实用 Reranking Pipeline
+
+Reranking pipeline 可以逐步构建。
+
+| 阶段 | Setup |
+| --- | --- |
+| Prototype | Dense or hybrid retrieval without reranking |
+| First improvement | Retrieve top 30 or 50, then rerank top 5 |
+| Metadata-heavy system | Add rule-based boosts for product, version, and permission |
+| Technical docs | Add keyword and exact-term boosts |
+| Policy or legal docs | Add cross-encoder reranking |
+| Complex reasoning cases | Consider LLM-based reranking with strict output |
+
+在你能检查 retrieval results 之前，不要急着加 reranking。
+
+先确认：
+
+- correct chunk 存在于 index
+- correct chunk 会出现在较大的 top-k candidate set
+- 当前 top results 的 answerability 比较弱
+- reranking 会把 correct chunk 往前移动
+
+Reranking 应该用 evidence quality 评估，而不是只看最终答案听起来是否更好。
+
+## 常见错误
+
+Reranking 的错误通常来自团队还没诊断 retrieval failure 就加入 reranking。
+
+| 错误 | 结果 |
+| --- | --- |
+| 只 rerank top 5 | correct chunk 可能根本没进入 reranker |
+| 用 reranking 修 missing chunks | 它不能修 failed recall |
+| 给 LLM reranker 太多 candidates | 成本高，结果不稳定 |
+| 忽略 metadata signals | 错误 product、version 或 source 可能排很高 |
+| 规则 boost 太强 | 弱 chunk 可能超过真正相关 chunk |
+| 没有 before/after evaluation | 无法证明 reranking 改善了 evidence quality |
+| 把 reranker 当 answer generator | reranking 阶段变得难控制 |
+
+最有用的评估很简单：
+
+```text
+Before reranking: correct chunk 排第几？
+After reranking: correct chunk 排第几？
+```
+
+如果 correct chunk 稳定往前移动，reranking 就有帮助。
+
+## 核心原则
+
+Reranking 不是 retrieval replacement。它是 candidate ordering correction。
+
+Retrieval 应该把足够多可能 evidence 带进 candidate pool。Reranking 应该让最能回答问题的 evidence 排到前面。Context selection 应该只把最强 chunks 送给 LLM。
+
+实用规则很简单：当 correct chunks 已经被 retrieved，但没有被优先排序时，加 reranking。如果 correct chunks 根本没有被 retrieved，先修 indexing、chunking、metadata 或 retrieval。
+
+</Lang>

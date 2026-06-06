@@ -1,0 +1,823 @@
+---
+title: "RAG LLM Prompt Design"
+category: "Software Development"
+createdAt: "2026-06-06"
+summary: "A practical guide to designing LLM prompts for RAG systems so answers stay grounded, scoped, traceable, and stable."
+readTime: "9 min read"
+tags:
+  - "RAG"
+  - "Backend"
+  - "AI"
+  - "System Design"
+featured: false
+series:
+  title: "Step By Step Build Your RAG"
+  slug: "step-by-step-build-your-rag"
+  order: 8
+---
+
+<Lang lang="en">
+
+After indexing, retrieval, and reranking, the LLM receives selected context and generates the final answer. This stage is not only about choosing a stronger model. Prompt design controls how the model reads evidence, handles missing information, cites sources, and avoids answering beyond the retrieved context.
+
+## Short Answer
+
+A RAG prompt should tell the model five things:
+
+<CardGrid columns={2}>
+  <InfoCard title="1. Role">
+    What kind of assistant it should behave as, such as support assistant, technical assistant, or internal knowledge assistant.
+  </InfoCard>
+
+  <InfoCard title="2. Evidence">
+    Which retrieved chunks are available, where they came from, and what metadata or source fields matter.
+  </InfoCard>
+
+  <InfoCard title="3. Grounding Rule">
+    Whether the model must answer only from context or can add limited general reasoning.
+  </InfoCard>
+
+  <InfoCard title="4. Unknown Handling">
+    What the model should do when the retrieved evidence is missing, weak, outdated, or conflicting.
+  </InfoCard>
+
+  <InfoCard title="5. Output Format">
+    How the final answer should be structured so it is useful for users and stable for the application.
+  </InfoCard>
+</CardGrid>
+
+The prompt should not try to hide retrieval problems. If the evidence is not enough, the model should say that the context is insufficient instead of inventing an answer.
+
+## Why Prompt Design Matters in RAG
+
+In normal chat, the model can answer from its internal knowledge.
+
+In RAG, the model should answer from retrieved evidence.
+
+That means the prompt must define the boundary between:
+
+| Source | How the Model Should Treat It |
+| --- | --- |
+| Retrieved context | Primary evidence |
+| User question | Intent and constraints |
+| Metadata | Scope, version, product, permission, source |
+| Model knowledge | Secondary reasoning only when allowed |
+| Missing evidence | Should trigger uncertainty, not hallucination |
+
+Without prompt rules, the model may use retrieved context loosely. It may answer from memory, merge unrelated chunks, ignore version metadata, or sound confident when the evidence is not enough.
+
+Prompt design is the control layer for generation behavior.
+
+## Core Prompt Components
+
+A practical RAG prompt usually has several sections.
+
+```text
+System role
+→ Answer rules
+→ Citation rules
+→ Context block
+→ User question
+→ Output format
+```
+
+Each section has a job.
+
+| Prompt Part | Purpose |
+| --- | --- |
+| System role | Sets behavior and domain |
+| Answer rules | Defines what the model can and cannot do |
+| Context block | Supplies retrieved evidence |
+| Source metadata | Provides scope and traceability |
+| Unknown handling | Prevents unsupported answers |
+| Output format | Makes the response predictable |
+| Citation rules | Links answer claims back to evidence |
+
+A good prompt is not necessarily long. It is explicit about the decisions that matter.
+
+## Role Design
+
+The role tells the model what type of work it is doing.
+
+Weak role:
+
+```text
+You are a helpful assistant.
+```
+
+Better RAG role:
+
+```text
+You are a support knowledge assistant. Answer user questions using only the provided retrieved context. Prefer direct policy evidence over general explanation. If the context is insufficient, say what is missing.
+```
+
+The better role defines:
+
+- domain
+- source of truth
+- answer behavior
+- uncertainty behavior
+
+The role should be specific enough to constrain the model, but not so detailed that it becomes hard to maintain.
+
+## Context Formatting
+
+Context formatting is one of the most important parts of RAG prompt design.
+
+Do not send chunks as anonymous paragraphs. Include structure and metadata that help the model understand scope.
+
+Weak context:
+
+```text
+Monthly subscriptions can be cancelled at any time. The cancellation will stop the next billing cycle, but it does not refund the current active month.
+```
+
+Better context:
+
+```text
+[Chunk ID: doc_refund_policy_learnpro_2026_04__subscription_cancellation]
+Source: Refund and Cancellation Policy
+Product: LearnPro Online Course Platform
+Version: 2026.04
+Section: Subscription Cancellation
+
+Monthly subscriptions can be cancelled at any time. The cancellation will stop the next billing cycle, but it does not refund the current active month.
+```
+
+This helps the model understand that the rule is about a specific product, version, and section.
+
+The LLM does not need every metadata field. It needs the fields that affect answer correctness.
+
+Useful fields often include:
+
+- title
+- section
+- product
+- version
+- language
+- source URI or source ID
+- updated date
+- permission-safe citation label
+
+## Grounding Rules
+
+Grounding rules define how strictly the model must follow retrieved context.
+
+There are three common levels.
+
+| Grounding Level | Behavior | Use Case |
+| --- | --- | --- |
+| Strict grounding | Answer only from retrieved context | Policy, legal, compliance, support |
+| Context-first grounding | Use context first, add limited explanation | Technical education, internal docs |
+| Open grounding | Use retrieved context plus general model knowledge | Broad research or brainstorming |
+
+For most RAG systems, strict or context-first grounding is safer.
+
+Strict grounding example:
+
+```text
+Answer only using the provided context. Do not use outside knowledge. If the context does not contain the answer, say that the provided context is insufficient.
+```
+
+Context-first grounding example:
+
+```text
+Use the provided context as the primary source. You may add brief general explanation only when it does not change the policy, facts, or source-specific answer.
+```
+
+The stricter the domain, the stricter the grounding should be.
+
+## Unknown Handling
+
+Unknown handling tells the model what to do when the context is not enough.
+
+Without this rule, the model may fill gaps.
+
+A good unknown rule:
+
+```text
+If the context does not contain enough evidence to answer, say:
+"The provided context does not contain enough information to answer this."
+Then explain which missing information would be needed.
+```
+
+This is important because RAG failures often happen before the LLM stage.
+
+| Failure | What the LLM Should Do |
+| --- | --- |
+| Correct chunk not retrieved | Say context is insufficient |
+| Retrieved chunks conflict | Explain the conflict and avoid a single confident answer |
+| Version is unclear | State that the applicable version is unclear |
+| Product scope is missing | Ask for or state the missing product scope |
+| Permission-limited context | Answer only from allowed context |
+
+Unknown handling is not a weakness. It is how the system avoids unsupported answers.
+
+## Citation Design
+
+Citation design decides how the final answer references evidence.
+
+In RAG, citations are not decoration. They are part of traceability.
+
+A useful citation source should be stable.
+
+| Citation Field | Purpose |
+| --- | --- |
+| chunk_id | Debugging and internal trace |
+| document_id | Stable document reference |
+| title | Human-readable source |
+| section | Explains where the answer came from |
+| source_uri | Link or source location |
+| version | Shows applicable document version |
+
+The prompt should tell the model how to cite.
+
+Example:
+
+```text
+When making a factual claim from the context, cite the source using this format:
+(Source: <title>, Section: <section>, Version: <version>)
+```
+
+For user-facing systems, you may not want to expose internal chunk IDs. But internally, the system should still log them.
+
+A good answer can be user-friendly while still traceable.
+
+## Output Format Design
+
+Output format controls response stability.
+
+For a human chat interface, the output can be natural but structured.
+
+Example:
+
+```text
+Answer:
+You can cancel your monthly subscription at any time, but the cancellation only stops the next billing cycle. The current active month is not refunded.
+
+Source:
+Refund and Cancellation Policy, Subscription Cancellation, Version 2026.04
+```
+
+For an application, JSON may be better.
+
+```json
+{
+  "answer": "You can cancel your monthly subscription at any time, but the current active month is not refunded.",
+  "confidence": "supported",
+  "sources": [
+    {
+      "title": "Refund and Cancellation Policy",
+      "section": "Subscription Cancellation",
+      "version": "2026.04"
+    }
+  ],
+  "missing_information": []
+}
+```
+
+Use structured output when the application needs to parse the answer.
+
+Use natural output when the answer is only displayed to a human.
+
+## A Practical RAG Prompt Template
+
+This is a reusable prompt template for the refund policy example.
+
+```text
+You are a support knowledge assistant.
+
+Answer the user's question using only the provided context.
+
+Rules:
+- Use the context as the source of truth.
+- Do not invent policy details.
+- If the context is insufficient, say the provided context does not contain enough information.
+- If sources conflict, explain the conflict instead of choosing silently.
+- Prefer specific policy sections over general related sections.
+- Keep the answer direct and practical.
+- Include source information after the answer.
+
+Context:
+[Chunk ID: doc_refund_policy_learnpro_2026_04__subscription_cancellation]
+Title: Refund and Cancellation Policy
+Product: LearnPro Online Course Platform
+Version: 2026.04
+Section: Subscription Cancellation
+Text:
+Monthly subscriptions can be cancelled at any time. The cancellation will stop the next billing cycle, but it does not refund the current active month.
+
+User question:
+Can I cancel my monthly subscription and get a refund for this month?
+
+Output format:
+Answer:
+<direct answer>
+
+Source:
+<title>, <section>, <version>
+```
+
+Expected answer:
+
+```text
+Answer:
+You can cancel your monthly subscription at any time, but it will only stop the next billing cycle. The current active month is not refunded.
+
+Source:
+Refund and Cancellation Policy, Subscription Cancellation, Version 2026.04
+```
+
+This prompt is simple, but it controls the important behavior: source of truth, uncertainty, conflict handling, and output format.
+
+## Prompt Design Based on Use Case
+
+Different RAG systems need different prompt behavior.
+
+| Use Case | Prompt Style | Reason |
+| --- | --- | --- |
+| Customer support | Strict, concise, source-backed | Avoid unsupported policy claims |
+| Internal knowledge base | Context-first, explanatory | Users may need reasoning and process |
+| Legal or compliance | Very strict, citation-heavy | Exact wording and source version matter |
+| Developer documentation | Technical, example-oriented | Users need code, constraints, and edge cases |
+| Education assistant | Context-first, teaching style | Explanation matters, but source should guide it |
+| Operations runbook | Direct, step-based | Users need safe actions and escalation rules |
+
+Prompt design should follow domain risk.
+
+If the answer can affect money, security, compliance, or production systems, use stricter grounding and clearer citations.
+
+## Common Prompt Mistakes
+
+Prompt mistakes often make RAG answers look better but less reliable.
+
+| Mistake | Result |
+| --- | --- |
+| No grounding rule | Model may answer from memory |
+| Anonymous chunks | Model cannot tell source or scope |
+| No unknown handling | Model may hallucinate missing details |
+| Too much metadata | Context becomes noisy |
+| No citation rule | Answer becomes hard to trace |
+| Overly broad role | Model behavior becomes inconsistent |
+| No conflict rule | Model may merge incompatible sources |
+| No output format | Application integration becomes unstable |
+
+A prompt should not compensate for bad retrieval by becoming vague.
+
+If the context is weak, the prompt should expose that weakness clearly.
+
+## How to Evaluate Prompt Design
+
+Prompt design should be evaluated separately from retrieval.
+
+Use a fixed set of retrieved chunks, then compare different prompts.
+
+| Evaluation Question | What It Tests |
+| --- | --- |
+| Does the answer use only retrieved evidence? | Grounding |
+| Does it cite the correct source? | Traceability |
+| Does it refuse when context is insufficient? | Unknown handling |
+| Does it avoid wrong version or product scope? | Metadata awareness |
+| Does it handle conflicting chunks? | Conflict behavior |
+| Is the output parseable? | Format stability |
+
+Do not evaluate prompt quality only by fluency.
+
+A fluent unsupported answer is still a bad RAG answer.
+
+## Reusable Example: Bad Prompt vs Better Prompt
+
+Bad prompt:
+
+```text
+Answer the question based on the context.
+```
+
+This is too vague. It does not define what to do with missing evidence, conflicts, metadata, or citation.
+
+Better prompt:
+
+```text
+You are a support knowledge assistant.
+
+Use only the provided context to answer.
+If the context is insufficient, say that the provided context does not contain enough information.
+Do not invent policy details.
+Prefer chunks that directly answer the user question.
+Cite the title, section, and version used for the answer.
+```
+
+The better prompt is not much longer, but it controls the important failure modes.
+
+## The Main Principle
+
+Prompt design is the final control layer of a RAG system.
+
+Indexing decides what knowledge exists. Retrieval decides what evidence is found. Reranking decides what evidence is prioritized. Prompt design decides how the LLM uses that evidence.
+
+The practical rule is simple: a RAG prompt should make unsupported answering harder than saying "the context is insufficient."
+
+</Lang>
+
+<Lang lang="zh">
+
+在 indexing、retrieval 和 reranking 之后，LLM 会收到被选中的 context，并生成最终答案。这个阶段不只是选择更强的模型。Prompt design 会控制模型怎么读取证据、怎么处理缺失信息、怎么引用来源，以及怎么避免超出 retrieved context 回答。
+
+## 简短答案
+
+一个 RAG prompt 应该告诉模型五件事：
+
+<CardGrid columns={2}>
+  <InfoCard title="1. Role">
+    它应该扮演什么类型的 assistant，例如 support assistant、technical assistant 或 internal knowledge assistant。
+  </InfoCard>
+
+  <InfoCard title="2. Evidence">
+    当前有哪些 retrieved chunks、它们来自哪里，以及哪些 metadata 或 source fields 重要。
+  </InfoCard>
+
+  <InfoCard title="3. Grounding Rule">
+    模型是否必须只根据 context 回答，还是可以加入有限的一般推理。
+  </InfoCard>
+
+  <InfoCard title="4. Unknown Handling">
+    当 retrieved evidence 缺失、太弱、过期或冲突时，模型应该怎么处理。
+  </InfoCard>
+
+  <InfoCard title="5. Output Format">
+    最终答案应该长什么样，才能对用户有用，也方便 application 稳定处理。
+  </InfoCard>
+</CardGrid>
+
+Prompt 不应该尝试掩盖 retrieval 问题。如果证据不足，模型应该说明 context 不足，而不是编造答案。
+
+## 为什么 RAG 需要 Prompt Design
+
+普通聊天里，模型可以根据内部知识回答。
+
+但在 RAG 里，模型应该根据 retrieved evidence 回答。
+
+所以 prompt 必须定义这些边界：
+
+| 来源 | 模型应该怎么处理 |
+| --- | --- |
+| Retrieved context | 主要证据 |
+| User question | 意图和约束 |
+| Metadata | scope、version、product、permission、source |
+| Model knowledge | 只有在允许时作为辅助推理 |
+| Missing evidence | 应该触发不确定，而不是 hallucination |
+
+如果没有 prompt rules，模型可能会松散地使用 retrieved context。它可能从记忆回答、混合不相关 chunks、忽略 version metadata，或者在证据不足时仍然表现得很自信。
+
+Prompt design 是 generation behavior 的控制层。
+
+## Prompt 的核心组件
+
+一个实用的 RAG prompt 通常有几个部分。
+
+```text
+System role
+→ Answer rules
+→ Citation rules
+→ Context block
+→ User question
+→ Output format
+```
+
+每个部分都有自己的任务。
+
+| Prompt Part | 目的 |
+| --- | --- |
+| System role | 设置行为和领域 |
+| Answer rules | 定义模型可以做什么、不可以做什么 |
+| Context block | 提供 retrieved evidence |
+| Source metadata | 提供 scope 和 traceability |
+| Unknown handling | 防止 unsupported answers |
+| Output format | 让 response 更稳定 |
+| Citation rules | 把 answer claims 连接回 evidence |
+
+好的 prompt 不一定很长。它需要明确控制真正重要的决策。
+
+## Role Design
+
+Role 会告诉模型现在要做什么类型的工作。
+
+弱 role：
+
+```text
+You are a helpful assistant.
+```
+
+更好的 RAG role：
+
+```text
+You are a support knowledge assistant. Answer user questions using only the provided retrieved context. Prefer direct policy evidence over general explanation. If the context is insufficient, say what is missing.
+```
+
+更好的 role 定义了：
+
+- domain
+- source of truth
+- answer behavior
+- uncertainty behavior
+
+role 应该足够具体，可以约束模型，但不要复杂到难维护。
+
+## Context Formatting
+
+Context formatting 是 RAG prompt design 里最重要的部分之一。
+
+不要把 chunks 当成匿名段落丢给模型。应该加入能帮助模型理解 scope 的 structure 和 metadata。
+
+弱 context：
+
+```text
+Monthly subscriptions can be cancelled at any time. The cancellation will stop the next billing cycle, but it does not refund the current active month.
+```
+
+更好的 context：
+
+```text
+[Chunk ID: doc_refund_policy_learnpro_2026_04__subscription_cancellation]
+Source: Refund and Cancellation Policy
+Product: LearnPro Online Course Platform
+Version: 2026.04
+Section: Subscription Cancellation
+
+Monthly subscriptions can be cancelled at any time. The cancellation will stop the next billing cycle, but it does not refund the current active month.
+```
+
+这样模型会知道这条规则属于哪个产品、哪个版本、哪个 section。
+
+LLM 不需要所有 metadata。它只需要那些会影响答案正确性的字段。
+
+常见有用字段包括：
+
+- title
+- section
+- product
+- version
+- language
+- source URI or source ID
+- updated date
+- permission-safe citation label
+
+## Grounding Rules
+
+Grounding rules 定义模型必须多严格地跟随 retrieved context。
+
+常见有三种层级。
+
+| Grounding Level | 行为 | Use Case |
+| --- | --- | --- |
+| Strict grounding | 只根据 retrieved context 回答 | Policy、legal、compliance、support |
+| Context-first grounding | 优先使用 context，允许有限解释 | Technical education、internal docs |
+| Open grounding | 使用 retrieved context 加一般模型知识 | Broad research 或 brainstorming |
+
+多数 RAG 系统更适合 strict 或 context-first grounding。
+
+Strict grounding 示例：
+
+```text
+Answer only using the provided context. Do not use outside knowledge. If the context does not contain the answer, say that the provided context is insufficient.
+```
+
+Context-first grounding 示例：
+
+```text
+Use the provided context as the primary source. You may add brief general explanation only when it does not change the policy, facts, or source-specific answer.
+```
+
+领域风险越高，grounding 就应该越严格。
+
+## Unknown Handling
+
+Unknown handling 会告诉模型当 context 不足时该怎么办。
+
+如果没有这条规则，模型可能会自己补洞。
+
+好的 unknown rule：
+
+```text
+If the context does not contain enough evidence to answer, say:
+"The provided context does not contain enough information to answer this."
+Then explain which missing information would be needed.
+```
+
+这很重要，因为 RAG failure 常常发生在 LLM 之前。
+
+| Failure | LLM 应该怎么做 |
+| --- | --- |
+| Correct chunk 没有被 retrieved | 说明 context insufficient |
+| Retrieved chunks 互相冲突 | 说明冲突，避免给出单一自信答案 |
+| Version 不清楚 | 说明 applicable version 不明确 |
+| Product scope 缺失 | 说明缺少 product scope |
+| Permission-limited context | 只根据允许的 context 回答 |
+
+Unknown handling 不是弱点。它是系统避免 unsupported answers 的方式。
+
+## Citation Design
+
+Citation design 决定最终答案如何引用 evidence。
+
+在 RAG 里，citation 不是装饰。它是 traceability 的一部分。
+
+有用的 citation source 应该稳定。
+
+| Citation Field | 目的 |
+| --- | --- |
+| chunk_id | debugging 和 internal trace |
+| document_id | 稳定 document reference |
+| title | 人类可读的 source |
+| section | 说明答案来自哪里 |
+| source_uri | link 或 source location |
+| version | 显示适用文档版本 |
+
+prompt 应该告诉模型如何引用。
+
+示例：
+
+```text
+When making a factual claim from the context, cite the source using this format:
+(Source: <title>, Section: <section>, Version: <version>)
+```
+
+对 user-facing system 来说，不一定要暴露 internal chunk IDs。但系统内部仍然应该记录它们。
+
+好的答案可以同时 user-friendly 和 traceable。
+
+## Output Format Design
+
+Output format 控制 response stability。
+
+如果是 human chat interface，输出可以自然一点，但仍然要有结构。
+
+示例：
+
+```text
+Answer:
+You can cancel your monthly subscription at any time, but the cancellation only stops the next billing cycle. The current active month is not refunded.
+
+Source:
+Refund and Cancellation Policy, Subscription Cancellation, Version 2026.04
+```
+
+如果是 application 使用，JSON 可能更合适。
+
+```json
+{
+  "answer": "You can cancel your monthly subscription at any time, but the current active month is not refunded.",
+  "confidence": "supported",
+  "sources": [
+    {
+      "title": "Refund and Cancellation Policy",
+      "section": "Subscription Cancellation",
+      "version": "2026.04"
+    }
+  ],
+  "missing_information": []
+}
+```
+
+当 application 需要 parse answer 时，使用 structured output。
+
+当答案只是展示给人看时，使用 natural output。
+
+## 一个实用 RAG Prompt Template
+
+这是一个可以复用到 refund policy example 的 prompt template。
+
+```text
+You are a support knowledge assistant.
+
+Answer the user's question using only the provided context.
+
+Rules:
+- Use the context as the source of truth.
+- Do not invent policy details.
+- If the context is insufficient, say the provided context does not contain enough information.
+- If sources conflict, explain the conflict instead of choosing silently.
+- Prefer specific policy sections over general related sections.
+- Keep the answer direct and practical.
+- Include source information after the answer.
+
+Context:
+[Chunk ID: doc_refund_policy_learnpro_2026_04__subscription_cancellation]
+Title: Refund and Cancellation Policy
+Product: LearnPro Online Course Platform
+Version: 2026.04
+Section: Subscription Cancellation
+Text:
+Monthly subscriptions can be cancelled at any time. The cancellation will stop the next billing cycle, but it does not refund the current active month.
+
+User question:
+Can I cancel my monthly subscription and get a refund for this month?
+
+Output format:
+Answer:
+<direct answer>
+
+Source:
+<title>, <section>, <version>
+```
+
+预期答案：
+
+```text
+Answer:
+You can cancel your monthly subscription at any time, but it will only stop the next billing cycle. The current active month is not refunded.
+
+Source:
+Refund and Cancellation Policy, Subscription Cancellation, Version 2026.04
+```
+
+这个 prompt 很简单，但它控制了重要行为：source of truth、uncertainty、conflict handling 和 output format。
+
+## 根据 Use Case 设计 Prompt
+
+不同 RAG 系统需要不同的 prompt behavior。
+
+| Use Case | Prompt Style | 原因 |
+| --- | --- | --- |
+| Customer support | Strict, concise, source-backed | 避免 unsupported policy claims |
+| Internal knowledge base | Context-first, explanatory | 用户可能需要 reasoning 和 process |
+| Legal or compliance | Very strict, citation-heavy | exact wording 和 source version 很重要 |
+| Developer documentation | Technical, example-oriented | 用户需要 code、constraints 和 edge cases |
+| Education assistant | Context-first, teaching style | explanation 重要，但 source 应该主导 |
+| Operations runbook | Direct, step-based | 用户需要 safe actions 和 escalation rules |
+
+Prompt design 应该跟 domain risk 走。
+
+如果答案会影响金钱、安全、合规或生产系统，就应该使用更严格的 grounding 和更清楚的 citations。
+
+## 常见 Prompt 错误
+
+Prompt 错误通常会让 RAG 答案看起来更好，但可靠性更低。
+
+| Mistake | Result |
+| --- | --- |
+| No grounding rule | 模型可能从记忆回答 |
+| Anonymous chunks | 模型无法判断 source 或 scope |
+| No unknown handling | 模型可能 hallucinate missing details |
+| Too much metadata | context 变得很吵 |
+| No citation rule | answer 很难 trace |
+| Overly broad role | model behavior 不稳定 |
+| No conflict rule | 模型可能合并不兼容 sources |
+| No output format | application integration 不稳定 |
+
+Prompt 不应该通过变模糊来补偿差的 retrieval。
+
+如果 context 很弱，prompt 应该清楚暴露这个问题。
+
+## 如何评估 Prompt Design
+
+Prompt design 应该和 retrieval 分开评估。
+
+固定一组 retrieved chunks，然后比较不同 prompts。
+
+| Evaluation Question | 测什么 |
+| --- | --- |
+| Answer 是否只使用 retrieved evidence？ | Grounding |
+| 是否引用正确 source？ | Traceability |
+| context 不足时是否拒答？ | Unknown handling |
+| 是否避免错误 version 或 product scope？ | Metadata awareness |
+| 是否处理 conflicting chunks？ | Conflict behavior |
+| output 是否可 parse？ | Format stability |
+
+不要只用流畅度评估 prompt quality。
+
+流畅但没有证据支持的答案，仍然是差的 RAG answer。
+
+## 可复用例子：Bad Prompt vs Better Prompt
+
+Bad prompt：
+
+```text
+Answer the question based on the context.
+```
+
+这太模糊。它没有定义 missing evidence、conflicts、metadata 和 citation 应该怎么处理。
+
+Better prompt：
+
+```text
+You are a support knowledge assistant.
+
+Use only the provided context to answer.
+If the context is insufficient, say that the provided context does not contain enough information.
+Do not invent policy details.
+Prefer chunks that directly answer the user question.
+Cite the title, section, and version used for the answer.
+```
+
+更好的 prompt 没有长很多，但它控制了重要 failure modes。
+
+## 核心原则
+
+Prompt design 是 RAG 系统最后一层控制。
+
+Indexing 决定系统拥有什么知识。Retrieval 决定系统找到什么证据。Reranking 决定哪些证据优先。Prompt design 决定 LLM 怎么使用这些证据。
+
+实用规则很简单：一个 RAG prompt 应该让 unsupported answering 比说 “context insufficient” 更难发生。
+
+</Lang>

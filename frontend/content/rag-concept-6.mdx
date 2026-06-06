@@ -1,0 +1,1069 @@
+---
+title: "RAG Retrieval Strategies"
+category: "Software Development"
+createdAt: "2026-06-06"
+summary: "A practical comparison of common RAG retrieval strategies and how to choose the right one based on data type and query behavior."
+readTime: "9 min read"
+tags:
+  - "RAG"
+  - "Backend"
+  - "AI"
+  - "System Design"
+featured: false
+series:
+  title: "Step By Step Build Your RAG"
+  slug: "step-by-step-build-your-rag"
+  order: 6
+---
+
+<Lang lang="en">
+
+Retrieval is the stage where the RAG system searches indexed knowledge and returns candidate chunks. It is not the final answer stage. Its job is to find useful evidence. If retrieval fails, the LLM usually has no reliable context to answer from.
+
+## Short Answer
+
+Retrieval strategy decides how the system finds relevant chunks.
+
+Common strategies include:
+
+| Strategy | Best For |
+| --- | --- |
+| Dense retrieval | Semantic questions and meaning-based search |
+| Keyword retrieval | Exact terms, IDs, names, codes, and error messages |
+| Hybrid retrieval | Mixed semantic and exact-match search |
+| Metadata-filtered retrieval | Product, version, permission, region, or domain-specific search |
+| Multi-query retrieval | Vague questions or questions with many possible phrasings |
+| Parent-child retrieval | Small chunks for search, larger context for answer generation |
+| Query routing | Different data sources or retrievers for different query types |
+
+The core rule is simple: retrieval strategy should match the data type and the expected question type.
+
+There is no single best retrieval strategy. A policy document, an API reference, a product table, and a support ticket archive should not always use the same retrieval method.
+
+## What Retrieval Actually Does
+
+Retrieval receives a user question and returns candidate evidence.
+
+A simplified retrieval flow looks like this:
+
+```text
+User question
+→ Query processing
+→ Search indexed chunks
+→ Return top-k candidate chunks
+→ Optional reranking
+→ Send selected context to LLM
+```
+
+The retriever does not need to write the final answer. It needs to answer a smaller question:
+
+```text
+Which chunks are most likely to contain useful evidence?
+```
+
+This distinction matters. Retrieval quality should be evaluated by whether it finds the correct evidence, not by whether the LLM gives a beautiful response.
+
+## Strategy 1: Dense Retrieval
+
+Dense retrieval uses embeddings.
+
+The system embeds the user question, compares that query vector with stored chunk vectors, and returns chunks with high semantic similarity.
+
+Example:
+
+```text
+User asks:
+"Can I get my money back after starting the course?"
+
+Dense retrieval may find:
+"Customers can request a refund within 14 days after purchase if they have completed less than 20% of the course content."
+```
+
+The words are not exactly the same, but the meaning is close.
+
+### When Dense Retrieval Works
+
+Dense retrieval is useful when users ask natural questions.
+
+Use it for:
+
+- support knowledge bases
+- policy documents
+- educational content
+- long-form explanations
+- general documentation
+- concept-based search
+
+<CardGrid columns={2}>
+  <InfoCard title="Strength">
+    It can match meaning even when the user does not use the exact wording from the document.
+  </InfoCard>
+
+  <InfoCard title="Weakness">
+    It may miss exact identifiers, rare names, codes, version numbers, and technical tokens.
+  </InfoCard>
+</CardGrid>
+
+Dense retrieval is usually a good baseline, but it should not be treated as enough for every data type.
+
+## Strategy 2: Keyword Retrieval
+
+Keyword retrieval searches based on exact or near-exact words.
+
+This can be implemented with full-text search engines, PostgreSQL full-text search, BM25, Elasticsearch, OpenSearch, or similar systems.
+
+Example:
+
+```text
+User asks:
+"What does error E1042 mean?"
+
+Keyword retrieval should match:
+"E1042: Payment authorization failed because the billing provider rejected the transaction."
+```
+
+For this type of question, exact matching matters more than semantic similarity.
+
+### When Keyword Retrieval Works
+
+Use keyword retrieval for:
+
+- error codes
+- product IDs
+- API endpoint names
+- class names
+- method names
+- legal terms
+- exact feature names
+- names of people, companies, or systems
+
+<CardGrid columns={2}>
+  <InfoCard title="Strength">
+    It is strong when the query contains exact tokens that must appear in the answer.
+  </InfoCard>
+
+  <InfoCard title="Weakness">
+    It may fail when the user asks with different wording or vague natural language.
+  </InfoCard>
+</CardGrid>
+
+Keyword retrieval is not old or weak. It solves a different problem from dense retrieval.
+
+## Strategy 3: Hybrid Retrieval
+
+Hybrid retrieval combines dense retrieval and keyword retrieval.
+
+A common approach is:
+
+```text
+Dense search returns top 50
+Keyword search returns top 50
+Fusion combines both lists
+Final top-k candidates are returned
+```
+
+This works because dense and keyword retrieval fail in different ways.
+
+| Query Type | Dense Retrieval | Keyword Retrieval |
+| --- | --- | --- |
+| Natural question | Strong | Sometimes weak |
+| Exact error code | Sometimes weak | Strong |
+| Product name | Medium | Strong |
+| Concept explanation | Strong | Medium |
+| Mixed query | Strong | Strong |
+
+Hybrid retrieval is often stronger than either strategy alone.
+
+### When Hybrid Retrieval Works
+
+Use hybrid retrieval when your users ask both natural questions and exact-match questions.
+
+It is useful for:
+
+- technical documentation
+- support centers
+- developer platforms
+- internal knowledge bases
+- mixed product documents
+- systems with error codes and natural explanations
+
+<CardGrid columns={2}>
+  <InfoCard title="Strength">
+    It handles both semantic meaning and exact terms.
+  </InfoCard>
+
+  <InfoCard title="Weakness">
+    It requires score fusion, tuning, and evaluation. Bad fusion can make results worse.
+  </InfoCard>
+</CardGrid>
+
+Hybrid retrieval is a common production direction because real user questions are messy.
+
+## Strategy 4: Metadata-Filtered Retrieval
+
+Metadata-filtered retrieval uses metadata to limit the search space.
+
+Instead of searching every chunk, the system first filters by fields like product, domain, language, version, region, or permission scope.
+
+Example:
+
+```json
+{
+  "product": "LearnPro Online Course Platform",
+  "domain": "billing",
+  "language": "en",
+  "permission_scope": "public_support"
+}
+```
+
+Then retrieval only searches chunks that match those constraints.
+
+### When Metadata Filtering Works
+
+Use metadata filtering when the knowledge base contains multiple scopes.
+
+Examples:
+
+| Data Scope | Useful Filter |
+| --- | --- |
+| Multiple products | product |
+| Multiple versions | version or updated_at |
+| Multiple countries | region |
+| Multiple teams | domain or owner |
+| Multiple languages | language |
+| Private and public docs | permission_scope |
+| Draft and published docs | status |
+
+<CardGrid columns={2}>
+  <InfoCard title="Strength">
+    It reduces irrelevant results before semantic or keyword scoring happens.
+  </InfoCard>
+
+  <InfoCard title="Weakness">
+    If metadata is wrong or too strict, the correct chunk may be filtered out before retrieval.
+  </InfoCard>
+</CardGrid>
+
+Metadata filtering is powerful, but it depends on metadata quality.
+
+## Strategy 5: Multi-Query Retrieval
+
+Multi-query retrieval generates several query variations and searches with each one.
+
+Example:
+
+```text
+Original question:
+"Can I cancel my plan?"
+
+Generated queries:
+1. "subscription cancellation policy"
+2. "cancel monthly subscription"
+3. "stop next billing cycle"
+4. "refund current active month"
+```
+
+The retriever then combines results from these searches.
+
+### When Multi-Query Retrieval Works
+
+Use multi-query retrieval when user questions are short, vague, or underspecified.
+
+It is useful for:
+
+- customer support chat
+- vague user questions
+- natural language search
+- documents with different wording
+- exploratory search
+
+<CardGrid columns={2}>
+  <InfoCard title="Strength">
+    It improves recall by searching multiple possible meanings or phrasings.
+  </InfoCard>
+
+  <InfoCard title="Weakness">
+    It costs more and may introduce noisy results if generated queries drift away from the original question.
+  </InfoCard>
+</CardGrid>
+
+Multi-query retrieval is useful when missing the correct chunk is more expensive than retrieving some extra noise.
+
+## Strategy 6: Parent-Child Retrieval
+
+Parent-child retrieval separates the search unit from the answer context.
+
+The child chunk is small and easy to match. The parent chunk is larger and gives the LLM enough context.
+
+| Unit | Role |
+| --- | --- |
+| Child chunk | Used for embedding and retrieval |
+| Parent chunk | Returned to the LLM as context |
+
+Example:
+
+```text
+Child chunk:
+"No refund for current active month."
+
+Parent chunk:
+Full section: Subscription Cancellation
+```
+
+This lets retrieval stay precise while generation receives enough context.
+
+### When Parent-Child Retrieval Works
+
+Use parent-child retrieval when:
+
+- small chunks retrieve better
+- answers need full section context
+- policy rules have conditions and exceptions
+- source documents are long but structured
+- one sentence is not enough for safe answering
+
+<CardGrid columns={2}>
+  <InfoCard title="Strength">
+    It balances retrieval precision with answer context.
+  </InfoCard>
+
+  <InfoCard title="Weakness">
+    It needs stable parent-child metadata. Bad linking can return the wrong context.
+  </InfoCard>
+</CardGrid>
+
+Parent-child retrieval is especially useful for policy, legal, compliance, and technical documentation.
+
+## Strategy 7: Query Routing
+
+Query routing sends different questions to different retrievers, collections, or data sources.
+
+Not every question should search the same index.
+
+Example routing:
+
+| Query | Route |
+| --- | --- |
+| "What does E1042 mean?" | Error code index with keyword search |
+| "How do refunds work?" | Policy index with hybrid search |
+| "Show API usage for createUser" | API docs index with keyword plus heading-aware retrieval |
+| "What changed in version 2026.04?" | Versioned changelog index |
+| "Can this customer see enterprise terms?" | Permission-filtered enterprise policy index |
+
+Routing can be rule-based, classifier-based, or LLM-based.
+
+### When Query Routing Works
+
+Use query routing when your knowledge base has clearly different data types.
+
+It is useful for:
+
+- multi-product systems
+- API docs plus support docs
+- public docs plus private docs
+- codebase search plus business docs
+- policy docs plus tickets
+- structured database records plus unstructured documents
+
+<CardGrid columns={2}>
+  <InfoCard title="Strength">
+    It prevents one generic retriever from handling every query badly.
+  </InfoCard>
+
+  <InfoCard title="Weakness">
+    Incorrect routing can send the question to the wrong data source and hide the correct answer.
+  </InfoCard>
+</CardGrid>
+
+Routing is useful after the system grows beyond one simple document collection.
+
+## Compare the Strategies
+
+Each retrieval strategy optimizes for a different failure mode.
+
+| Strategy | Main Goal | Main Risk |
+| --- | --- | --- |
+| Dense retrieval | Find semantic matches | Misses exact tokens |
+| Keyword retrieval | Find exact matches | Misses paraphrased meaning |
+| Hybrid retrieval | Balance semantic and exact search | Needs tuning |
+| Metadata-filtered retrieval | Reduce wrong-scope results | Bad filters remove correct chunks |
+| Multi-query retrieval | Improve recall | Adds cost and noise |
+| Parent-child retrieval | Retrieve small, answer with large context | Needs reliable linking |
+| Query routing | Use the right retriever for the query | Wrong route hides answer |
+
+The best system often combines multiple strategies.
+
+A mature RAG system may use metadata filtering first, hybrid retrieval second, parent-child expansion third, and reranking after that.
+
+## Select Based on Data Type
+
+The data type should strongly influence retrieval strategy.
+
+| Data Type | Suitable Retrieval Strategy | Why |
+| --- | --- | --- |
+| Policy documents | Hybrid + metadata filtering + parent-child | Rules need exact terms and full context |
+| API documentation | Keyword + hybrid + heading-aware retrieval | Endpoint names and method names matter |
+| Error code docs | Keyword first, dense second | Exact code match is critical |
+| Product manuals | Hybrid + metadata filtering | Product and version scope matter |
+| FAQ pages | Dense or hybrid over question-answer pairs | Each pair is already a retrieval unit |
+| Support tickets | Dense + metadata filtering + multi-query | Wording is messy and user-specific |
+| Tables and specs | Keyword + table-aware chunks | Exact values and labels matter |
+| Legal documents | Hybrid + parent-child + metadata filtering | Exact wording and context both matter |
+| Codebase documentation | Keyword + hybrid | Function names and concepts both matter |
+| Meeting notes | Dense + multi-query | Natural language and vague phrasing dominate |
+
+Do not select retrieval strategy only by what the vector database supports. Select it by how the data behaves.
+
+## Select Based on Query Type
+
+The same data source may need different strategies for different questions.
+
+| User Query Type | Better Strategy |
+| --- | --- |
+| "What does this mean?" | Dense retrieval |
+| "Find E1042" | Keyword retrieval |
+| "Can I refund after downloading materials?" | Hybrid retrieval |
+| "Only search LearnPro billing docs" | Metadata-filtered retrieval |
+| "I forgot the exact name, but it was about billing cancellation" | Multi-query retrieval |
+| "Give the full policy rule" | Parent-child retrieval |
+| "Search API docs, not support tickets" | Query routing |
+
+Query type matters because user intent changes the retrieval target.
+
+Some questions need meaning. Some need exact match. Some need scope control. Some need larger context after a small match.
+
+## Reusable Example: Retrieval on Refund Policy
+
+Use the same refund policy example from previous logs.
+
+Question:
+
+```text
+Can I cancel my monthly subscription and get a refund for this month?
+```
+
+A dense retriever may find the subscription section because the meaning is close.
+
+A keyword retriever may match words like:
+
+```text
+monthly subscription
+refund
+current active month
+```
+
+A metadata filter can limit search to:
+
+```json
+{
+  "product": "LearnPro Online Course Platform",
+  "domain": "billing",
+  "document_type": "policy",
+  "language": "en"
+}
+```
+
+A hybrid retriever can combine semantic meaning and exact words.
+
+A parent-child retriever may match this child chunk:
+
+```text
+No refund for current active month.
+```
+
+Then return the full parent section:
+
+```text
+Section: Subscription Cancellation
+
+Monthly subscriptions can be cancelled at any time. The cancellation will stop the next billing cycle, but it does not refund the current active month.
+```
+
+For this document, a good retrieval pipeline is:
+
+```text
+Metadata filter
+→ Hybrid retrieval
+→ Parent-child expansion
+→ Reranking
+→ LLM context selection
+```
+
+This is stronger than using only vector search because the question contains both semantic intent and exact policy terms.
+
+## Practical Starting Recommendation
+
+For most practical RAG systems, start with a simple but testable retrieval baseline.
+
+A reasonable path:
+
+| Stage | Retrieval Setup |
+| --- | --- |
+| First prototype | Dense retrieval |
+| Technical or support docs | Hybrid retrieval |
+| Multi-product knowledge base | Metadata-filtered hybrid retrieval |
+| Policy or legal docs | Hybrid + parent-child retrieval |
+| Large mixed knowledge base | Query routing + hybrid retrieval |
+| Vague user questions | Add multi-query retrieval |
+
+Do not add every strategy immediately.
+
+Start with a baseline, evaluate retrieval hit rate, inspect failures, then add the strategy that fixes the most common failure mode.
+
+## Common Mistakes
+
+Retrieval mistakes are often mistaken as LLM problems.
+
+| Mistake | Result |
+| --- | --- |
+| Using only dense retrieval for error codes | Exact matches may be missed |
+| No metadata filtering | Wrong product or version may be retrieved |
+| Over-filtering metadata | Correct chunks may be excluded |
+| No keyword search for technical docs | API names and IDs may retrieve poorly |
+| Multi-query without control | Generated queries may add noise |
+| Parent-child without stable links | Correct child may return wrong parent |
+| No retrieval evaluation | Team cannot prove whether retrieval improved |
+
+The most important debugging question is:
+
+```text
+Did the correct chunk appear in top-k before the LLM answered?
+```
+
+If the answer is no, the problem is retrieval, indexing, chunking, or metadata. It is not primarily a prompt problem.
+
+## The Main Principle
+
+Retrieval strategy should be selected by data type and query type.
+
+Dense retrieval is good for meaning. Keyword retrieval is good for exact terms. Hybrid retrieval handles both. Metadata filtering controls scope. Multi-query improves recall. Parent-child retrieval balances precise search with larger answer context. Query routing prevents one retriever from handling every data type.
+
+The practical rule is simple: choose the retrieval strategy that reduces the most common way your data fails to be found.
+
+</Lang>
+
+<Lang lang="zh">
+
+Retrieval 是 RAG 系统搜索 indexed knowledge，并返回候选 chunks 的阶段。它不是最终回答阶段。它的任务是找到有用证据。如果 retrieval 失败，LLM 通常就没有可靠上下文可以回答。
+
+## 简短答案
+
+Retrieval strategy 决定系统如何找到相关 chunks。
+
+常见策略包括：
+
+| Strategy | 最适合 |
+| --- | --- |
+| Dense retrieval | 语义问题和基于意思的搜索 |
+| Keyword retrieval | 精确术语、ID、名称、代码和错误信息 |
+| Hybrid retrieval | 同时需要语义和精确匹配的搜索 |
+| Metadata-filtered retrieval | 按 product、version、permission、region 或 domain 搜索 |
+| Multi-query retrieval | 模糊问题，或有多种表达方式的问题 |
+| Parent-child retrieval | 小 chunk 用来搜索，大 context 用来回答 |
+| Query routing | 不同问题走不同数据源或不同 retriever |
+
+核心规则很简单：retrieval strategy 应该匹配 data type 和 expected question type。
+
+没有单一最好的 retrieval strategy。policy document、API reference、product table 和 support ticket archive 不应该永远使用同一种 retrieval method。
+
+## Retrieval 实际上在做什么
+
+Retrieval 接收用户问题，然后返回候选 evidence。
+
+简化流程是这样：
+
+```text
+User question
+→ Query processing
+→ Search indexed chunks
+→ Return top-k candidate chunks
+→ Optional reranking
+→ Send selected context to LLM
+```
+
+retriever 不需要写最终答案。它只需要回答一个更小的问题：
+
+```text
+哪些 chunks 最可能包含有用证据？
+```
+
+这个区别很重要。评估 retrieval quality 时，应该看它有没有找到正确 evidence，而不是看 LLM 回答写得漂不漂亮。
+
+## 策略一：Dense Retrieval
+
+Dense retrieval 使用 embeddings。
+
+系统会把用户问题 embed 成 query vector，再和已经存好的 chunk vectors 比较，返回 semantic similarity 高的 chunks。
+
+例子：
+
+```text
+User asks:
+"Can I get my money back after starting the course?"
+
+Dense retrieval may find:
+"Customers can request a refund within 14 days after purchase if they have completed less than 20% of the course content."
+```
+
+用词不完全一样，但意思接近。
+
+### 什么时候适合 Dense Retrieval
+
+Dense retrieval 适合用户用自然语言提问的场景。
+
+适合用于：
+
+- support knowledge bases
+- policy documents
+- educational content
+- long-form explanations
+- general documentation
+- concept-based search
+
+<CardGrid columns={2}>
+  <InfoCard title="优点">
+    即使用户没有使用文档里的精确用词，它也可能找到语义接近的内容。
+  </InfoCard>
+
+  <InfoCard title="弱点">
+    它可能漏掉精确 identifiers、罕见名称、代码、版本号和技术 token。
+  </InfoCard>
+</CardGrid>
+
+Dense retrieval 通常是好的 baseline，但不应该认为它适合所有数据类型。
+
+## 策略二：Keyword Retrieval
+
+Keyword retrieval 根据精确或接近精确的词来搜索。
+
+它可以通过 full-text search engines、PostgreSQL full-text search、BM25、Elasticsearch、OpenSearch 或类似系统实现。
+
+例子：
+
+```text
+User asks:
+"What does error E1042 mean?"
+
+Keyword retrieval should match:
+"E1042: Payment authorization failed because the billing provider rejected the transaction."
+```
+
+对这种问题来说，精确匹配比语义相似更重要。
+
+### 什么时候适合 Keyword Retrieval
+
+适合用于：
+
+- error codes
+- product IDs
+- API endpoint names
+- class names
+- method names
+- legal terms
+- exact feature names
+- 人名、公司名、系统名
+
+<CardGrid columns={2}>
+  <InfoCard title="优点">
+    当 query 包含必须出现在答案里的 exact tokens 时，它很强。
+  </InfoCard>
+
+  <InfoCard title="弱点">
+    当用户用不同表达方式或模糊自然语言提问时，它可能失败。
+  </InfoCard>
+</CardGrid>
+
+Keyword retrieval 不是旧技术，也不是弱技术。它解决的是和 dense retrieval 不同的问题。
+
+## 策略三：Hybrid Retrieval
+
+Hybrid retrieval 结合 dense retrieval 和 keyword retrieval。
+
+常见做法是：
+
+```text
+Dense search returns top 50
+Keyword search returns top 50
+Fusion combines both lists
+Final top-k candidates are returned
+```
+
+这样有用，是因为 dense 和 keyword 的失败方式不同。
+
+| Query Type | Dense Retrieval | Keyword Retrieval |
+| --- | --- | --- |
+| 自然语言问题 | 强 | 有时弱 |
+| 精确 error code | 有时弱 | 强 |
+| Product name | 中等 | 强 |
+| 概念解释 | 强 | 中等 |
+| Mixed query | 强 | 强 |
+
+Hybrid retrieval 通常比单独使用其中一种更稳。
+
+### 什么时候适合 Hybrid Retrieval
+
+当用户同时会问自然语言问题，也会问 exact-match 问题时，适合 hybrid retrieval。
+
+适合用于：
+
+- technical documentation
+- support centers
+- developer platforms
+- internal knowledge bases
+- mixed product documents
+- 同时包含 error codes 和自然语言解释的系统
+
+<CardGrid columns={2}>
+  <InfoCard title="优点">
+    它同时处理 semantic meaning 和 exact terms。
+  </InfoCard>
+
+  <InfoCard title="弱点">
+    它需要 score fusion、tuning 和 evaluation。fusion 做得差，结果可能更差。
+  </InfoCard>
+</CardGrid>
+
+Hybrid retrieval 是常见 production 方向，因为真实用户问题通常很乱。
+
+## 策略四：Metadata-Filtered Retrieval
+
+Metadata-filtered retrieval 会用 metadata 缩小搜索范围。
+
+系统不会搜索所有 chunks，而是先根据 product、domain、language、version、region 或 permission scope 过滤。
+
+例子：
+
+```json
+{
+  "product": "LearnPro Online Course Platform",
+  "domain": "billing",
+  "language": "en",
+  "permission_scope": "public_support"
+}
+```
+
+然后 retrieval 只搜索符合这些条件的 chunks。
+
+### 什么时候适合 Metadata Filtering
+
+当 knowledge base 有多个 scope 时，就应该考虑 metadata filtering。
+
+例子：
+
+| Data Scope | Useful Filter |
+| --- | --- |
+| 多个产品 | product |
+| 多个版本 | version or updated_at |
+| 多个国家 | region |
+| 多个团队 | domain or owner |
+| 多种语言 | language |
+| private 和 public docs | permission_scope |
+| draft 和 published docs | status |
+
+<CardGrid columns={2}>
+  <InfoCard title="优点">
+    在 semantic 或 keyword scoring 之前，先减少错误范围的结果。
+  </InfoCard>
+
+  <InfoCard title="弱点">
+    如果 metadata 错误或 filter 太严格，正确 chunk 可能在 retrieval 前就被排除了。
+  </InfoCard>
+</CardGrid>
+
+Metadata filtering 很强，但它依赖 metadata quality。
+
+## 策略五：Multi-Query Retrieval
+
+Multi-query retrieval 会生成多个 query variations，并用每个 query 搜索。
+
+例子：
+
+```text
+Original question:
+"Can I cancel my plan?"
+
+Generated queries:
+1. "subscription cancellation policy"
+2. "cancel monthly subscription"
+3. "stop next billing cycle"
+4. "refund current active month"
+```
+
+retriever 再把这些搜索结果合并。
+
+### 什么时候适合 Multi-Query Retrieval
+
+当用户问题很短、很模糊或信息不足时，可以使用 multi-query retrieval。
+
+适合用于：
+
+- customer support chat
+- vague user questions
+- natural language search
+- 文档表达方式很多变
+- exploratory search
+
+<CardGrid columns={2}>
+  <InfoCard title="优点">
+    它通过搜索多个可能含义或表达方式，提高 recall。
+  </InfoCard>
+
+  <InfoCard title="弱点">
+    它成本更高，而且 generated queries 如果偏离原问题，会引入噪音。
+  </InfoCard>
+</CardGrid>
+
+当漏掉正确 chunk 的代价比多拿一些噪音更高时，multi-query retrieval 会有用。
+
+## 策略六：Parent-Child Retrieval
+
+Parent-child retrieval 会把搜索单位和回答上下文分开。
+
+child chunk 小，用来 embedding 和 retrieval。parent chunk 大，用来交给 LLM 当 context。
+
+| 单位 | 角色 |
+| --- | --- |
+| Child chunk | 用来 embedding 和 retrieval |
+| Parent chunk | 作为 context 返回给 LLM |
+
+例子：
+
+```text
+Child chunk:
+"No refund for current active month."
+
+Parent chunk:
+Full section: Subscription Cancellation
+```
+
+这样可以让 retrieval 保持精准，同时让 generation 拿到足够上下文。
+
+### 什么时候适合 Parent-Child Retrieval
+
+适合在这些情况使用：
+
+- 小 chunk 检索更准
+- 答案需要完整 section context
+- policy rules 有条件和例外
+- source documents 很长但有结构
+- 一句孤立文字不足以安全回答
+
+<CardGrid columns={2}>
+  <InfoCard title="优点">
+    它平衡 retrieval precision 和 answer context。
+  </InfoCard>
+
+  <InfoCard title="弱点">
+    它需要稳定的 parent-child metadata。linking 错了，就可能返回错误上下文。
+  </InfoCard>
+</CardGrid>
+
+Parent-child retrieval 特别适合 policy、legal、compliance 和 technical documentation。
+
+## 策略七：Query Routing
+
+Query routing 会把不同问题送去不同 retriever、collection 或 data source。
+
+不是每个问题都应该搜索同一个 index。
+
+routing 例子：
+
+| Query | Route |
+| --- | --- |
+| "What does E1042 mean?" | Error code index with keyword search |
+| "How do refunds work?" | Policy index with hybrid search |
+| "Show API usage for createUser" | API docs index with keyword plus heading-aware retrieval |
+| "What changed in version 2026.04?" | Versioned changelog index |
+| "Can this customer see enterprise terms?" | Permission-filtered enterprise policy index |
+
+routing 可以是 rule-based、classifier-based，也可以是 LLM-based。
+
+### 什么时候适合 Query Routing
+
+当你的 knowledge base 有明显不同的数据类型时，可以使用 query routing。
+
+适合用于：
+
+- multi-product systems
+- API docs plus support docs
+- public docs plus private docs
+- codebase search plus business docs
+- policy docs plus tickets
+- structured database records plus unstructured documents
+
+<CardGrid columns={2}>
+  <InfoCard title="优点">
+    它避免让一个 generic retriever 勉强处理所有问题。
+  </InfoCard>
+
+  <InfoCard title="弱点">
+    route 错了，问题会被送去错误数据源，正确答案就被隐藏了。
+  </InfoCard>
+</CardGrid>
+
+当系统已经超过单一 document collection 时，routing 会变得有用。
+
+## 策略对比
+
+每种 retrieval strategy 都在优化不同的 failure mode。
+
+| Strategy | Main Goal | Main Risk |
+| --- | --- | --- |
+| Dense retrieval | 找 semantic matches | 漏掉 exact tokens |
+| Keyword retrieval | 找 exact matches | 漏掉 paraphrased meaning |
+| Hybrid retrieval | 平衡 semantic 和 exact search | 需要 tuning |
+| Metadata-filtered retrieval | 减少 wrong-scope results | bad filters 会排除正确 chunks |
+| Multi-query retrieval | 提高 recall | 增加成本和噪音 |
+| Parent-child retrieval | 小单位检索，大上下文回答 | 需要可靠 linking |
+| Query routing | 为 query 使用正确 retriever | wrong route 会隐藏答案 |
+
+最好的系统通常会组合多个策略。
+
+成熟一点的 RAG 系统可能会先做 metadata filtering，再做 hybrid retrieval，然后 parent-child expansion，最后 reranking。
+
+## 根据 Data Type 选择
+
+data type 应该强烈影响 retrieval strategy。
+
+| Data Type | 适合的 Retrieval Strategy | 原因 |
+| --- | --- | --- |
+| Policy documents | Hybrid + metadata filtering + parent-child | 规则需要 exact terms，也需要完整上下文 |
+| API documentation | Keyword + hybrid + heading-aware retrieval | endpoint names 和 method names 很重要 |
+| Error code docs | Keyword first, dense second | 精确 code match 很关键 |
+| Product manuals | Hybrid + metadata filtering | product 和 version scope 很重要 |
+| FAQ pages | Dense or hybrid over question-answer pairs | 每组问答本身就是 retrieval unit |
+| Support tickets | Dense + metadata filtering + multi-query | wording 很乱，而且用户相关性高 |
+| Tables and specs | Keyword + table-aware chunks | exact values 和 labels 很重要 |
+| Legal documents | Hybrid + parent-child + metadata filtering | 精确 wording 和上下文都重要 |
+| Codebase documentation | Keyword + hybrid | function names 和 concepts 都重要 |
+| Meeting notes | Dense + multi-query | 自然语言和模糊表达占主导 |
+
+不要只根据 vector database 支持什么来选 retrieval strategy。应该根据 data 本身的行为来选。
+
+## 根据 Query Type 选择
+
+同一个 data source 也可能因为问题不同而需要不同策略。
+
+| User Query Type | 更适合的策略 |
+| --- | --- |
+| "What does this mean?" | Dense retrieval |
+| "Find E1042" | Keyword retrieval |
+| "Can I refund after downloading materials?" | Hybrid retrieval |
+| "Only search LearnPro billing docs" | Metadata-filtered retrieval |
+| "I forgot the exact name, but it was about billing cancellation" | Multi-query retrieval |
+| "Give the full policy rule" | Parent-child retrieval |
+| "Search API docs, not support tickets" | Query routing |
+
+query type 很重要，因为 user intent 会改变 retrieval target。
+
+有些问题需要语义。有些需要精确匹配。有些需要 scope control。有些需要小命中后返回更大上下文。
+
+## 可复用例子：Refund Policy Retrieval
+
+继续使用前几篇 log 的 refund policy 例子。
+
+问题：
+
+```text
+Can I cancel my monthly subscription and get a refund for this month?
+```
+
+dense retriever 可能会因为意思接近而找到 subscription section。
+
+keyword retriever 可能会匹配这些词：
+
+```text
+monthly subscription
+refund
+current active month
+```
+
+metadata filter 可以把搜索限制在：
+
+```json
+{
+  "product": "LearnPro Online Course Platform",
+  "domain": "billing",
+  "document_type": "policy",
+  "language": "en"
+}
+```
+
+hybrid retriever 可以结合 semantic meaning 和 exact words。
+
+parent-child retriever 可能会命中这个 child chunk：
+
+```text
+No refund for current active month.
+```
+
+然后返回完整 parent section：
+
+```text
+Section: Subscription Cancellation
+
+Monthly subscriptions can be cancelled at any time. The cancellation will stop the next billing cycle, but it does not refund the current active month.
+```
+
+对这份文档来说，一个比较好的 retrieval pipeline 是：
+
+```text
+Metadata filter
+→ Hybrid retrieval
+→ Parent-child expansion
+→ Reranking
+→ LLM context selection
+```
+
+这比只使用 vector search 更强，因为这个问题同时包含 semantic intent 和 exact policy terms。
+
+## 实用起点建议
+
+多数 RAG 系统应该从简单但可测试的 retrieval baseline 开始。
+
+合理路线：
+
+| 阶段 | Retrieval Setup |
+| --- | --- |
+| First prototype | Dense retrieval |
+| Technical or support docs | Hybrid retrieval |
+| Multi-product knowledge base | Metadata-filtered hybrid retrieval |
+| Policy or legal docs | Hybrid + parent-child retrieval |
+| Large mixed knowledge base | Query routing + hybrid retrieval |
+| Vague user questions | Add multi-query retrieval |
+
+不要一开始就加入所有策略。
+
+先做 baseline，评估 retrieval hit rate，检查失败案例，然后加入能修复最常见 failure mode 的策略。
+
+## 常见错误
+
+Retrieval 错误经常被误判成 LLM 问题。
+
+| 错误 | 结果 |
+| --- | --- |
+| error codes 只用 dense retrieval | 可能漏掉 exact matches |
+| 没有 metadata filtering | 可能检索到错误 product 或 version |
+| metadata 过度过滤 | 正确 chunks 可能被排除 |
+| technical docs 没有 keyword search | API names 和 IDs 可能检索不好 |
+| multi-query 没有控制 | generated queries 可能增加噪音 |
+| parent-child 没有稳定 linking | correct child 可能返回 wrong parent |
+| 没有 retrieval evaluation | 团队无法证明 retrieval 有没有变好 |
+
+最重要的 debugging question 是：
+
+```text
+LLM 回答之前，正确 chunk 有没有出现在 top-k？
+```
+
+如果答案是没有，问题就在 retrieval、indexing、chunking 或 metadata，不应该优先怪 prompt。
+
+## 核心原则
+
+Retrieval strategy 应该根据 data type 和 query type 选择。
+
+Dense retrieval 适合语义。Keyword retrieval 适合精确术语。Hybrid retrieval 同时处理两者。Metadata filtering 控制范围。Multi-query 提高 recall。Parent-child retrieval 平衡精准搜索和更大回答上下文。Query routing 避免一个 retriever 处理所有数据类型。
+
+实用规则很简单：选择能减少你的数据最常见 “找不到正确证据” 方式的 retrieval strategy。
+
+</Lang>
