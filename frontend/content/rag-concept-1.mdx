@@ -2,8 +2,8 @@
 title: "Step By Step Build Your RAG: System Overview"
 category: "Software Development"
 createdAt: "2026-06-06"
-summary: "A short overview of the full RAG build path, from indexing to retrieval, reranking, LLM design, and debugging."
-readTime: "7 min read"
+summary: "A short overview of the full RAG build path, from why RAG is needed to indexing, retrieval, reranking, LLM design, and debugging."
+readTime: "8 min read"
 tags:
   - "RAG"
   - "Backend"
@@ -20,9 +20,13 @@ series:
 
 Building a RAG system is not only about connecting documents to an LLM. A useful RAG system is a pipeline. Each stage decides whether the final answer has enough context, enough accuracy, and enough traceability.
 
-This first log is only a walkthrough. It introduces the full path: indexing, retrieval, reranking, LLM model design, and debugging system design. Each part can be expanded into its own deeper log later.
+This first log is only a walkthrough. It introduces why RAG exists, then goes through the full path: indexing, retrieval, reranking, LLM model design, and debugging system design. Each part can be expanded into its own deeper log later.
 
 ## Short Answer
+
+RAG means Retrieval-Augmented Generation.
+
+The simple idea is this: before the LLM answers, the system first retrieves relevant information from external knowledge sources. Then the retrieved context is passed into the LLM so the model can generate an answer based on that evidence.
 
 A RAG system usually has five major stages:
 
@@ -49,6 +53,36 @@ A RAG system usually has five major stages:
 </CardGrid>
 
 The main idea is simple: RAG quality is not decided by one model. It is decided by the whole path from document preparation to final answer generation.
+
+## Why RAG Is Needed
+
+Modern LLMs are powerful because they are trained on large volumes of data using sophisticated training techniques. They can reason, summarize, rewrite, classify, and generate useful answers across many domains.
+
+But an LLM still has two important limits.
+
+| Limit | What It Means |
+| --- | --- |
+| Static knowledge | The model only knows what was available during training |
+| Missing private data | The model does not automatically know your company docs, database records, tickets, or internal knowledge |
+| Knowledge cutoff | The model may not know the latest events, latest product changes, or recent documentation updates |
+| No built-in source trace | The model may answer fluently without showing where the answer came from |
+
+This is why a powerful model alone is not always enough for production applications.
+
+For example, if the user asks about a new company policy, a recent release note, a private support ticket, or a document that was created after the model was trained, the LLM may not have that information. It may answer with outdated knowledge, incomplete knowledge, or a confident guess.
+
+RAG addresses this problem by retrieving relevant context from external knowledge sources before generation. These sources can be documents, databases, websites, tickets, logs, manuals, or internal notes.
+
+The LLM is still important, but its job changes. Instead of answering only from memory, it answers with retrieved evidence.
+
+| Without RAG | With RAG |
+| --- | --- |
+| The model answers from static training knowledge | The model answers with retrieved external context |
+| Latest or private information may be missing | Latest or private information can be provided at runtime |
+| Harder to verify the answer | Easier to attach citations and source references |
+| Wrong answers may look fluent | Answers can be grounded against real documents |
+
+RAG is essential when an LLM-based application needs to be accurate, current, and traceable. Without RAG, the model may still sound good, but the answer can be incomplete, outdated, or unsupported.
 
 ## Step 1: Indexing Fundamentals
 
@@ -274,6 +308,8 @@ If indexing is broken, retrieval will be weak. If retrieval is weak, reranking h
 
 RAG should be built as a traceable pipeline, not as one large LLM call.
 
+The reason is practical: LLMs are strong, but their internal knowledge is static and incomplete for many real applications. RAG gives the model external, runtime knowledge so the answer can be more accurate, current, and verifiable.
+
 Indexing decides what knowledge exists. Retrieval decides what evidence is found. Reranking decides what evidence is prioritized. LLM design decides how evidence becomes an answer. Debugging decides whether the team can locate failure precisely.
 
 The practical rule is simple: every stage should produce something inspectable. If you cannot inspect it, you cannot debug it.
@@ -284,9 +320,13 @@ The practical rule is simple: every stage should produce something inspectable. 
 
 构建 RAG 系统不是把文件接到 LLM 后面就结束。真正可用的 RAG 是一条管线。每一个阶段都会影响最后回答有没有足够上下文、有没有准确性、以及能不能追踪问题来源。
 
-这一篇只是总览，不深入展开。它先把完整路径讲清楚：索引、检索、重排、LLM 模型设计，以及调试系统设计。后面的 log 再逐个模块深入。
+这一篇只是总览，不深入展开。它先解释为什么需要 RAG，再把完整路径讲清楚：索引、检索、重排、LLM 模型设计，以及调试系统设计。后面的 log 再逐个模块深入。
 
 ## 简短答案
+
+RAG 的全称是 Retrieval-Augmented Generation，也就是“检索增强生成”。
+
+简单讲，就是在 LLM 回答之前，系统先从外部知识库里检索相关资料。然后把这些资料作为 context 交给 LLM，让模型基于证据生成答案。
 
 一个 RAG 系统一般可以拆成五个主要阶段：
 
@@ -313,6 +353,36 @@ The practical rule is simple: every stage should produce something inspectable. 
 </CardGrid>
 
 核心想法很简单：RAG 的质量不是由单一模型决定的，而是由从文档处理到最终回答的整条链路决定的。
+
+## 为什么需要 RAG
+
+现在的 LLM 很强，因为它们使用大量数据和复杂训练技术训练出来。它们可以推理、总结、改写、分类，也可以在很多领域生成有用答案。
+
+但 LLM 还是有几个关键限制。
+
+| 限制 | 意思 |
+| --- | --- |
+| 静态知识 | 模型主要知道训练时见过的内容 |
+| 缺少私有数据 | 模型不会自动知道你的公司文档、数据库记录、ticket 或内部知识 |
+| 知识截止 | 模型可能不知道最新事件、最新产品变化或最近更新的文档 |
+| 缺少天然来源追踪 | 模型可以写得很流畅，但不一定说明答案来自哪里 |
+
+所以，强大的模型本身不等于生产环境里一定可靠。
+
+比如用户问的是新的公司政策、最近的 release note、私有客服 ticket，或者模型训练之后才创建的文档，LLM 本身可能根本没有这些信息。它可能会用旧知识回答，也可能给出不完整答案，甚至给出一个看起来很自信的猜测。
+
+RAG 解决的就是这个问题。它会在生成答案之前，先从外部知识源检索相关 context。这些知识源可以是文档、数据库、网站、ticket、日志、产品手册，或者内部笔记。
+
+LLM 依然很重要，但它的角色变了。它不是只靠记忆回答，而是基于检索到的证据回答。
+
+| 没有 RAG | 有 RAG |
+| --- | --- |
+| 模型依赖训练时的静态知识 | 模型可以使用运行时检索到的外部 context |
+| 最新或私有信息可能缺失 | 最新或私有信息可以在回答前提供 |
+| 答案比较难验证 | 可以附上引用和来源 |
+| 错误答案也可能写得很流畅 | 答案可以被真实文档约束 |
+
+当一个 LLM 应用需要准确、及时、可追踪时，RAG 就很重要。否则，模型单独回答时可能看起来不错，但内容可能过时、不完整，或者没有证据支撑。
 
 ## 第一步：索引基础
 
@@ -537,6 +607,8 @@ RAG 系统一开始就应该设计调试能力。
 ## 核心原则
 
 RAG 应该被当成一条可追踪的管线，而不是一次大型 LLM 调用。
+
+原因很实际：LLM 很强，但它的内部知识是静态的，而且对很多真实应用来说并不完整。RAG 可以在运行时给模型补充外部知识，让答案更准确、更新，也更容易验证。
 
 索引决定系统拥有哪些知识。检索决定系统找到哪些证据。重排决定哪些证据优先。LLM 设计决定证据如何变成答案。调试系统决定团队能不能准确定位失败点。
 
