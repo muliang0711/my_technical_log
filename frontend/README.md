@@ -26,6 +26,25 @@ The filename becomes the URL slug. For example:
 
 `content/long-polling-vs-short-polling.mdx` becomes `/posts/long-polling-vs-short-polling`.
 
+### Flow Diagrams
+
+Use `FlowGraph` when a log needs a simple process or architecture flow. Keep diagrams short: 3-6 nodes usually reads best.
+
+```mdx
+<FlowGraph
+  title="RAG Answer Flow"
+  nodes={[
+    { id: "question", label: "User Question", detail: "What the user asks" },
+    { id: "retrieve", label: "Retrieve Context", detail: "Find relevant chunks" },
+    { id: "answer", label: "Generate Answer", detail: "Use context to respond" }
+  ]}
+  edges={[
+    ["question", "retrieve"],
+    ["retrieve", "answer"]
+  ]}
+/>
+```
+
 ## Run
 
 ```bash

@@ -838,6 +838,109 @@ input {
   margin-top: 6px;
 }
 
+.flow-graph {
+  margin: 28px 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #1c1916;
+  overflow: hidden;
+}
+
+.flow-graph figcaption {
+  border-bottom: 1px solid var(--border-soft);
+  padding: 14px 18px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.flow-graph__canvas {
+  overflow-x: auto;
+  padding: 18px;
+}
+
+.flow-graph__nodes {
+  min-width: 560px;
+  display: grid;
+  grid-template-columns: repeat(var(--flow-node-count, 3), minmax(150px, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.flow-graph__node {
+  min-height: 106px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-card);
+  padding: 14px;
+  position: relative;
+}
+
+.flow-graph__node:not(:last-child)::after {
+  content: "->";
+  position: absolute;
+  right: -18px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--faint);
+  font-weight: 700;
+  z-index: 1;
+}
+
+.flow-graph__index {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #f4f0e8;
+  color: #171411;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.flow-graph__label {
+  display: block;
+  margin-top: 12px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.flow-graph__node small,
+.flow-graph__edges small {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.flow-graph__edges {
+  min-width: 560px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.flow-graph__edges li {
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  background: var(--bg-soft);
+  padding: 8px 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .mdx-code-tabs {
   margin: 24px 0;
   border: 1px solid var(--border);

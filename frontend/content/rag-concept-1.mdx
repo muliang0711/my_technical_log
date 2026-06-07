@@ -52,6 +52,23 @@ A RAG system usually has five major stages:
   </InfoCard>
 </CardGrid>
 
+<FlowGraph
+  title="RAG Pipeline Overview"
+  nodes={[
+    { id: "indexing", label: "Indexing", detail: "Prepare searchable knowledge units" },
+    { id: "retrieval", label: "Retrieval", detail: "Return candidate chunks" },
+    { id: "reranking", label: "Reranking", detail: "Move useful chunks to the top" },
+    { id: "llm", label: "LLM Design", detail: "Generate a grounded answer" },
+    { id: "debugging", label: "Debugging", detail: "Trace failures across the pipeline" }
+  ]}
+  edges={[
+    ["indexing", "retrieval"],
+    ["retrieval", "reranking"],
+    ["reranking", "llm"],
+    ["llm", "debugging"]
+  ]}
+/>
+
 The main idea is simple: RAG quality is not decided by one model. It is decided by the whole path from document preparation to final answer generation.
 
 ## Why RAG Is Needed
