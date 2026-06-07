@@ -5,21 +5,23 @@ import PostMeta from "./PostMeta";
 
 export default function PostCard({ post, wide = false }) {
   return (
-    <article className={`card post-card ${wide ? "post-card--wide" : ""}`}>
+    <Link
+      className={`card post-card ${wide ? "post-card--wide" : ""}`}
+      href={`/posts/${post.slug}`}
+      aria-label={`Read ${post.title}`}
+    >
       <div className="meta-line">
         <CategoryBadge category={post.category} />
-        <SeriesBadge series={post.series} />
+        <SeriesBadge series={post.series} linked={false} />
         <PostMeta post={post} />
       </div>
-      <h3>
-        <Link href={`/posts/${post.slug}`}>{post.title}</Link>
-      </h3>
+      <h3>{post.title}</h3>
       <p>{post.summary}</p>
       <div className="tag-row">
         {post.tags.map((tag) => (
           <span className="tag" key={tag}>{tag}</span>
         ))}
       </div>
-    </article>
+    </Link>
   );
 }

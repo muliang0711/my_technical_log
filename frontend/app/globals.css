@@ -394,8 +394,15 @@ input {
 }
 
 .post-card {
+  display: block;
   min-height: 190px;
   padding: 24px;
+}
+
+.post-card:focus-visible {
+  border-color: var(--accent);
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
 }
 
 .post-card--wide {
