@@ -30,7 +30,11 @@ export default function CategoryCard({ category, focus = false }) {
   );
 
   return (
-    <Link href={`/categories/${category.slug}`} aria-label={`View ${category.name} posts`}>
+    <Link
+      className="category-card-link"
+      href={`/categories/${category.slug}`}
+      aria-label={`View ${category.name} posts`}
+    >
       {card}
     </Link>
   );

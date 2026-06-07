@@ -369,6 +369,7 @@ input {
 
 .grid {
   display: grid;
+  align-items: stretch;
   gap: 20px;
 }
 
@@ -626,11 +627,17 @@ input {
 }
 
 .category-card {
+  height: 100%;
   min-height: 136px;
   padding: 24px 28px;
   display: grid;
   grid-template-columns: 46px 1fr;
   gap: 18px;
+}
+
+.category-card-link {
+  display: block;
+  height: 100%;
 }
 
 .category-icon {
