@@ -1,0 +1,865 @@
+---
+title: "Cloudflare Deployment Models: Pages, Workers, and Static Export"
+category: "Software Development"
+createdAt: "2026-06-07"
+summary: "A practical note on why Cloudflare Pages, Workers, OpenNext, and Next.js static export feel confusing during deployment."
+readTime: "8 min read"
+tags:
+  - "Cloudflare"
+  - "Next.js"
+  - "Frontend"
+  - "Deployment"
+featured: false
+series:
+  title: "Problem I Meet"
+  slug: "problem-i-meet"
+  order: 1
+---
+
+<Lang lang="en">
+
+Cloudflare deployment can feel confusing because Pages, Workers, Wrangler, OpenNext, and Next.js static export appear close to each other in the UI and documentation. They are related, but they are not the same deployment model. The first mistake is treating them as one thing.
+
+## Short Answer
+
+For a simple personal blog built with Next.js and static content, the cleanest deployment path is usually:
+
+```text
+Next.js output: "export"
+→ npm run build
+→ out/
+→ Cloudflare Pages deploys out/
+```
+
+This means the site is deployed as static files.
+
+You usually do not need:
+
+```text
+OpenNext
+Workers SSR
+@opennextjs/cloudflare
+wrangler deploy
+```
+
+Those tools are useful when you want to run server-side logic on Cloudflare's runtime. A static blog does not need that by default.
+
+## Why This Feels Confusing
+
+Cloudflare puts several related products under a similar deployment experience:
+
+| Name | What It Mainly Does | Mental Model |
+| --- | --- | --- |
+| Cloudflare Pages | Hosts frontend sites and static output folders | Deploy files |
+| Cloudflare Workers | Runs JavaScript or TypeScript at the edge | Run code |
+| Wrangler | CLI for Cloudflare Workers and related resources | Deploy and configure runtime |
+| OpenNext | Adapter for running Next.js server features outside Vercel | Convert Next.js server output |
+| Next.js static export | Generates plain HTML, CSS, and JS files | Remove the server |
+
+The confusion happens because a Next.js project can be deployed in more than one way.
+
+The same framework can produce either:
+
+```text
+static files
+```
+
+or:
+
+```text
+server-rendered application output
+```
+
+Cloudflare needs to know which model you are using.
+
+## Pages Means Deploy Files
+
+Cloudflare Pages is mainly for frontend websites.
+
+Typical examples:
+
+```text
+React static site
+Vite app
+Next.js static export
+Astro static site
+personal blog
+documentation site
+landing page
+```
+
+The core flow is simple:
+
+```text
+GitHub repo
+→ build command runs
+→ static output folder is generated
+→ Cloudflare deploys that folder to its CDN
+```
+
+So Pages mostly cares about two things:
+
+| Question | Example Answer |
+| --- | --- |
+| What is the build command? | `npm run build` |
+| What is the build output folder? | `out` |
+| Where is the frontend project? | `frontend` |
+
+For a Next.js static export project, the important output is the `out` folder.
+
+Run this from the `frontend` directory to generate the static export output and check whether the site can build locally:
+
+```bash
+npm run build
+```
+
+After the build succeeds, the expected result is usually:
+
+```text
+frontend/
+  out/
+    index.html
+    _next/
+    posts/
+```
+
+This is the folder Cloudflare Pages should deploy.
+
+## Workers Means Run Code
+
+Cloudflare Workers is different. Workers is not mainly about uploading an `out` folder. It is about running code when a request reaches Cloudflare.
+
+The request flow looks like this:
+
+```text
+request arrives
+→ Cloudflare executes Worker code
+→ Worker returns a response
+```
+
+Workers are useful for:
+
+```text
+API server
+edge middleware
+authentication logic
+proxy
+webhook handling
+SSR rendering
+rate limit
+cron job
+KV / R2 / D1 / Durable Objects integration
+```
+
+Workers care about different things:
+
+| Question | Example |
+| --- | --- |
+| What is the Worker entry file? | `src/index.ts` |
+| What does `wrangler.toml` configure? | routes, bindings, compatibility date |
+| What resources are bound? | KV, D1, R2, Durable Objects |
+| What code runs per request? | fetch handler, middleware, API logic |
+
+That is why Workers feel more like backend or edge application deployment.
+
+The short distinction is:
+
+```text
+Pages = deploy files
+Workers = run code
+```
+
+## Static Export Means No Server Runtime
+
+In Next.js, this config changes the deployment model:
+
+```javascript
+const nextConfig = {
+  output: "export",
+};
+
+export default nextConfig;
+```
+
+`output: "export"` tells Next.js to generate static files during build time.
+
+The output is similar to:
+
+```text
+out/
+  index.html
+  about.html
+  posts/example.html
+  _next/static/...
+```
+
+The request flow becomes:
+
+```text
+user opens /posts/rag
+→ Cloudflare CDN returns a generated HTML file
+→ no server render
+→ no Node.js server
+→ no OpenNext runtime
+```
+
+This is why static export fits a blog well.
+
+A blog usually has pages that can be known at build time:
+
+```text
+home page
+about page
+post list
+individual markdown or MDX posts
+images
+static assets
+```
+
+The benefit is operational simplicity:
+
+<CardGrid columns={2}>
+  <InfoCard title="Fast">
+    Static files can be served directly from the CDN without waiting for server-side rendering.
+  </InfoCard>
+
+  <InfoCard title="Cheap">
+    There is no application server running for every request.
+  </InfoCard>
+
+  <InfoCard title="Stable">
+    Fewer runtime components means fewer deployment and compatibility failures.
+  </InfoCard>
+
+  <InfoCard title="Simple">
+    The main deployment question becomes whether the build output folder is correct.
+  </InfoCard>
+</CardGrid>
+
+## SSR Means Request-Time Rendering
+
+SSR means Server-Side Rendering.
+
+With SSR, the page is not fully generated ahead of time. The server generates the HTML when the user makes a request.
+
+The flow looks like this:
+
+```text
+user opens /dashboard
+→ request reaches a server or Worker
+→ server checks identity or queries data
+→ server renders HTML
+→ response returns to the user
+```
+
+SSR is useful when the page depends on request-time information:
+
+```text
+logged-in user dashboard
+admin page
+profile page
+user orders
+permission-based content
+real-time database result
+cookie or session logic
+```
+
+For example, `/dashboard` may show different data to different users. That page should not be exported as one static HTML file shared by everyone.
+
+The trade-off is that SSR needs a runtime.
+
+On Cloudflare, that usually means using Cloudflare Workers with an adapter such as OpenNext.
+
+## Static Export vs SSR
+
+| Area | Static Export | SSR |
+| --- | --- | --- |
+| Generated at | Build time | Request time |
+| Output | HTML, CSS, JS files | Server/runtime output |
+| Runtime needed | No | Yes |
+| Good for | Blog, docs, portfolio | Dashboard, SaaS, admin |
+| Reads cookies on server | No | Yes |
+| Server-side database query | No | Yes |
+| Deployment complexity | Lower | Higher |
+| Cloudflare target | Pages | Workers or Pages with Functions/runtime support |
+
+Static export is not weaker by default. It is just optimized for a different type of site.
+
+For a content-heavy blog, static export is often the better engineering choice because the page content does not need to change per request.
+
+## Why OpenNext Appears
+
+Next.js was originally optimized heavily around Vercel's deployment platform. When you want to run Next.js server features on Cloudflare Workers, the output needs to be adapted.
+
+That is where tools such as these appear:
+
+```text
+OpenNext
+@opennextjs/cloudflare
+next-on-pages
+```
+
+Their job is not to deploy a plain static export folder.
+
+Their job is closer to:
+
+```text
+take Next.js server output
+→ adapt it to Cloudflare runtime
+→ deploy it as Worker-compatible code
+```
+
+So these two directions should not be mixed:
+
+```text
+output: "export"
+```
+
+means:
+
+```text
+I do not want a server. Give me static files.
+```
+
+OpenNext means:
+
+```text
+I need Next.js server behavior to run on Cloudflare.
+```
+
+When these two mental models are mixed, deployment errors become hard to understand because the platform may think you are deploying a full-stack SSR app while your code is actually prepared as a static site.
+
+## The Practical Decision Rule
+
+Use this decision rule for a blog project:
+
+| Requirement | Recommended Direction |
+| --- | --- |
+| Static posts from markdown or MDX | Next.js static export + Cloudflare Pages |
+| Personal blog without login | Next.js static export + Cloudflare Pages |
+| Landing page | Cloudflare Pages |
+| Documentation site | Cloudflare Pages |
+| API endpoints | Workers API or Pages Functions |
+| User login and dashboard | SSR or separate backend |
+| Admin panel with database writes | SSR, Workers, or separate backend |
+| Request-time personalization | SSR with runtime |
+
+For the current blog case, the recommended setup is:
+
+```text
+Next.js static export
+Cloudflare Pages
+Build command: npm run build
+Output directory: out
+```
+
+If the project root on Cloudflare is the repository root but the app is inside `frontend`, then the output directory may need to be configured as:
+
+```text
+frontend/out
+```
+
+If Cloudflare runs the build from the `frontend` directory, then the output directory should usually be:
+
+```text
+out
+```
+
+## Common Mistakes
+
+<CardGrid columns={2}>
+  <InfoCard title="Mistake 1: Using Workers for a Static Blog">
+    A static blog does not need a Worker runtime unless it has backend logic.
+  </InfoCard>
+
+  <InfoCard title="Mistake 2: Mixing OpenNext with Static Export">
+    OpenNext is for server-capable Next.js deployment. Static export is for removing the server.
+  </InfoCard>
+
+  <InfoCard title="Mistake 3: Wrong Output Folder">
+    If the build creates `frontend/out` but Cloudflare deploys `out` from the repository root, the deployment may fail or deploy nothing useful.
+  </InfoCard>
+
+  <InfoCard title="Mistake 4: Using the Wrong Build Command">
+    `npx run build` is not the normal command. For npm projects, the usual build command is `npm run build`.
+  </InfoCard>
+</CardGrid>
+
+The safest debugging sequence is to first prove the local build works, then map the local output folder to Cloudflare's output directory setting.
+
+Run this from the same directory Cloudflare uses as the build root to confirm the build script exists and runs correctly:
+
+```bash
+npm run build
+```
+
+If the build succeeds locally, inspect where the output folder is created:
+
+```text
+out/
+```
+
+or:
+
+```text
+frontend/out/
+```
+
+That exact folder is the one Pages should deploy.
+
+## The Main Principle
+
+Do not start by choosing a Cloudflare button. Start by identifying the deployment model.
+
+For a static blog, the model is:
+
+```text
+build once
+generate files
+deploy files
+serve from CDN
+```
+
+For a full-stack or SSR app, the model is:
+
+```text
+receive request
+run server code
+generate response
+return response
+```
+
+Most of the confusion disappears once the distinction is clear:
+
+```text
+Pages deploys files.
+Workers run code.
+Static export removes the server.
+OpenNext helps when the server is still needed.
+```
+
+</Lang>
+
+<Lang lang="zh">
+
+Cloudflare 部署会让人觉得很乱，是因为 Pages、Workers、Wrangler、OpenNext、Next.js static export 在 UI 和文档里经常一起出现。它们有关联，但不是同一种部署模型。真正的问题不是某个工具很难，而是你一开始没有区分清楚自己到底是在“部署文件”还是“运行代码”。
+
+## 简短答案
+
+如果你的项目是一个简单的个人 blog，使用 Next.js 加 markdown / MDX 静态文章，那么最清晰的部署路线通常是：
+
+```text
+Next.js output: "export"
+→ npm run build
+→ out/
+→ Cloudflare Pages 部署 out/
+```
+
+这代表你的站点是静态文件部署。
+
+你通常不需要：
+
+```text
+OpenNext
+Workers SSR
+@opennextjs/cloudflare
+wrangler deploy
+```
+
+这些工具更适合你要在 Cloudflare runtime 上运行 server-side logic 的情况。单纯的静态 blog 默认不需要它们。
+
+## 为什么这件事很 Confusing
+
+Cloudflare 把几个相关产品放在相似的部署流程里：
+
+| 名称 | 主要用途 | 心智模型 |
+| --- | --- | --- |
+| Cloudflare Pages | 部署前端网站和静态输出目录 | Deploy files |
+| Cloudflare Workers | 在 edge 执行 JavaScript / TypeScript | Run code |
+| Wrangler | Cloudflare 的 CLI，用来部署和配置 runtime | Deploy and configure runtime |
+| OpenNext | 让 Next.js server output 能跑在非 Vercel 平台 | Convert Next.js server output |
+| Next.js static export | 生成纯 HTML、CSS、JS 文件 | Remove the server |
+
+混乱的原因是：同一个 Next.js 项目可以有不同的部署方式。
+
+它可以变成：
+
+```text
+静态文件
+```
+
+也可以变成：
+
+```text
+需要 server runtime 的 SSR 应用
+```
+
+Cloudflare 需要知道你是哪一种。
+
+## Pages 是 Deploy Files
+
+Cloudflare Pages 主要是部署前端网站。
+
+常见场景包括：
+
+```text
+React static site
+Vite app
+Next.js static export
+Astro static site
+个人 blog
+文档站
+landing page
+```
+
+它的核心流程很简单：
+
+```text
+GitHub repo
+→ 执行 build command
+→ 生成静态输出目录
+→ Cloudflare 把这个目录部署到 CDN
+```
+
+所以 Pages 最关心的是：
+
+| 问题 | 例子 |
+| --- | --- |
+| build command 是什么？ | `npm run build` |
+| build output folder 是什么？ | `out` |
+| frontend 项目在哪里？ | `frontend` |
+
+对于 Next.js static export 项目，关键输出目录就是 `out`。
+
+在 `frontend` 目录运行这个命令，用来生成静态输出并确认本地 build 能不能成功：
+
+```bash
+npm run build
+```
+
+成功后，常见结果会像这样：
+
+```text
+frontend/
+  out/
+    index.html
+    _next/
+    posts/
+```
+
+这个 `out` 目录才是 Cloudflare Pages 应该部署的东西。
+
+## Workers 是 Run Code
+
+Cloudflare Workers 是另一回事。Workers 不是单纯上传一个 `out` 文件夹，而是在 request 到达 Cloudflare 时执行代码。
+
+它的请求流程是：
+
+```text
+request arrives
+→ Cloudflare 执行 Worker code
+→ Worker 返回 response
+```
+
+Workers 适合这些场景：
+
+```text
+API server
+edge middleware
+authentication logic
+proxy
+webhook handling
+SSR rendering
+rate limit
+cron job
+KV / R2 / D1 / Durable Objects integration
+```
+
+Workers 关心的问题也不一样：
+
+| 问题 | 例子 |
+| --- | --- |
+| Worker entry file 是什么？ | `src/index.ts` |
+| `wrangler.toml` 配什么？ | routes, bindings, compatibility date |
+| 绑定哪些资源？ | KV, D1, R2, Durable Objects |
+| 每个 request 执行什么代码？ | fetch handler, middleware, API logic |
+
+所以 Workers 更像 backend 或 edge application 的部署方式。
+
+最简单的区别就是：
+
+```text
+Pages = deploy files
+Workers = run code
+```
+
+## Static Export 代表不需要 Server Runtime
+
+在 Next.js 里，这个配置会改变部署模型：
+
+```javascript
+const nextConfig = {
+  output: "export",
+};
+
+export default nextConfig;
+```
+
+`output: "export"` 的意思是：Next.js 在 build time 直接生成静态文件。
+
+输出结果通常类似：
+
+```text
+out/
+  index.html
+  about.html
+  posts/example.html
+  _next/static/...
+```
+
+请求流程会变成：
+
+```text
+用户打开 /posts/rag
+→ Cloudflare CDN 直接返回生成好的 HTML
+→ 没有 server render
+→ 没有 Node.js server
+→ 没有 OpenNext runtime
+```
+
+所以 static export 很适合 blog。
+
+一个 blog 的页面通常可以在 build time 就确定：
+
+```text
+首页
+about 页面
+文章列表
+单篇 markdown / MDX 文章
+图片
+静态资源
+```
+
+它的好处是部署简单：
+
+<CardGrid columns={2}>
+  <InfoCard title="快">
+    静态文件可以直接从 CDN 返回，不需要等待 server-side rendering。
+  </InfoCard>
+
+  <InfoCard title="便宜">
+    每个请求不需要启动或执行应用服务器逻辑。
+  </InfoCard>
+
+  <InfoCard title="稳定">
+    runtime 组件越少，部署和兼容性问题通常越少。
+  </InfoCard>
+
+  <InfoCard title="简单">
+    主要部署问题变成：build 是否成功，以及 output folder 是否配置正确。
+  </InfoCard>
+</CardGrid>
+
+## SSR 是 Request-Time Rendering
+
+SSR 是 Server-Side Rendering。
+
+意思是页面不是全部提前生成，而是在用户请求时由 server 生成 HTML。
+
+流程像这样：
+
+```text
+用户打开 /dashboard
+→ request 打到 server 或 Worker
+→ server 检查身份或查询数据
+→ server render HTML
+→ response 返回给用户
+```
+
+SSR 适合页面依赖 request-time information 的情况：
+
+```text
+登录后的 dashboard
+admin 页面
+profile 页面
+user orders
+基于权限显示的内容
+实时数据库结果
+cookie 或 session 逻辑
+```
+
+例如 `/dashboard` 每个用户看到的数据可能不同。这种页面就不适合导出成一个所有人共享的静态 HTML。
+
+代价是 SSR 需要 runtime。
+
+在 Cloudflare 上，这通常意味着你要使用 Cloudflare Workers，再搭配类似 OpenNext 的 adapter。
+
+## Static Export vs SSR
+
+| 项目 | Static Export | SSR |
+| --- | --- | --- |
+| 生成时间 | Build time | Request time |
+| 输出结果 | HTML、CSS、JS 文件 | Server/runtime output |
+| 是否需要 runtime | 不需要 | 需要 |
+| 适合场景 | Blog、docs、portfolio | Dashboard、SaaS、admin |
+| server-side 读取 cookie | 不可以 | 可以 |
+| server-side 查询数据库 | 不可以 | 可以 |
+| 部署复杂度 | 较低 | 较高 |
+| Cloudflare 目标 | Pages | Workers 或带 runtime 的 Pages |
+
+Static export 不是比较弱。它只是适合另一种类型的网站。
+
+对于内容型 blog 来说，static export 反而经常是更好的工程选择，因为文章内容不需要每次 request 都重新生成。
+
+## 为什么会出现 OpenNext
+
+Next.js 原本很大程度上围绕 Vercel 的部署环境优化。如果你想把 Next.js 的 server features 跑在 Cloudflare Workers 上，就需要把 Next.js 的 server output 转成 Cloudflare runtime 能理解的结构。
+
+这就是这些工具出现的原因：
+
+```text
+OpenNext
+@opennextjs/cloudflare
+next-on-pages
+```
+
+它们的目标不是部署一个普通的 static export 文件夹。
+
+它们更像是在做这件事：
+
+```text
+拿到 Next.js server output
+→ 转换成 Cloudflare runtime 可运行的结构
+→ 部署成 Worker-compatible code
+```
+
+所以这两个方向不要混在一起：
+
+```text
+output: "export"
+```
+
+代表：
+
+```text
+我不要 server，给我静态文件。
+```
+
+OpenNext 代表：
+
+```text
+我需要 Next.js server behavior 跑在 Cloudflare 上。
+```
+
+如果把这两个模型混在一起，错误就会很难看懂。Cloudflare 可能以为你在部署 full-stack SSR app，但你的代码其实是准备作为 static site 输出。
+
+## 实际选择规则
+
+对于 blog 项目，可以直接用这个判断表：
+
+| 需求 | 推荐方向 |
+| --- | --- |
+| markdown / MDX 静态文章 | Next.js static export + Cloudflare Pages |
+| 没有登录的个人 blog | Next.js static export + Cloudflare Pages |
+| Landing page | Cloudflare Pages |
+| 文档站 | Cloudflare Pages |
+| API endpoints | Workers API 或 Pages Functions |
+| 用户登录和 dashboard | SSR 或独立 backend |
+| 有数据库写入的 admin panel | SSR、Workers 或独立 backend |
+| request-time personalization | SSR with runtime |
+
+对于当前 blog，更合理的配置是：
+
+```text
+Next.js static export
+Cloudflare Pages
+Build command: npm run build
+Output directory: out
+```
+
+如果 Cloudflare 的 project root 是 repository root，但你的 app 在 `frontend` 里面，那么 output directory 可能要设成：
+
+```text
+frontend/out
+```
+
+如果 Cloudflare 是从 `frontend` 目录开始 build，那么 output directory 通常就是：
+
+```text
+out
+```
+
+## 常见错误
+
+<CardGrid columns={2}>
+  <InfoCard title="错误 1：静态 Blog 却用 Workers">
+    纯静态 blog 不需要 Worker runtime，除非你有 backend logic。
+  </InfoCard>
+
+  <InfoCard title="错误 2：把 OpenNext 和 Static Export 混用">
+    OpenNext 是为了部署带 server behavior 的 Next.js。Static export 是为了移除 server。
+  </InfoCard>
+
+  <InfoCard title="错误 3：Output Folder 配错">
+    如果 build 生成的是 `frontend/out`，但 Cloudflare 从 repo root 部署 `out`，那就可能部署失败或部署到错误内容。
+  </InfoCard>
+
+  <InfoCard title="错误 4：Build Command 写错">
+    `npx run build` 不是正常的 npm build 命令。npm 项目通常应该用 `npm run build`。
+  </InfoCard>
+</CardGrid>
+
+最安全的 debug 顺序是：先证明本地 build 成功，再把本地实际生成的 output folder 对应到 Cloudflare Pages 的 output directory 设置。
+
+在 Cloudflare 实际使用的 build root 目录运行这个命令，用来确认 build script 存在并且能正常执行：
+
+```bash
+npm run build
+```
+
+如果本地 build 成功，再检查输出目录到底在哪里：
+
+```text
+out/
+```
+
+或：
+
+```text
+frontend/out/
+```
+
+Cloudflare Pages 应该部署的就是这个准确目录。
+
+## 核心原则
+
+不要一开始就选 Cloudflare 某个按钮。先判断你的部署模型。
+
+如果是 static blog，模型是：
+
+```text
+build once
+generate files
+deploy files
+serve from CDN
+```
+
+如果是 full-stack 或 SSR app，模型是：
+
+```text
+receive request
+run server code
+generate response
+return response
+```
+
+大部分 confusion 都来自没有先分清楚这件事：
+
+```text
+Pages deploys files.
+Workers run code.
+Static export removes the server.
+OpenNext helps when the server is still needed.
+```
+
+</Lang>
