@@ -848,8 +848,6 @@ Why this is wrong:
 - YAML indentation or JSX formatting may be transformed.
 ````
 
-Also add this small rule near **AI Task**:
-
 ```md
 When the user asks for a log, the final answer must contain only:
 
