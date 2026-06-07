@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { FlowGraph } from "./FlowGraph.js";
 
 describe("FlowGraph", () => {
-  it("renders a titled flow diagram with ordered nodes and edges", () => {
+  it("renders a titled flow diagram with ordered nodes and no edge summary list", () => {
     const html = renderToStaticMarkup(
       React.createElement(FlowGraph, {
         title: "RAG Answer Flow",
@@ -13,10 +13,6 @@ describe("FlowGraph", () => {
           { id: "question", label: "User Question" },
           { id: "retrieve", label: "Retrieve Context" },
           { id: "answer", label: "Generate Answer" }
-        ],
-        edges: [
-          ["question", "retrieve"],
-          ["retrieve", "answer"]
         ]
       })
     );
@@ -27,19 +23,19 @@ describe("FlowGraph", () => {
     assert.match(html, />User Question</);
     assert.match(html, />Retrieve Context</);
     assert.match(html, />Generate Answer</);
-    assert.match(html, /User Question to Retrieve Context/);
-    assert.match(html, /Retrieve Context to Generate Answer/);
+    assert.doesNotMatch(html, /flow-graph__edges/);
+    assert.doesNotMatch(html, /User Question to Retrieve Context/);
   });
 
-  it("renders readable fallback text for edges with missing node ids", () => {
+  it("does not render a separate edge summary area", () => {
     const html = renderToStaticMarkup(
       React.createElement(FlowGraph, {
-        nodes: [{ id: "client", label: "Client" }],
-        edges: [["client", "server"]]
+        nodes: [{ id: "client", label: "Client" }]
       })
     );
 
-    assert.match(html, /Client to server/);
+    assert.match(html, />Client</);
+    assert.doesNotMatch(html, /flow-graph__edges/);
   });
 
   it("renders nothing when no nodes are supplied", () => {

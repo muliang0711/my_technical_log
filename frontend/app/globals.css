@@ -911,34 +911,13 @@ input {
   line-height: 1.35;
 }
 
-.flow-graph__node small,
-.flow-graph__edges small {
+.flow-graph__node small {
   display: block;
   margin-top: 6px;
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
   line-height: 1.4;
-}
-
-.flow-graph__edges {
-  min-width: 560px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 14px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.flow-graph__edges li {
-  border: 1px solid var(--border-soft);
-  border-radius: 4px;
-  background: var(--bg-soft);
-  padding: 8px 10px;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
 }
 
 .mdx-code-tabs {

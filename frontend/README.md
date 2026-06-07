@@ -38,10 +38,6 @@ Use `FlowGraph` when a log needs a simple process or architecture flow. Keep dia
     { id: "retrieve", label: "Retrieve Context", detail: "Find relevant chunks" },
     { id: "answer", label: "Generate Answer", detail: "Use context to respond" }
   ]}
-  edges={[
-    ["question", "retrieve"],
-    ["retrieve", "answer"]
-  ]}
 />
 ```
 

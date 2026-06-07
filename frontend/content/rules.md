@@ -502,6 +502,7 @@ Available MDX components:
 - `<InfoCard title="...">...</InfoCard>`
 - `<CodeTabs>...</CodeTabs>`
 - `<CodeTab label="Java">...</CodeTab>`
+- `<FlowGraph title="..." nodes={[...]}/>`
 
 Preferred strategy pattern:
 
@@ -533,6 +534,36 @@ Card rules:
 - Keep card bodies to one to three sentences.
 - Do not put large code blocks inside cards.
 - Use cards for summaries; put deep explanation in normal sections.
+
+## Flow Graph Style
+
+Use `FlowGraph` when a section needs to explain a process, request path, architecture flow, lifecycle, or concept sequence.
+
+Preferred pattern:
+
+````mdx
+<FlowGraph
+  title="RAG Pipeline Overview"
+  nodes={[
+    { id: "indexing", label: "Indexing", detail: "Prepare searchable knowledge units" },
+    { id: "retrieval", label: "Retrieval", detail: "Return candidate chunks" },
+    { id: "reranking", label: "Reranking", detail: "Move useful chunks to the top" },
+    { id: "llm", label: "LLM Design", detail: "Generate a grounded answer" }
+  ]}
+/>
+````
+
+Flow graph rules:
+
+- Use `FlowGraph` only when the visual sequence makes the explanation clearer than a paragraph or table.
+- Keep graphs short. Three to six nodes is the normal range.
+- Keep each `label` short.
+- Keep each `detail` to one compact sentence fragment.
+- Use stable lowercase `id` values.
+- The rendered graph should stay clean: do not add manual text below it that repeats every edge such as `A to B`.
+- If the English version uses a `FlowGraph`, the Chinese version must include a matching Chinese `FlowGraph`.
+- Translate `title`, `label`, and `detail` naturally in the Chinese graph.
+- Keep the English and Chinese graph structure equivalent unless the Chinese explanation genuinely needs a clearer local phrasing.
 
 ## Readability Rules
 
@@ -716,6 +747,7 @@ Before returning the MDX, verify:
 - Multi-language examples use `CodeTabs` when tabs save space.
 - Tables are short and readable.
 - Cards use only `CardGrid` and `InfoCard`.
+- Flow diagrams use `FlowGraph`, and every English `FlowGraph` has a matching Chinese `FlowGraph`.
 - The article ends with a practical takeaway.
 
 ## Strict MDX Response Format Rule
@@ -827,5 +859,3 @@ When the user asks for a log, the final answer must contain only:
 Do not return the article as rendered Markdown.
 Do not use canvas, document blocks, rich text blocks, or split code blocks.
 ```
-
-Your current rule is correct, but not strict enough. The key missing part is: **force four-backtick outer fence and define the exact final response shape.**

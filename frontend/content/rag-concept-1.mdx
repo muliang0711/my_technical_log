@@ -61,12 +61,6 @@ A RAG system usually has five major stages:
     { id: "llm", label: "LLM Design", detail: "Generate a grounded answer" },
     { id: "debugging", label: "Debugging", detail: "Trace failures across the pipeline" }
   ]}
-  edges={[
-    ["indexing", "retrieval"],
-    ["retrieval", "reranking"],
-    ["reranking", "llm"],
-    ["llm", "debugging"]
-  ]}
 />
 
 The main idea is simple: RAG quality is not decided by one model. It is decided by the whole path from document preparation to final answer generation.
@@ -368,6 +362,17 @@ RAG 的全称是 Retrieval-Augmented Generation，也就是“检索增强生成
     判断错误发生在哪里：原始资料、切片、检索、重排，还是生成。
   </InfoCard>
 </CardGrid>
+
+<FlowGraph
+  title="RAG 管线总览"
+  nodes={[
+    { id: "indexing", label: "索引", detail: "整理成可搜索的知识单元" },
+    { id: "retrieval", label: "检索", detail: "找出候选 chunk" },
+    { id: "reranking", label: "重排", detail: "把有用内容排到前面" },
+    { id: "llm", label: "LLM 设计", detail: "生成有证据支撑的回答" },
+    { id: "debugging", label: "调试", detail: "追踪管线中的失败位置" }
+  ]}
+/>
 
 核心想法很简单：RAG 的质量不是由单一模型决定的，而是由从文档处理到最终回答的整条链路决定的。
 
