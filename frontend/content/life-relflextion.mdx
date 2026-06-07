@@ -1,0 +1,449 @@
+---
+title: "The Delayed Effect of Learning"
+category: "Learning"
+createdAt: "2026-06-07"
+summary: "Learning large subjects often feels stuck at first because the useful progress appears only after the first messy exposure."
+readTime: "7 min read"
+tags:
+  - "Learning"
+  - "Projects"
+  - "Skill Building"
+  - "Reflection"
+featured: false
+---
+
+<Lang lang="en">
+
+Some subjects do not reward you immediately. System design, Web3, infrastructure, distributed systems, AI engineering, and large project development often feel slow in the first few months. The first pass is usually confusing. The first project is usually ugly. But when you return to the same subject later, the second and third attempts can become much smoother because the first struggle already built hidden structure in your head.
+
+## Short Answer
+
+Learning has delay.
+
+When I first touch a large subject, I often feel stuck for months. I read the words, watch the videos, follow the examples, and still cannot connect everything into a clear system.
+
+But after leaving it for a while and coming back, the same topic becomes easier. The progress feels sudden, but it is not sudden. The first round already created rough mental hooks.
+
+The same thing happens in projects.
+
+The first build is usually trash. The architecture is messy. The naming is weak. The flow is unclear. The AI output also feels hard to control because I do not know what to ask for.
+
+But the second build is different. I know the shape of the problem. I know what files matter. I know what logic should be separated. I can ask AI for larger changes because my understanding is no longer empty.
+
+The real lesson is simple: the first attempt is not wasted. It is often the cost of building the map.
+
+## Why Big Subjects Feel Impossible at First
+
+Small topics give fast feedback. You learn one syntax rule, write one function, and immediately see whether it works.
+
+Large subjects do not behave like that.
+
+System design is not only about one diagram. It involves API boundaries, database design, caching, queues, scaling, failure handling, observability, and trade-offs.
+
+Web3 is not only about writing a smart contract. It involves wallets, signatures, chains, gas, contract state, security assumptions, indexing, RPC providers, and user flow.
+
+A serious project is also not only about writing code. It involves folder structure, data model, deployment, debugging, product behavior, and maintenance.
+
+At the beginning, the problem is not effort. The problem is missing context.
+
+| Stage | What It Feels Like | What Is Actually Happening |
+| --- | --- | --- |
+| First exposure | Everything feels disconnected | The brain is collecting raw parts |
+| First build | The project feels messy | The real constraints become visible |
+| First failure | It feels like no progress | Wrong assumptions are being removed |
+| Second exposure | Concepts start connecting | Hidden structure becomes usable |
+| Second build | Implementation becomes smoother | The mental model is now stronger |
+
+The first few months are often not about visible output. They are about collecting enough fragments so the next round has something to connect.
+
+## The First Build Is Supposed to Be Bad
+
+The first build of a serious project is rarely clean.
+
+It usually has these problems:
+
+- unclear folder structure
+- duplicated logic
+- weak naming
+- wrong abstraction
+- too much logic in one place
+- confused data flow
+- unclear deployment assumptions
+- poor debugging visibility
+
+This does not mean the project failed. It means the first build exposed what the project actually needs.
+
+Before building, many things look simple:
+
+```text
+Just build the app.
+Just connect the API.
+Just store the data.
+Just deploy it.
+Just ask AI to generate it.
+```
+
+After building once, the hidden details become visible:
+
+```text
+Where should this logic live?
+How should the data be shaped?
+What should be static?
+What should be dynamic?
+What should be stored?
+What should be derived?
+How do I debug this when it breaks?
+```
+
+The first build is not only an implementation attempt. It is also a discovery process.
+
+## Why Relearning Feels So Much Faster
+
+Relearning feels fast because the second round is not starting from zero.
+
+Even if the first round felt bad, it created memory in several forms:
+
+<CardGrid columns={2}>
+  <InfoCard title="Concept Memory">
+    The words are no longer completely foreign. Even if the concept was unclear before, the second exposure has a place to attach.
+  </InfoCard>
+
+  <InfoCard title="Error Memory">
+    The previous mistakes become warning signals. You can recognize bad structure faster because you have already suffered from it.
+  </InfoCard>
+
+  <InfoCard title="Pattern Memory">
+    Similar shapes start appearing across different topics. APIs, queues, indexes, metadata, prompts, and deployment flows stop looking isolated.
+  </InfoCard>
+
+  <InfoCard title="Question Memory">
+    The second time, you ask better questions. Better questions make AI, documentation, and debugging much more useful.
+  </InfoCard>
+</CardGrid>
+
+This is why a subject can feel impossible in month one, then become much clearer in month four or five.
+
+The improvement is not magic. It is delayed compounding.
+
+## How This Applies to AI-Assisted Projects
+
+AI makes the second and third build look even faster.
+
+But this does not mean AI removed the need to learn. It means AI becomes more powerful when the human already understands the project shape.
+
+In the first build, the prompt is usually vague:
+
+```text
+Build me a blog website.
+Build me a RAG system.
+Build me a deployment flow.
+```
+
+The AI may produce code, but the result is often hard to control because the direction is not precise.
+
+In the second build, the prompt becomes sharper:
+
+```text
+Use static export for the frontend.
+Separate content parsing from rendering.
+Keep the post normalization logic isolated.
+Add validation for frontmatter.
+Make the deployment target Cloudflare Pages.
+Do not add a backend yet.
+```
+
+That difference is not just prompt quality. It is project understanding.
+
+AI one-shot works better when the human already knows the target architecture, constraints, and failure points. The better the mental model, the more useful the AI becomes.
+
+## A Better Way to Judge Progress
+
+Bad early progress should not be judged only by output quality.
+
+For large subjects, progress can appear in weaker but important signals:
+
+| Signal | Why It Matters |
+| --- | --- |
+| You know what confused you | The problem is becoming more specific |
+| You can name the failure point | Debugging is becoming possible |
+| You can compare two approaches | Your mental model is forming |
+| You can reject bad AI output | You are no longer blindly accepting results |
+| You rebuild faster | The first attempt created reusable understanding |
+
+A bad first project is not useless if it gives you better judgment.
+
+The useful question is not:
+
+```text
+Was the first build good?
+```
+
+The better question is:
+
+```text
+Did the first build make the second build easier?
+```
+
+If the answer is yes, then the first build already did its job.
+
+## How to Be Patient Without Being Passive
+
+Patience does not mean waiting and doing nothing.
+
+Good patience means accepting that the first attempt may be messy while still extracting signal from it.
+
+A practical workflow:
+
+<CardGrid columns={2}>
+  <InfoCard title="1. Finish a Rough Version">
+    Do not try to make the first build perfect. Finish enough of it to expose the real problems.
+  </InfoCard>
+
+  <InfoCard title="2. Record the Friction">
+    Write down where you got stuck: architecture, data shape, deployment, debugging, prompt design, or missing concepts.
+  </InfoCard>
+
+  <InfoCard title="3. Rebuild with Constraints">
+    The second build should not repeat the first blindly. Use the first build's pain points as design constraints.
+  </InfoCard>
+
+  <InfoCard title="4. Compare Attempts">
+    Check whether the second version is easier to explain, modify, debug, and deploy. That is the real progress signal.
+  </InfoCard>
+</CardGrid>
+
+The goal is not to feel good during the first attempt. The goal is to make the next attempt less random.
+
+## The Main Principle
+
+Learning large subjects has delayed output.
+
+The first few months may feel stuck because the brain is still building the internal map. The first project may look bad because it is exposing the real shape of the problem.
+
+But when you come back later, the same subject can suddenly become much easier. The second and third builds become smoother because the first failure already paid part of the cost.
+
+So be patient, but not passive.
+
+Build the rough version. Notice the failure points. Relearn the subject. Rebuild with better constraints.
+
+The first attempt is often not the proof that you are bad. It is the raw material that makes the second attempt strong.
+
+</Lang>
+
+<Lang lang="zh">
+
+有些学习不会马上给你回报。像系统设计、Web3、基础设施、分布式系统、AI 工程、复杂项目开发这种大主题，前几个月经常会让人觉得卡住。第一次学的时候很乱，第一次做项目的时候也很烂。但当你过一段时间重新回来学，第二次、第三次反而会突然顺很多，因为第一次挣扎其实已经在脑子里建了一些隐藏结构。
+
+## 简短答案
+
+学习有延后性。
+
+我以前学一些很大的主题，比如 system design、Web3，或者其他复杂技术时，前几个月经常会觉得完全卡住。字看得懂，视频也看了，例子也跟了，但就是无法把它们连成一个完整系统。
+
+可是过一段时间重新学，同样的东西会突然变清楚。这个进步看起来像突然发生，但其实不是。第一次学习已经在脑子里留下了粗糙的连接点。
+
+做项目也是一样。
+
+第一个版本通常很烂。架构乱，命名乱，数据流不清楚，debug 很痛苦。就算用 AI，也很难一次做对，因为自己还不知道应该怎么描述需求。
+
+但第二次 build 会完全不一样。你已经知道问题大概长什么样，知道哪些文件重要，知道哪些逻辑应该拆开，也知道应该怎样让 AI 帮你改得更准确。
+
+真正的重点是：第一次不是浪费。第一次通常是在帮你建立地图。
+
+## 为什么大主题一开始会很难
+
+小主题的反馈很快。你学一个语法，写一个函数，马上就知道对不对。
+
+但大主题不是这样。
+
+系统设计不是画一张图而已。它包含 API 边界、数据库设计、缓存、队列、扩展性、故障处理、监控、取舍。
+
+Web3 也不是写一个 smart contract 而已。它包含 wallet、signature、chain、gas、contract state、安全假设、indexing、RPC provider、用户流程。
+
+复杂项目也不是写代码而已。它包含目录结构、数据模型、部署、debug、产品行为、长期维护。
+
+一开始的问题通常不是不努力，而是上下文不够。
+
+| 阶段 | 体感 | 实际发生的事情 |
+| --- | --- | --- |
+| 第一次接触 | 所有东西都很散 | 大脑正在收集原始碎片 |
+| 第一次 build | 项目很乱 | 真正的限制条件开始暴露 |
+| 第一次失败 | 感觉没有进步 | 错误假设正在被排除 |
+| 第二次学习 | 概念开始连接 | 隐藏结构开始可用 |
+| 第二次 build | 实现变顺 | 心智模型变强了 |
+
+前几个月很多时候不是在产出漂亮结果，而是在收集足够多的碎片，让下一轮学习有东西可以连接。
+
+## 第一个版本本来就很容易烂
+
+复杂项目的第一个版本很少是干净的。
+
+它通常会出现这些问题：
+
+- 目录结构不清楚
+- 逻辑重复
+- 命名很弱
+- 抽象层切错
+- 太多逻辑挤在同一个地方
+- 数据流不清楚
+- 部署假设不明确
+- debug 信息不足
+
+这不一定代表项目失败。它更多是在暴露这个项目真正需要什么。
+
+还没开始做之前，很多事情看起来都很简单：
+
+```text
+就做一个 app。
+就接一个 API。
+就把数据存起来。
+就部署上去。
+就叫 AI 生成。
+```
+
+做过一次之后，隐藏细节才会出现：
+
+```text
+这段逻辑应该放哪里？
+数据应该怎么设计？
+什么东西应该是静态的？
+什么东西应该是动态的？
+什么东西要存？
+什么东西可以计算出来？
+坏掉的时候我要怎么 debug？
+```
+
+所以第一次 build 不只是实现。它也是一种探索。
+
+## 为什么重新学习会突然变快
+
+重新学习之所以快，是因为第二次不是从零开始。
+
+即使第一次学得很痛苦，它还是留下了几种记忆：
+
+<CardGrid columns={2}>
+  <InfoCard title="概念记忆">
+    那些词已经不再完全陌生。就算之前没有真正理解，第二次接触时也有地方可以挂上去。
+  </InfoCard>
+
+  <InfoCard title="错误记忆">
+    以前踩过的坑会变成警告信号。你会更快看出哪些结构会让项目变难维护。
+  </InfoCard>
+
+  <InfoCard title="模式记忆">
+    不同主题之间开始出现相似形状。API、queue、index、metadata、prompt、deployment 不再像孤立的东西。
+  </InfoCard>
+
+  <InfoCard title="问题记忆">
+    第二次你会问出更好的问题。问题变准确后，AI、文档和 debug 才会真正变好用。
+  </InfoCard>
+</CardGrid>
+
+这就是为什么一个主题可能第一个月完全看不懂，但第四个月、第五个月突然变清楚。
+
+这不是玄学。它是延后的复利。
+
+## 这件事如何影响 AI 项目开发
+
+AI 会让第二次、第三次 build 看起来更快。
+
+但这不代表 AI 让学习变得不重要。更准确地说，是当人已经理解项目结构后，AI 才会变得更强。
+
+第一次 build 时，prompt 通常很模糊：
+
+```text
+帮我做一个 blog website。
+帮我做一个 RAG system。
+帮我做一个 deployment flow。
+```
+
+AI 可能会生成代码，但结果经常不好控制，因为方向本身还不够清楚。
+
+第二次 build 时，prompt 会变得更准确：
+
+```text
+Frontend 使用 static export。
+把 content parsing 和 rendering 分开。
+post normalization logic 保持独立。
+给 frontmatter 加 validation。
+部署目标是 Cloudflare Pages。
+暂时不要加 backend。
+```
+
+这个差异不只是 prompt 写得更好，而是你对项目本身理解更深了。
+
+AI one-shot 更容易成功，是因为人已经知道目标架构、限制条件和失败点。你的心智模型越清楚，AI 的输出越容易被你控制。
+
+## 应该怎样判断进步
+
+早期进步不能只用成品质量来判断。
+
+对于大主题，很多进步会先出现在比较隐性的地方：
+
+| 信号 | 为什么重要 |
+| --- | --- |
+| 你知道自己卡在哪里 | 问题开始具体化 |
+| 你能说出 failure point | debug 开始变可能 |
+| 你能比较两种方案 | 心智模型正在形成 |
+| 你能拒绝烂的 AI 输出 | 你不再盲目接受结果 |
+| 你 rebuild 更快 | 第一次尝试已经产生复用价值 |
+
+一个很烂的第一个项目，如果能让你第二次判断力变强，那它就不是无效的。
+
+不该只问：
+
+```text
+第一个版本好不好？
+```
+
+更应该问：
+
+```text
+第一个版本有没有让第二个版本更容易？
+```
+
+如果答案是有，那第一次 build 已经完成它的任务。
+
+## 如何保持耐心但不躺平
+
+耐心不是等着不动。
+
+好的耐心是接受第一次会很乱，同时从里面提取有效信号。
+
+一个实用流程：
+
+<CardGrid columns={2}>
+  <InfoCard title="1. 先完成粗糙版本">
+    不要试图让第一个版本完美。先做到足够完整，让真实问题暴露出来。
+  </InfoCard>
+
+  <InfoCard title="2. 记录卡点">
+    写下自己卡在哪里：架构、数据结构、部署、debug、prompt 设计，还是概念缺失。
+  </InfoCard>
+
+  <InfoCard title="3. 带着限制重做">
+    第二次不要盲目重复第一次。要把第一次的痛点变成第二次的设计限制。
+  </InfoCard>
+
+  <InfoCard title="4. 比较两次尝试">
+    看第二个版本是不是更容易解释、更容易修改、更容易 debug、更容易部署。这才是真正的进步信号。
+  </InfoCard>
+</CardGrid>
+
+目标不是让第一次过程舒服。目标是让下一次不再那么随机。
+
+## 核心原则
+
+大主题的学习成果通常有延后性。
+
+前几个月觉得卡住，是因为大脑还在建立内部地图。第一个项目很烂，是因为它正在暴露问题真正的形状。
+
+但当你之后重新回来，东西可能会突然变容易。第二次、第三次 build 会更顺，是因为第一次失败已经替你付了一部分成本。
+
+所以要有耐心，但不要被动。
+
+先做粗糙版本。观察 failure point。重新学习。带着更清楚的限制重新 build。
+
+第一次尝试很多时候不是证明你不行，而是在为第二次尝试提供原材料。
+
+</Lang>

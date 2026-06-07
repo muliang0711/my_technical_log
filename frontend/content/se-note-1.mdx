@@ -1,0 +1,658 @@
+---
+title: "OpenNext as a Platform Adapter"
+category: "Software Development"
+createdAt: "2026-06-07"
+summary: "A practical explanation of how OpenNext converts Next.js build output into deployable packages for non-Vercel platforms."
+readTime: "8 min read"
+tags:
+  - "Frontend"
+  - "Next.js"
+  - "Cloudflare"
+  - "Deployment"
+featured: false
+series:
+  title: "Engineering Field Notes"
+  slug: "engineering-field-notes"
+  order: 1
+---
+
+<Lang lang="en">
+
+OpenNext is easier to understand when we stop treating it as a replacement for Next.js. It does not rewrite the application. It reads the output produced by `next build`, separates the parts that need different runtime behavior, and adapts them to platforms such as AWS, Cloudflare, or Netlify.
+
+## Short Answer
+
+OpenNext is a build-output adapter for Next.js.
+
+The flow is roughly:
+
+```text
+Next.js source code
+        ↓
+next build
+        ↓
+.next build output
+        ↓
+OpenNext analyzes the output
+        ↓
+static assets / server functions / image function / middleware / cache
+        ↓
+platform adapter
+        ↓
+AWS, Cloudflare, Netlify, or another supported runtime
+```
+
+The important idea is this:
+
+OpenNext does not make your Java backend deployable. It does not manage your whole system. It only helps the Next.js application run on platforms that are not Vercel.
+
+If your project has this shape:
+
+```text
+project/
+  frontend/   Next.js app
+  backend/    Java, Go, Node.js, or another backend service
+```
+
+OpenNext mainly applies to the `frontend/` folder. The backend still needs its own deployment model.
+
+## What OpenNext Actually Does
+
+A normal Next.js build produces a `.next` directory.
+
+That directory contains many different kinds of output:
+
+- static JavaScript and CSS bundles
+- route metadata
+- server-rendered page code
+- React Server Component output
+- API route or route handler code
+- middleware output
+- cache and ISR-related metadata
+- internal manifest files used by the Next.js runtime
+
+The problem is that these pieces do not all belong in the same place.
+
+Some files should be served directly from a CDN. Some code needs a server runtime. Some code should run at the edge. Some cache behavior needs platform storage.
+
+OpenNext reads the Next.js build output and separates those responsibilities.
+
+## The Main Split
+
+The clearest mental model is to divide a Next.js deployment into several runtime zones.
+
+| Part | What It Contains | Where It Usually Runs |
+| --- | --- | --- |
+| Static assets | JS, CSS, images, public files | CDN or static hosting |
+| Server functions | SSR pages, route handlers, Server Actions | Lambda, Worker, or function runtime |
+| Image optimization | `/_next/image` requests | Dedicated function or adapter |
+| ISR and cache | regenerated pages and cached responses | Platform storage or cache API |
+| Middleware | request interception and rewrites | edge runtime or fallback layer |
+
+This split matters because a Next.js app is not always a pure static website.
+
+A static export can be hosted like normal files. A dynamic Next.js app needs server behavior. OpenNext exists because the dynamic parts need to be translated into the target platform's execution model.
+
+## Why Platform Adapters Are Needed
+
+Different cloud platforms receive and execute requests in different formats.
+
+AWS Lambda has its own event shape. Cloudflare Workers use the standard `fetch(request, env, ctx)` model. Netlify has its own function and edge function conventions.
+
+Next.js expects requests to pass through the Next.js server runtime. The platform expects code to match its own function signature.
+
+OpenNext sits between these two worlds.
+
+For example, on AWS, the adapter conceptually does this:
+
+```typescript
+export async function handler(event) {
+  const request = convertAwsEventToNextRequest(event);
+  const response = await runNextServerLogic(request);
+  return convertNextResponseToAwsResponse(response);
+}
+```
+
+On Cloudflare Workers, the shape is closer to this:
+
+```typescript
+export default {
+  async fetch(request, env, ctx) {
+    return runNextServerLogic(request, env, ctx);
+  }
+}
+```
+
+The exact implementation is more complex, but the principle is simple:
+
+```text
+platform request
+        ↓
+adapter
+        ↓
+Next.js server logic
+        ↓
+adapter
+        ↓
+platform response
+```
+
+OpenNext is therefore not only a packager. It is also a compatibility layer between Next.js runtime assumptions and cloud platform runtime rules.
+
+## Static Export vs OpenNext
+
+Static export and OpenNext solve different problems.
+
+A static export turns your app into plain files. There is no server runtime after deployment.
+
+OpenNext keeps the server-capable parts of Next.js working by packaging them into platform functions.
+
+| Feature | Static Export | OpenNext |
+| --- | --- | --- |
+| Static pages | Supported | Supported |
+| CDN assets | Supported | Supported |
+| SSR | Not supported | Supported if platform adapter supports it |
+| API routes | Not supported after export | Supported as server functions |
+| Route handlers | Not supported after export | Supported as server functions |
+| Server Actions | Not a static-only feature | Depends on adapter support |
+| ISR | Not the normal static-export model | Depends on cache adapter |
+| Middleware | Limited or unavailable | Depends on platform support |
+
+This is why the deployment decision should start from the app's behavior.
+
+If the app is only a blog, documentation site, landing page, or static portfolio, static export is usually enough.
+
+If the app uses SSR, API routes, route handlers, Server Actions, dynamic authentication, middleware, or ISR, then static export is no longer the same category of deployment.
+
+## What Happens to the Backend
+
+OpenNext only adapts the Next.js application.
+
+If the backend is Java, Go, Python, Laravel, Spring Boot, Express, or another separate service, OpenNext does not deploy that backend for you.
+
+The architecture remains separate:
+
+```text
+Browser
+  ↓
+Next.js frontend deployed with OpenNext
+  ↓
+HTTP request
+  ↓
+External backend API
+  ↓
+Database or internal services
+```
+
+This means the frontend and backend still have separate concerns.
+
+<CardGrid columns={2}>
+  <InfoCard title="Frontend deployment">
+    OpenNext packages the Next.js app into assets, functions, middleware, and cache adapters for the selected platform.
+  </InfoCard>
+
+  <InfoCard title="Backend deployment">
+    A Java or separate backend service still needs its own runtime, container, VM, serverless function, or managed platform.
+  </InfoCard>
+
+  <InfoCard title="API boundary">
+    The frontend calls the backend through HTTP, RPC, GraphQL, or another API contract. OpenNext does not remove that boundary.
+  </InfoCard>
+
+  <InfoCard title="Shared domain setup">
+    You can route `/api/*` to the backend and the rest to Next.js, but that is routing configuration, not OpenNext replacing the backend.
+  </InfoCard>
+</CardGrid>
+
+The confusion usually comes from the word "server" in Next.js.
+
+Next.js can have server-side logic, but that does not mean it automatically replaces every backend service in a system.
+
+## Can Next.js Also Be the Backend
+
+Yes, a Next.js project can contain backend-like behavior.
+
+For example:
+
+- API routes
+- route handlers
+- Server Actions
+- authentication callbacks
+- form submission handlers
+- database queries from server-side code
+- lightweight business logic
+
+In that case, OpenNext can help deploy those backend-like parts because they are part of the Next.js build output.
+
+A simple full-stack Next.js project may look like this:
+
+```text
+next-app/
+  app/
+    page.tsx
+    api/
+      orders/
+        route.ts
+  lib/
+    db.ts
+```
+
+In this structure, the route handler under `app/api/orders/route.ts` is part of the Next.js app. OpenNext can package it as a server function if the target adapter supports that behavior.
+
+But a separate backend is different:
+
+```text
+frontend/
+  Next.js app
+
+backend/
+  Java Spring Boot service
+```
+
+The Java service is outside the Next.js build output, so OpenNext does not know how to transform it.
+
+## How to Inspect the Boundary
+
+Run this from the Next.js project directory to produce the standard Next.js build output that OpenNext later reads:
+
+```bash
+npm run build
+```
+
+After the build, inspect the project output to confirm whether the application is static-only or contains server runtime artifacts:
+
+```bash
+ls -la .next
+```
+
+The presence of `.next` does not automatically mean the app requires a server. The useful question is what kind of routes and features the app uses.
+
+For example:
+
+| App Behavior | Deployment Direction |
+| --- | --- |
+| Only static pages and public assets | Static hosting or static export |
+| Uses SSR pages | Needs server runtime |
+| Uses route handlers or API routes | Needs server runtime |
+| Uses image optimization | Needs image function or alternative image strategy |
+| Uses ISR | Needs cache/storage adapter |
+| Uses middleware | Needs edge/runtime support |
+
+The boundary should be decided by feature usage, not by the framework name.
+
+## Practical Decision Rule
+
+Use this decision rule when choosing between Cloudflare Pages static hosting, OpenNext, Vercel, or a separate backend deployment.
+
+<CardGrid columns={2}>
+  <InfoCard title="Use static hosting">
+    Use this when the Next.js app can be exported into plain files and does not need SSR, API routes, Server Actions, middleware, or ISR.
+  </InfoCard>
+
+  <InfoCard title="Use OpenNext">
+    Use this when the app needs Next.js server features but you want to deploy outside Vercel on a supported platform.
+  </InfoCard>
+
+  <InfoCard title="Use Vercel">
+    Use this when you want the most direct Next.js platform support and do not need to control the cloud runtime yourself.
+  </InfoCard>
+
+  <InfoCard title="Use a separate backend">
+    Use this when business logic, data processing, authentication, queues, or domain services are better owned by a dedicated backend.
+  </InfoCard>
+</CardGrid>
+
+A common production setup is not one tool only.
+
+It may look like this:
+
+```text
+Next.js frontend
+  → deployed with OpenNext on Cloudflare
+
+Java backend
+  → deployed on container platform, VM, Railway, Render, ECS, or Kubernetes
+
+Database
+  → managed PostgreSQL, MySQL, MongoDB, or another data store
+```
+
+OpenNext solves the Next.js deployment translation problem. It does not solve the whole system deployment problem.
+
+## The Main Principle
+
+OpenNext should be understood as a compiler-like adapter for Next.js build output.
+
+It takes the `.next` result, separates static files from runtime code, connects runtime code to platform-specific function handlers, and maps cache, image, and middleware behavior onto the target cloud.
+
+The clean mental model is:
+
+```text
+OpenNext helps the Next.js app leave Vercel.
+
+It does not deploy every backend in your system.
+```
+
+When the frontend and backend are split, OpenNext belongs to the frontend deployment path. The backend remains a separate service with its own runtime, scaling model, routing, database access, and deployment pipeline.
+
+</Lang>
+
+<Lang lang="zh">
+
+理解 OpenNext 时，最重要的是不要把它当成 Next.js 的替代品。它不是重写你的应用，而是读取 `next build` 之后生成的构建产物，把里面不同运行性质的部分拆出来，再适配到 AWS、Cloudflare、Netlify 这类非 Vercel 平台。
+
+## 简短答案
+
+OpenNext 本质上是 Next.js 构建产物的部署适配层。
+
+大概流程是：
+
+```text
+Next.js source code
+        ↓
+next build
+        ↓
+.next build output
+        ↓
+OpenNext 分析构建产物
+        ↓
+static assets / server functions / image function / middleware / cache
+        ↓
+platform adapter
+        ↓
+AWS、Cloudflare、Netlify 或其他支持的平台
+```
+
+重点是：
+
+OpenNext 不会帮你部署 Java backend。它也不是整个系统的部署工具。它主要处理 Next.js 应用本身。
+
+如果你的项目结构是这样：
+
+```text
+project/
+  frontend/   Next.js app
+  backend/    Java、Go、Node.js 或其他 backend service
+```
+
+OpenNext 主要作用在 `frontend/`。backend 还是要用自己的部署方式。
+
+## OpenNext 实际在做什么
+
+正常的 Next.js build 会生成一个 `.next` 目录。
+
+这个目录里面不只有静态文件，它还可能包含很多不同类型的内容：
+
+- 静态 JavaScript 和 CSS bundle
+- route metadata
+- server-rendered page code
+- React Server Component output
+- API route 或 route handler code
+- middleware output
+- cache 和 ISR 相关 metadata
+- Next.js runtime 需要读取的 internal manifest
+
+问题是，这些东西不应该全部用同一种方式部署。
+
+有些文件适合直接丢到 CDN。有些代码需要 server runtime。有些逻辑应该在 edge 执行。有些缓存行为需要平台提供 storage 或 cache API。
+
+OpenNext 做的事情，就是读取 Next.js 的 build output，然后根据这些职责把应用拆开。
+
+## 主要拆分方式
+
+比较清楚的理解方式，是把一个 Next.js 部署拆成几个 runtime zone。
+
+| 部分 | 包含什么 | 通常跑在哪里 |
+| --- | --- | --- |
+| Static assets | JS、CSS、图片、public files | CDN 或 static hosting |
+| Server functions | SSR pages、route handlers、Server Actions | Lambda、Worker 或 function runtime |
+| Image optimization | `/_next/image` 请求 | 独立 function 或 adapter |
+| ISR and cache | 重新生成的页面和 cached response | 平台 storage 或 cache API |
+| Middleware | request interception、rewrite、redirect | edge runtime 或 fallback layer |
+
+这个拆分很重要，因为 Next.js 应用不一定是纯静态网站。
+
+如果是 static export，它可以像普通 HTML、JS、CSS 文件一样部署。  
+但如果应用有动态 server 行为，就需要 runtime。OpenNext 解决的正是这些动态部分如何在非 Vercel 平台运行的问题。
+
+## 为什么需要 Platform Adapter
+
+不同云平台接收 request 和执行 function 的方式不一样。
+
+AWS Lambda 有自己的 event 格式。Cloudflare Workers 使用 `fetch(request, env, ctx)` 模型。Netlify 也有自己的 function 和 edge function 规则。
+
+但是 Next.js server runtime 期待的是 Next.js 能理解的 request / response 流程。
+
+所以中间需要一个 adapter。
+
+在 AWS 上，概念上可能像这样：
+
+```typescript
+export async function handler(event) {
+  const request = convertAwsEventToNextRequest(event);
+  const response = await runNextServerLogic(request);
+  return convertNextResponseToAwsResponse(response);
+}
+```
+
+在 Cloudflare Workers 上，形状会更接近这样：
+
+```typescript
+export default {
+  async fetch(request, env, ctx) {
+    return runNextServerLogic(request, env, ctx);
+  }
+}
+```
+
+真实实现会更复杂，但核心原则很简单：
+
+```text
+platform request
+        ↓
+adapter
+        ↓
+Next.js server logic
+        ↓
+adapter
+        ↓
+platform response
+```
+
+所以 OpenNext 不只是打包工具。它也是 Next.js runtime 和云平台 runtime 之间的兼容层。
+
+## Static Export 和 OpenNext 的区别
+
+Static export 和 OpenNext 解决的是两类问题。
+
+Static export 是把应用导出成纯静态文件。部署后没有 server runtime。
+
+OpenNext 是保留 Next.js 的 server 能力，然后把这些 server 部分包装成目标平台可以执行的 function。
+
+| Feature | Static Export | OpenNext |
+| --- | --- | --- |
+| Static pages | 支持 | 支持 |
+| CDN assets | 支持 | 支持 |
+| SSR | 不支持 | adapter 支持时可用 |
+| API routes | export 后不支持 | 可作为 server function |
+| Route handlers | export 后不支持 | 可作为 server function |
+| Server Actions | 不是纯静态能力 | 取决于 adapter 支持 |
+| ISR | 不是普通 static export 模型 | 取决于 cache adapter |
+| Middleware | 有限制或不可用 | 取决于平台支持 |
+
+所以部署方式应该从应用行为出发，而不是从框架名字出发。
+
+如果只是 blog、文档站、landing page、portfolio，static export 通常就够了。
+
+如果你用了 SSR、API routes、route handlers、Server Actions、动态 auth、middleware、ISR，那么它就不再是纯静态部署问题。
+
+## Backend 会发生什么
+
+OpenNext 只适配 Next.js 应用。
+
+如果你的 backend 是 Java、Go、Python、Laravel、Spring Boot、Express，或者任何独立 service，OpenNext 不会帮你部署它。
+
+架构还是分开的：
+
+```text
+Browser
+  ↓
+Next.js frontend deployed with OpenNext
+  ↓
+HTTP request
+  ↓
+External backend API
+  ↓
+Database or internal services
+```
+
+这代表 frontend 和 backend 仍然有各自的职责。
+
+<CardGrid columns={2}>
+  <InfoCard title="Frontend deployment">
+    OpenNext 把 Next.js app 打包成 assets、functions、middleware 和 cache adapter，然后部署到目标平台。
+  </InfoCard>
+
+  <InfoCard title="Backend deployment">
+    Java 或其他独立 backend service 仍然需要自己的 runtime、container、VM、serverless function 或 managed platform。
+  </InfoCard>
+
+  <InfoCard title="API boundary">
+    Frontend 还是通过 HTTP、RPC、GraphQL 或其他 API contract 调用 backend。OpenNext 不会移除这个边界。
+  </InfoCard>
+
+  <InfoCard title="Shared domain setup">
+    你可以把 `/api/*` route 到 backend，其他 route 给 Next.js。但这是 routing config，不是 OpenNext 替代 backend。
+  </InfoCard>
+</CardGrid>
+
+很多混淆来自 Next.js 里面的 "server" 这个词。
+
+Next.js 可以写 server-side logic，但这不代表它会自动替代系统里的所有 backend service。
+
+## Next.js 可以同时当 Backend 吗
+
+可以。Next.js 项目本身可以包含一些 backend-like 的能力。
+
+例如：
+
+- API routes
+- route handlers
+- Server Actions
+- authentication callbacks
+- form submission handlers
+- 从 server-side code 查询 database
+- 轻量 business logic
+
+这种情况下，OpenNext 可以帮你部署这些 backend-like 的部分，因为它们属于 Next.js build output 的一部分。
+
+一个简单的 full-stack Next.js 项目可能长这样：
+
+```text
+next-app/
+  app/
+    page.tsx
+    api/
+      orders/
+        route.ts
+  lib/
+    db.ts
+```
+
+这里的 `app/api/orders/route.ts` 是 Next.js app 的一部分。如果目标 adapter 支持，OpenNext 可以把它打包成 server function。
+
+但独立 backend 是另一回事：
+
+```text
+frontend/
+  Next.js app
+
+backend/
+  Java Spring Boot service
+```
+
+这个 Java service 不在 Next.js build output 里面，所以 OpenNext 不会知道如何转换它。
+
+## 如何判断边界
+
+在 Next.js 项目目录里运行这个命令，生成 OpenNext 后续会读取的标准 Next.js build output：
+
+```bash
+npm run build
+```
+
+build 完之后，在同一个项目目录里检查 `.next` 是否生成，以及里面是否有构建产物：
+
+```bash
+ls -la .next
+```
+
+不过，存在 `.next` 不代表应用一定需要 server。真正要看的是应用用了哪些功能。
+
+| App Behavior | Deployment Direction |
+| --- | --- |
+| 只有 static pages 和 public assets | Static hosting 或 static export |
+| 使用 SSR pages | 需要 server runtime |
+| 使用 route handlers 或 API routes | 需要 server runtime |
+| 使用 image optimization | 需要 image function 或其他图片策略 |
+| 使用 ISR | 需要 cache/storage adapter |
+| 使用 middleware | 需要 edge/runtime support |
+
+边界应该由 feature usage 决定，而不是由 framework 名字决定。
+
+## 实用判断规则
+
+选择 Cloudflare Pages static hosting、OpenNext、Vercel，或者独立 backend 部署时，可以用这个规则。
+
+<CardGrid columns={2}>
+  <InfoCard title="Use static hosting">
+    当 Next.js app 可以导出成纯静态文件，而且不需要 SSR、API routes、Server Actions、middleware 或 ISR 时使用。
+  </InfoCard>
+
+  <InfoCard title="Use OpenNext">
+    当应用需要 Next.js server features，但你又想部署到 Vercel 以外的平台时使用。
+  </InfoCard>
+
+  <InfoCard title="Use Vercel">
+    当你想要最直接的 Next.js 平台支持，并且不想自己处理 cloud runtime 细节时使用。
+  </InfoCard>
+
+  <InfoCard title="Use a separate backend">
+    当 business logic、data processing、authentication、queue 或 domain service 更适合由独立 backend 负责时使用。
+  </InfoCard>
+</CardGrid>
+
+真实项目里通常不是只选一个工具。
+
+它可能长这样：
+
+```text
+Next.js frontend
+  → deployed with OpenNext on Cloudflare
+
+Java backend
+  → deployed on container platform, VM, Railway, Render, ECS, or Kubernetes
+
+Database
+  → managed PostgreSQL, MySQL, MongoDB, or another data store
+```
+
+OpenNext 解决的是 Next.js 部署翻译问题。它不解决整个系统的部署问题。
+
+## 核心原则
+
+OpenNext 可以理解成 Next.js build output 的 compiler-like adapter。
+
+它读取 `.next` 结果，把 static files 和 runtime code 分开，把 runtime code 接到目标平台的 function handler，再把 cache、image、middleware 这些行为映射到目标云平台。
+
+最干净的 mental model 是：
+
+```text
+OpenNext helps the Next.js app leave Vercel.
+
+It does not deploy every backend in your system.
+```
+
+当前后端分离时，OpenNext 属于 frontend deployment path。backend 仍然是独立 service，有自己的 runtime、scaling model、routing、database access 和 deployment pipeline。
+
+</Lang>
