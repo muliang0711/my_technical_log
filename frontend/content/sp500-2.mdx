@@ -3,7 +3,7 @@ title: "S&P 500 Monthly Investing: RM2000 Per Month For 10, 15, and 20 Years"
 category: "Finance"
 createdAt: "2026-06-08"
 summary: "A practical simulation of investing RM2000 monthly into S&P 500 ETFs and what may happen when a Malaysian investor sells, converts, and withdraws the money."
-readTime: "10 min read"
+readTime: "7 min read"
 tags:
   - "S&P 500"
   - "ETF"
@@ -93,106 +93,20 @@ Taking money out is not one action. It is a chain.
 
 Each step can create cost or paperwork. The ETF code affects mainly tax drag and platform access. The platform affects trading fee, FX rate, withdrawal path, and reporting.
 
-## Platform And Code Can Change The Final Money
+## Platform And Code: The Numbers That Matter
 
-Two people can both invest RM2000 monthly into S&P 500 and still receive different final amounts.
+Two investors can both invest RM2000 monthly into the S&P 500 and still end with different amounts. The main differences are easier to compare directly:
 
-Reason:
+| Item | VOO / IVV / SPY Path | CSPX / VUAA / VUAG Path | Why It Matters |
+| --- | --- | --- | --- |
+| Domicile | United States | Ireland | Drives dividend withholding and estate-tax exposure |
+| Common platform | Webull, Moomoo, Rakuten Trade, IBKR | Usually IBKR or global brokers with LSE access | Easier access can mean higher tax drag |
+| Dividend handling | Usually distributing | Often accumulating | Cash dividends need manual reinvestment; accumulating funds reinvest internally |
+| USD 100 dividend example | About USD 30 withheld; about USD 70 cash received | About USD 15 withheld at fund level; about USD 85 retained/reinvested | The difference is about USD 15 per USD 100 dividend |
+| Expense ratio example | VOO / IVV around 0.03%; SPY around 0.09% | CSPX / VUAA often around 0.07% | Lower expense ratio does not always beat higher dividend withholding |
+| Withdrawal tax misconception | No fresh 30% tax just because you withdraw | No fresh 15% tax just because you withdraw | Dividend tax usually happened earlier |
 
-| Difference | Example |
-| --- | --- |
-| ETF domicile | VOO is US-domiciled; VUAA is Ireland-domiciled |
-| Dividend tax drag | US-domiciled ETFs usually face 30% dividend withholding for Malaysian non-US investors |
-| Fund-level withholding | Ireland-domiciled ETFs holding US stocks commonly face 15% US withholding at fund level |
-| ETF expense ratio | VOO / IVV are often around 0.03%; CSPX / VUAA are often around 0.07% |
-| Platform access | Webull / Moomoo commonly support US ETFs; IBKR is usually better for Ireland UCITS ETFs |
-| FX spread | Each platform may use a different conversion rate |
-| Withdrawal cost | Some brokers or banks may charge transfer fees |
-
-The difference may look small per year, but over 10 to 20 years it can become meaningful.
-
-## US-Domiciled ETF Path: VOO, IVV, SPY
-
-Common US-domiciled S&P 500 ETFs:
-
-```text
-VOO
-IVV
-SPY
-```
-
-Typical platform access:
-
-```text
-Webull Malaysia
-Moomoo Malaysia
-Rakuten Trade
-Interactive Brokers
-Other US stock platforms
-```
-
-Common tax/cost behavior for Malaysian non-US investors:
-
-| Item | What Usually Happens |
-| --- | --- |
-| Dividend withholding tax | US dividends are generally subject to 30% withholding tax |
-| Capital gain on ETF sale in the US | Usually not taxed by the US for ordinary nonresident investors unless special rules apply |
-| Estate tax exposure | US-situs assets may matter if portfolio becomes large |
-| Withdrawal | You sell ETF, receive USD, convert to MYR, then withdraw |
-| Main benefit | Easy access and simple ticker |
-| Main weakness | Dividend tax drag and possible estate tax concern |
-
-Example dividend flow:
-
-```text
-ETF receives USD 100 dividend
-→ 30% US withholding tax
-→ investor receives about USD 70 cash dividend
-```
-
-This tax happens during the holding period when dividends are paid. It is not a separate 30% tax when you withdraw your whole portfolio.
-
-## Ireland-Domiciled ETF Path: CSPX, VUAA, VUAG
-
-Common Ireland-domiciled S&P 500 UCITS ETFs:
-
-```text
-CSPX
-VUAA
-VUAG
-```
-
-Typical platform access:
-
-```text
-Interactive Brokers
-Some global brokers with London Stock Exchange access
-```
-
-Common tax/cost behavior for Malaysian non-US investors:
-
-| Item | What Usually Happens |
-| --- | --- |
-| Dividend withholding tax | US dividends to the Irish fund commonly face 15% withholding tax |
-| Dividend received by investor | Accumulating versions usually do not pay cash dividend to you |
-| Capital gain on ETF sale | Usually determined by your country of tax residence, not US ETF rules |
-| Estate tax exposure | Usually less direct US estate tax exposure than US-domiciled ETFs |
-| Withdrawal | Sell ETF, receive trading currency, convert to MYR, then withdraw |
-| Main benefit | Cleaner long-term structure for many non-US investors |
-| Main weakness | Harder to access and slightly more complex |
-
-Example dividend flow:
-
-```text
-US companies pay USD 100 dividend to Ireland ETF
-→ 15% US withholding tax at fund level
-→ about USD 85 remains inside the ETF
-→ ETF reinvests internally
-```
-
-For accumulating ETFs, you usually do not see the dividend as cash. The value is reflected inside the ETF price over time.
-
-## The 30% vs 15% Tax Drag
+## The 30% vs 15% Tax Drag In RM
 
 Assume the S&P 500 return is 8% per year before fund cost and dividend withholding effect. Also assume the dividend yield is around 1.3%.
 
@@ -211,7 +125,7 @@ Using RM2000 monthly:
 | 15 years | RM652,361 | RM660,693 | RM8,331 |
 | 20 years | RM1,084,450 | RM1,103,878 | RM19,428 |
 
-This table is not exact. It only shows the direction. Ireland-domiciled ETFs may have better dividend tax efficiency, but they may also involve different platform access, trading spread, currency path, and complexity.
+This table is not exact. It only shows direction and scale. In this simplified model, the 20-year difference is about RM19,428, which is roughly 9.7 months of RM2000 contributions. That is why a small annual drag can become visible over long holding periods.
 
 ## What You May Pay When Taking Money Out
 
@@ -261,109 +175,17 @@ Frequent trader:
 Do not assume investment tax treatment automatically applies.
 ```
 
-## Exit Scenario 1: VOO Through Webull Or Moomoo
+## Exit Scenario Comparison
 
-Example situation:
+The exit paths are similar, but the weak points are different.
 
-```text
-ETF: VOO
-Platform: Webull Malaysia or Moomoo Malaysia
-Investor: Malaysian non-US investor
-```
+| Scenario | Likely Exit Flow | Main Cost Already Happened | Cost At Exit | Practical Note |
+| --- | --- | --- | --- | --- |
+| VOO / IVV through Webull or Moomoo | Sell ETF → receive USD → convert to MYR → withdraw to Malaysian bank | 30% withholding on dividends during holding period | Sell fee, spread, FX spread, withdrawal fee | Easiest path, but dividend withholding is less efficient |
+| VUAA / CSPX through IBKR | Sell ETF → receive listing currency → convert in broker → withdraw to Malaysian bank | 15% fund-level withholding before reinvestment | Exchange commission, spread, FX conversion, withdrawal/bank fee | Cleaner long-term structure, but platform and product access are more complex |
+| SPY for trading | Sell SPY → receive USD → convert/withdraw as needed | 30% dividend withholding plus higher expense ratio than VOO / IVV | Usually tight spread, but still subject to trading and FX costs | Useful for liquidity/trading; usually not the first choice for 20-year monthly investing |
 
-Likely exit flow:
-
-```text
-Sell VOO
-→ receive USD cash
-→ convert USD to MYR inside platform or during withdrawal
-→ withdraw to Malaysian bank
-```
-
-Possible costs:
-
-| Cost | Meaning |
-| --- | --- |
-| US dividend withholding | Already happened on dividends during holding period |
-| Sell fee | Depends on platform pricing at that time |
-| FX spread | USD to MYR conversion rate matters |
-| Withdrawal fee | Depends on platform and bank |
-| Malaysian tax review | Needed especially for large remittance or if rules change |
-
-Main advantage:
-
-```text
-Easy to buy and sell through beginner-friendly platforms.
-```
-
-Main weakness:
-
-```text
-Dividend withholding tax is generally less efficient than Ireland-domiciled ETFs.
-```
-
-## Exit Scenario 2: VUAA Or CSPX Through IBKR
-
-Example situation:
-
-```text
-ETF: VUAA or CSPX
-Platform: Interactive Brokers
-Investor: Malaysian non-US investor
-```
-
-Likely exit flow:
-
-```text
-Sell VUAA or CSPX
-→ receive USD, GBP, or ETF trading currency depending on listing
-→ convert currency in broker
-→ withdraw to Malaysian bank
-```
-
-Possible costs:
-
-| Cost | Meaning |
-| --- | --- |
-| Fund-level US withholding | Usually 15% on US dividends before reinvestment |
-| Sell commission | Depends on exchange and IBKR pricing |
-| FX conversion | Usually important when converting back to MYR |
-| Withdrawal or bank fee | Depends on withdrawal route |
-| Malaysian tax review | Still needed for large withdrawal or changed tax rules |
-
-Main advantage:
-
-```text
-Usually cleaner for long-term non-US investors because of dividend tax efficiency and accumulating structure.
-```
-
-Main weakness:
-
-```text
-More complex platform and product access.
-```
-
-## Exit Scenario 3: SPY For Trading
-
-Example situation:
-
-```text
-ETF: SPY
-Investor: More active trader
-```
-
-SPY is very liquid and often used by traders, but it is usually not the most cost-efficient long-term S&P 500 ETF.
-
-Possible issues:
-
-| Issue | Meaning |
-| --- | --- |
-| Higher expense ratio than VOO / IVV | Long-term drag is higher |
-| Distributing dividend | Dividends are paid out and taxed |
-| US-domiciled | 30% dividend withholding generally applies for Malaysian non-US investors |
-| Good liquidity | Useful for trading, not necessary for monthly long-term investing |
-
-For a 20-year monthly investor, SPY is usually not the first choice unless there is a specific trading reason.
+Example: if your final portfolio shows RM1,137,998 and the exit costs are RM500 selling/spread, 0.40% FX cost, and RM100 bank cost, the ETF choice does not create a new 15% or 30% withdrawal tax. The visible exit cost in that example is RM5,152 before any personal tax review.
 
 ## Full Withdrawal Checklist
 
@@ -537,106 +359,20 @@ For simple access, VOO or IVV through Webull or Moomoo is easier. For long-term 
 
 每一步都可能有成本或记录要求。ETF code 主要影响税务损耗和平台 access。平台主要影响交易费、汇率、提款路径和报表。
 
-## 平台和 Code 会改变最终金额
+## 平台和 Code：真正影响数字的地方
 
-两个人都每个月投资 RM2000 到 S&P 500，最后拿到的钱仍然可能不同。
+两个人都每个月投资 RM2000 到 S&P 500，最后拿到的钱仍然可能不同。直接用表看更清楚：
 
-原因是：
+| 项目 | VOO / IVV / SPY 路径 | CSPX / VUAA / VUAG 路径 | 为什么重要 |
+| --- | --- | --- | --- |
+| Domicile | 美国 | 爱尔兰 | 影响股息 withholding 和 estate tax exposure |
+| 常见平台 | Webull、Moomoo、Rakuten Trade、IBKR | 通常是 IBKR 或支持 LSE 的全球券商 | 容易买不代表长期成本最低 |
+| 派息处理 | 通常 distributing | 常见 accumulating | 现金股息要自己再投资；累积型会在基金内部处理 |
+| USD 100 股息例子 | 约 USD 30 被扣，约 USD 70 现金到账 | 基金层面约 USD 15 被扣，约 USD 85 留下再投资 | 每 USD 100 股息差约 USD 15 |
+| 费用率例子 | VOO / IVV 约 0.03%；SPY 约 0.09% | CSPX / VUAA 常见约 0.07% | 低 expense ratio 不一定完全抵消较高股息 withholding |
+| 提款税误解 | 不是提款时再扣 30% | 不是提款时再扣 15% | 股息税通常早在持有期间已经发生 |
 
-| 差异 | 例子 |
-| --- | --- |
-| ETF domicile | VOO 是美国注册；VUAA 是爱尔兰注册 |
-| 股息税务损耗 | 美国注册 ETF 对马来西亚非美国投资者通常是 30% dividend withholding |
-| 基金层面 withholding | 爱尔兰注册 ETF 持有美国股票时，通常是基金层面 15% withholding |
-| ETF expense ratio | VOO / IVV 常见约 0.03%；CSPX / VUAA 常见约 0.07% |
-| 平台 access | Webull / Moomoo 常见支持美国 ETF；IBKR 通常更适合买 Ireland UCITS ETF |
-| FX spread | 不同平台使用的换汇价可能不同 |
-| 出金成本 | 券商或银行可能收转账费用 |
-
-每年看起来差不多，但 10 到 20 年后会累积成明显差异。
-
-## 美国注册 ETF 路径：VOO、IVV、SPY
-
-常见美国注册 S&P 500 ETF：
-
-```text
-VOO
-IVV
-SPY
-```
-
-常见平台 access：
-
-```text
-Webull Malaysia
-Moomoo Malaysia
-Rakuten Trade
-Interactive Brokers
-其他美股平台
-```
-
-对马来西亚非美国投资者来说，常见税务和成本行为：
-
-| 项目 | 通常会发生什么 |
-| --- | --- |
-| Dividend withholding tax | 美国股息通常会被扣 30% withholding tax |
-| 在美国卖出 ETF 的 capital gain | 普通非美国投资者通常不会被美国征收 capital gains tax，除非特殊规则适用 |
-| Estate tax exposure | 如果 portfolio 变大，US-situs assets 可能需要关注 |
-| 提款 | 卖出 ETF，收到 USD，换成 MYR，然后提款 |
-| 主要优点 | 容易买，ticker 简单 |
-| 主要弱点 | 股息税务损耗和潜在 estate tax concern |
-
-股息例子：
-
-```text
-ETF 收到 USD 100 股息
-→ 30% US withholding tax
-→ 投资者大约收到 USD 70 现金股息
-```
-
-这个税是在持有期间派息时发生，不是你提款整个 portfolio 时才一次性扣 30%。
-
-## 爱尔兰注册 ETF 路径：CSPX、VUAA、VUAG
-
-常见爱尔兰注册 S&P 500 UCITS ETF：
-
-```text
-CSPX
-VUAA
-VUAG
-```
-
-常见平台 access：
-
-```text
-Interactive Brokers
-一些支持 London Stock Exchange 的全球券商
-```
-
-对马来西亚非美国投资者来说，常见税务和成本行为：
-
-| 项目 | 通常会发生什么 |
-| --- | --- |
-| Dividend withholding tax | 美国股息进入爱尔兰基金时通常被扣 15% |
-| 投资者收到的 dividend | Accumulating 版本通常不会派现金给你 |
-| 卖出 ETF 的 capital gain | 通常由你的税务居住国决定，不是按美国 ETF 规则处理 |
-| Estate tax exposure | 通常比直接持有美国注册 ETF 更少面对 US estate tax exposure |
-| 提款 | 卖出 ETF，收到交易货币，换成 MYR，然后提款 |
-| 主要优点 | 对很多非美国长期投资者结构更干净 |
-| 主要弱点 | 平台更复杂，access 没那么简单 |
-
-股息例子：
-
-```text
-美国公司派 USD 100 股息给爱尔兰 ETF
-→ 基金层面 15% US withholding tax
-→ 大约 USD 85 留在 ETF 内部
-→ ETF 内部再投资
-```
-
-对 accumulating ETF 来说，你通常不会看到现金股息。价值会反映在 ETF 价格里面。
-
-## 30% vs 15% 的长期差异
+## 30% vs 15% 的长期 RM 差异
 
 假设 S&P 500 在扣费用和股息 withholding 前，每年回报是 8%。再假设 dividend yield 大约是 1.3%。
 
@@ -655,7 +391,7 @@ Interactive Brokers
 | 15 年 | RM652,361 | RM660,693 | RM8,331 |
 | 20 年 | RM1,084,450 | RM1,103,878 | RM19,428 |
 
-这张表不是精确预测。它只是说明方向：爱尔兰注册 ETF 可能有更好的股息税务效率，但它也可能带来不同平台、交易点差、货币路径和操作复杂度。
+这张表不是精确预测，只是说明方向和数量级。在这个简化模型里，20 年差异约 RM19,428，相当于接近 9.7 个月的 RM2000 月投金额。所以每年看起来很小的 drag，长期会变成可见差异。
 
 ## 提款时可能会付什么
 
@@ -705,109 +441,17 @@ Interactive Brokers
 不要自动假设长期投资税务处理一定适用。
 ```
 
-## 退出场景 1：通过 Webull 或 Moomoo 持有 VOO
+## 退出场景对比
 
-假设：
+退出路径很像，但弱点不同。
 
-```text
-ETF: VOO
-平台: Webull Malaysia 或 Moomoo Malaysia
-投资者: 马来西亚非美国投资者
-```
+| 场景 | 可能退出流程 | 已经在持有期间发生的主要成本 | 退出时的成本 | 实用备注 |
+| --- | --- | --- | --- | --- |
+| Webull / Moomoo 持有 VOO / IVV | 卖出 ETF → 收到 USD → 换成 MYR → 提款到马来西亚银行 | 股息派发时通常已扣 30% withholding | 卖出费、价差、FX spread、出金费 | 路径最简单，但股息税务效率较低 |
+| IBKR 持有 VUAA / CSPX | 卖出 ETF → 收到 listing 货币 → 在券商换汇 → 提款到马来西亚银行 | 基金内部再投资前通常已扣 15% withholding | 交易所佣金、价差、FX conversion、银行/出金费 | 长期结构较干净，但平台和产品 access 更复杂 |
+| SPY 用于交易 | 卖出 SPY → 收到 USD → 按需要换汇和提款 | 30% 股息 withholding，加上比 VOO / IVV 更高的 expense ratio | 通常价差较窄，但仍有交易和 FX 成本 | 适合需要流动性的交易，不一定适合 20 年月投 |
 
-可能退出流程：
-
-```text
-卖出 VOO
-→ 收到 USD 现金
-→ 在平台内或提款过程中把 USD 换成 MYR
-→ 提款到马来西亚银行
-```
-
-可能成本：
-
-| 成本 | 意思 |
-| --- | --- |
-| US dividend withholding | 持有期间派息时已经发生 |
-| 卖出费用 | 根据当时平台价格表 |
-| FX spread | USD 换 MYR 的汇率差很重要 |
-| 出金费用 | 取决于平台和银行 |
-| 马来西亚税务检查 | 大额汇回或规则改变时尤其需要 |
-
-主要优点：
-
-```text
-比较容易通过新手友好的平台买卖。
-```
-
-主要弱点：
-
-```text
-股息 withholding 通常不如爱尔兰注册 ETF 有效率。
-```
-
-## 退出场景 2：通过 IBKR 持有 VUAA 或 CSPX
-
-假设：
-
-```text
-ETF: VUAA 或 CSPX
-平台: Interactive Brokers
-投资者: 马来西亚非美国投资者
-```
-
-可能退出流程：
-
-```text
-卖出 VUAA 或 CSPX
-→ 根据 listing 收到 USD、GBP 或其他交易货币
-→ 在券商内做货币转换
-→ 提款到马来西亚银行
-```
-
-可能成本：
-
-| 成本 | 意思 |
-| --- | --- |
-| 基金层面 US withholding | 美国股息再投资前通常已经扣 15% |
-| 卖出佣金 | 取决于交易所和 IBKR 价格表 |
-| FX conversion | 换回 MYR 时很重要 |
-| 出金或银行费用 | 取决于提款路径 |
-| 马来西亚税务检查 | 大额提款或规则改变时仍然需要 |
-
-主要优点：
-
-```text
-对非美国长期投资者来说，股息税务效率和 accumulating 结构通常更干净。
-```
-
-主要弱点：
-
-```text
-平台和产品 access 更复杂。
-```
-
-## 退出场景 3：SPY 用于交易
-
-假设：
-
-```text
-ETF: SPY
-投资者: 更偏交易者
-```
-
-SPY 流动性很高，经常被 trader 使用，但它通常不是长期 S&P 500 投资最省成本的选择。
-
-可能问题：
-
-| 问题 | 意思 |
-| --- | --- |
-| Expense ratio 比 VOO / IVV 高 | 长期会有更高拖累 |
-| Distributing dividend | 股息会派出来并被扣税 |
-| 美国注册 | 马来西亚非美国投资者通常面对 30% dividend withholding |
-| 流动性强 | 适合交易，但月投长期投资未必需要 |
-
-如果你是 20 年月投投资者，SPY 通常不是第一选择，除非你有明确交易理由。
+例子：如果最终 portfolio 显示 RM1,137,998，退出成本是 RM500 卖出/价差、0.40% FX cost、RM100 银行费用，ETF 选择本身不会让你提款时再被扣新的 15% 或 30%。这个例子里的可见退出成本是 RM5,152，还没计算个人税务审查结果。
 
 ## 完整提款 Checklist
 
