@@ -1,0 +1,905 @@
+---
+title: "S&P 500 Monthly Investing: RM2000 Per Month For 10, 15, and 20 Years"
+category: "Finance"
+createdAt: "2026-06-08"
+summary: "A practical simulation of investing RM2000 monthly into S&P 500 ETFs and what may happen when a Malaysian investor sells, converts, and withdraws the money."
+readTime: "10 min read"
+tags:
+  - "S&P 500"
+  - "ETF"
+  - "Investing"
+  - "Tax"
+featured: false
+series:
+  title: "S&P 500 ETF Selection"
+  slug: "sp500-etf-selection"
+  order: 2
+---
+
+<Lang lang="en">
+
+This log focuses on one practical situation: you invest RM2000 every month into an S&P 500 ETF and hold it for 10, 15, or 20 years. The goal is not to predict the exact future value. The goal is to understand the possible final amount, the selling and withdrawal process, and the tax or cost layers you may meet depending on the platform and ETF code.
+
+## Short Answer
+
+If you invest RM2000 every month:
+
+| Holding Period | Total Money Invested | Approx Value At 6% Annual Return | Approx Value At 8% Annual Return | Approx Value At 10% Annual Return |
+| --- | ---: | ---: | ---: | ---: |
+| 10 years | RM240,000 | RM324,947 | RM360,249 | RM399,728 |
+| 15 years | RM360,000 | RM573,824 | RM675,213 | RM796,888 |
+| 20 years | RM480,000 | RM906,877 | RM1,137,998 | RM1,436,518 |
+
+These numbers are simplified projections. They assume monthly investing, stable annual return, no missed months, and no platform, FX, or tax drag except what is discussed separately.
+
+When you want to take money out, the process is usually:
+
+```text
+Sell ETF
+→ receive USD or trading currency in broker account
+→ convert to MYR if needed
+→ withdraw to Malaysian bank
+→ check whether any tax reporting applies
+```
+
+The biggest possible deductions are usually:
+
+- Dividend withholding tax during the holding period.
+- ETF expense ratio.
+- Broker trading fee.
+- FX spread when converting MYR to USD and USD back to MYR.
+- Withdrawal or transfer fee.
+- Possible Malaysian tax treatment depending on the latest tax rules and your personal situation.
+
+## Projection Assumptions
+
+This log uses a simple monthly compound model.
+
+```text
+Monthly investment: RM2000
+Investment frequency: Every month
+Holding periods: 10, 15, 20 years
+Return scenarios: 4%, 6%, 8%, 10% per year
+Currency: Shown in RM equivalent
+```
+
+The projection is not a promise. S&P 500 returns are not stable every year. Some years can be negative. The actual result can be higher or lower depending on market return, exchange rate, platform cost, ETF structure, and investor behavior.
+
+## Growth Table
+
+| Annual Return | 10 Years | 15 Years | 20 Years |
+| --- | ---: | ---: | ---: |
+| 4% | RM293,392 | RM489,314 | RM727,683 |
+| 6% | RM324,947 | RM573,824 | RM906,877 |
+| 8% | RM360,249 | RM675,213 | RM1,137,998 |
+| 10% | RM399,728 | RM796,888 | RM1,436,518 |
+
+The important observation is that time matters more than the monthly amount after the habit is stable. From 10 years to 20 years, the invested capital doubles from RM240,000 to RM480,000, but the final value can more than triple under higher return scenarios.
+
+## What Happens When You Withdraw
+
+Taking money out is not one action. It is a chain.
+
+<FlowGraph
+  title="S&P 500 ETF Exit Flow"
+  nodes={[
+    { id: "sell", label: "Sell ETF", detail: "You sell VOO, IVV, SPY, CSPX, or VUAA inside the broker." },
+    { id: "cash", label: "Receive Cash", detail: "The broker account receives USD or the ETF trading currency." },
+    { id: "fx", label: "Convert Currency", detail: "You convert USD or GBP back to MYR if needed." },
+    { id: "withdraw", label: "Withdraw", detail: "You send cash from broker to Malaysian bank." },
+    { id: "tax", label: "Check Tax", detail: "You review dividend, capital gain, and foreign income rules." }
+  ]}
+/>
+
+Each step can create cost or paperwork. The ETF code affects mainly tax drag and platform access. The platform affects trading fee, FX rate, withdrawal path, and reporting.
+
+## Platform And Code Can Change The Final Money
+
+Two people can both invest RM2000 monthly into S&P 500 and still receive different final amounts.
+
+Reason:
+
+| Difference | Example |
+| --- | --- |
+| ETF domicile | VOO is US-domiciled; VUAA is Ireland-domiciled |
+| Dividend tax drag | US-domiciled ETFs usually face 30% dividend withholding for Malaysian non-US investors |
+| Fund-level withholding | Ireland-domiciled ETFs holding US stocks commonly face 15% US withholding at fund level |
+| ETF expense ratio | VOO / IVV are often around 0.03%; CSPX / VUAA are often around 0.07% |
+| Platform access | Webull / Moomoo commonly support US ETFs; IBKR is usually better for Ireland UCITS ETFs |
+| FX spread | Each platform may use a different conversion rate |
+| Withdrawal cost | Some brokers or banks may charge transfer fees |
+
+The difference may look small per year, but over 10 to 20 years it can become meaningful.
+
+## US-Domiciled ETF Path: VOO, IVV, SPY
+
+Common US-domiciled S&P 500 ETFs:
+
+```text
+VOO
+IVV
+SPY
+```
+
+Typical platform access:
+
+```text
+Webull Malaysia
+Moomoo Malaysia
+Rakuten Trade
+Interactive Brokers
+Other US stock platforms
+```
+
+Common tax/cost behavior for Malaysian non-US investors:
+
+| Item | What Usually Happens |
+| --- | --- |
+| Dividend withholding tax | US dividends are generally subject to 30% withholding tax |
+| Capital gain on ETF sale in the US | Usually not taxed by the US for ordinary nonresident investors unless special rules apply |
+| Estate tax exposure | US-situs assets may matter if portfolio becomes large |
+| Withdrawal | You sell ETF, receive USD, convert to MYR, then withdraw |
+| Main benefit | Easy access and simple ticker |
+| Main weakness | Dividend tax drag and possible estate tax concern |
+
+Example dividend flow:
+
+```text
+ETF receives USD 100 dividend
+→ 30% US withholding tax
+→ investor receives about USD 70 cash dividend
+```
+
+This tax happens during the holding period when dividends are paid. It is not a separate 30% tax when you withdraw your whole portfolio.
+
+## Ireland-Domiciled ETF Path: CSPX, VUAA, VUAG
+
+Common Ireland-domiciled S&P 500 UCITS ETFs:
+
+```text
+CSPX
+VUAA
+VUAG
+```
+
+Typical platform access:
+
+```text
+Interactive Brokers
+Some global brokers with London Stock Exchange access
+```
+
+Common tax/cost behavior for Malaysian non-US investors:
+
+| Item | What Usually Happens |
+| --- | --- |
+| Dividend withholding tax | US dividends to the Irish fund commonly face 15% withholding tax |
+| Dividend received by investor | Accumulating versions usually do not pay cash dividend to you |
+| Capital gain on ETF sale | Usually determined by your country of tax residence, not US ETF rules |
+| Estate tax exposure | Usually less direct US estate tax exposure than US-domiciled ETFs |
+| Withdrawal | Sell ETF, receive trading currency, convert to MYR, then withdraw |
+| Main benefit | Cleaner long-term structure for many non-US investors |
+| Main weakness | Harder to access and slightly more complex |
+
+Example dividend flow:
+
+```text
+US companies pay USD 100 dividend to Ireland ETF
+→ 15% US withholding tax at fund level
+→ about USD 85 remains inside the ETF
+→ ETF reinvests internally
+```
+
+For accumulating ETFs, you usually do not see the dividend as cash. The value is reflected inside the ETF price over time.
+
+## The 30% vs 15% Tax Drag
+
+Assume the S&P 500 return is 8% per year before fund cost and dividend withholding effect. Also assume the dividend yield is around 1.3%.
+
+This is a simplified model:
+
+| ETF Type | Dividend Withholding | Expense Ratio Example | Approx Net Return Used |
+| --- | ---: | ---: | ---: |
+| US-domiciled ETF like VOO | 30% of dividend portion | 0.03% | About 7.58% |
+| Ireland-domiciled ETF like VUAA | 15% of dividend portion | 0.07% | About 7.74% |
+
+Using RM2000 monthly:
+
+| Holding Period | US-Domiciled Approx Result | Ireland-Domiciled Approx Result | Difference |
+| --- | ---: | ---: | ---: |
+| 10 years | RM352,504 | RM355,341 | RM2,837 |
+| 15 years | RM652,361 | RM660,693 | RM8,331 |
+| 20 years | RM1,084,450 | RM1,103,878 | RM19,428 |
+
+This table is not exact. It only shows the direction. Ireland-domiciled ETFs may have better dividend tax efficiency, but they may also involve different platform access, trading spread, currency path, and complexity.
+
+## What You May Pay When Taking Money Out
+
+When you sell and withdraw, the possible layers are:
+
+| Layer | Applies To | Explanation |
+| --- | --- | --- |
+| ETF selling spread | All ETFs | Difference between bid and ask price |
+| Broker selling commission | Depends on platform | Some platforms charge commission, some have promotions |
+| Platform fee | Depends on platform | Some platforms charge extra service or settlement fees |
+| Currency conversion | Usually applies | USD or GBP may need conversion back to MYR |
+| Withdrawal fee | Depends on broker and bank | Broker or intermediary bank may charge |
+| US dividend withholding | During holding period | Usually already deducted before withdrawal |
+| Malaysia tax review | Depends on latest rule and personal situation | You may need to check whether remitted foreign income or gain is taxable |
+
+The key point:
+
+```text
+Withdrawal is usually not where the 15% or 30% dividend tax happens.
+The dividend tax usually happened earlier during the holding period.
+```
+
+## Malaysia Tax Possibility
+
+Malaysia tax rules can change, so this section must be treated as a checklist, not personal tax advice.
+
+Current broad points to understand:
+
+| Situation | Possible Tax Issue |
+| --- | --- |
+| Foreign dividend received in Malaysia by resident individual | May be exempt if conditions are met during the exemption period |
+| Foreign income received in Malaysia | LHDN guidelines provide exemptions for resident individuals for certain foreign income until 31 December 2026, subject to conditions |
+| Foreign capital gains | Malaysia has rules for gains from disposal of foreign capital assets, but the official guideline on foreign capital assets specifically lists companies, LLPs, trust bodies, and co-operative societies as chargeable persons |
+| Personal investing gain from selling listed foreign ETF | You should verify the latest personal tax treatment before remitting a large amount |
+| Business-like trading activity | If activity looks like trading business rather than passive investment, tax treatment may be different |
+
+A simple practical rule:
+
+```text
+Small long-term investor:
+Usually focus on dividend withholding, FX, broker fee, and record keeping.
+
+Large withdrawal:
+Check with a tax professional before remitting a large amount back to Malaysia.
+
+Frequent trader:
+Do not assume investment tax treatment automatically applies.
+```
+
+## Exit Scenario 1: VOO Through Webull Or Moomoo
+
+Example situation:
+
+```text
+ETF: VOO
+Platform: Webull Malaysia or Moomoo Malaysia
+Investor: Malaysian non-US investor
+```
+
+Likely exit flow:
+
+```text
+Sell VOO
+→ receive USD cash
+→ convert USD to MYR inside platform or during withdrawal
+→ withdraw to Malaysian bank
+```
+
+Possible costs:
+
+| Cost | Meaning |
+| --- | --- |
+| US dividend withholding | Already happened on dividends during holding period |
+| Sell fee | Depends on platform pricing at that time |
+| FX spread | USD to MYR conversion rate matters |
+| Withdrawal fee | Depends on platform and bank |
+| Malaysian tax review | Needed especially for large remittance or if rules change |
+
+Main advantage:
+
+```text
+Easy to buy and sell through beginner-friendly platforms.
+```
+
+Main weakness:
+
+```text
+Dividend withholding tax is generally less efficient than Ireland-domiciled ETFs.
+```
+
+## Exit Scenario 2: VUAA Or CSPX Through IBKR
+
+Example situation:
+
+```text
+ETF: VUAA or CSPX
+Platform: Interactive Brokers
+Investor: Malaysian non-US investor
+```
+
+Likely exit flow:
+
+```text
+Sell VUAA or CSPX
+→ receive USD, GBP, or ETF trading currency depending on listing
+→ convert currency in broker
+→ withdraw to Malaysian bank
+```
+
+Possible costs:
+
+| Cost | Meaning |
+| --- | --- |
+| Fund-level US withholding | Usually 15% on US dividends before reinvestment |
+| Sell commission | Depends on exchange and IBKR pricing |
+| FX conversion | Usually important when converting back to MYR |
+| Withdrawal or bank fee | Depends on withdrawal route |
+| Malaysian tax review | Still needed for large withdrawal or changed tax rules |
+
+Main advantage:
+
+```text
+Usually cleaner for long-term non-US investors because of dividend tax efficiency and accumulating structure.
+```
+
+Main weakness:
+
+```text
+More complex platform and product access.
+```
+
+## Exit Scenario 3: SPY For Trading
+
+Example situation:
+
+```text
+ETF: SPY
+Investor: More active trader
+```
+
+SPY is very liquid and often used by traders, but it is usually not the most cost-efficient long-term S&P 500 ETF.
+
+Possible issues:
+
+| Issue | Meaning |
+| --- | --- |
+| Higher expense ratio than VOO / IVV | Long-term drag is higher |
+| Distributing dividend | Dividends are paid out and taxed |
+| US-domiciled | 30% dividend withholding generally applies for Malaysian non-US investors |
+| Good liquidity | Useful for trading, not necessary for monthly long-term investing |
+
+For a 20-year monthly investor, SPY is usually not the first choice unless there is a specific trading reason.
+
+## Full Withdrawal Checklist
+
+Before selling and withdrawing, check this list.
+
+<CardGrid columns={2}>
+  <InfoCard title="1. Confirm ETF Code">
+    Know whether you hold VOO, IVV, SPY, CSPX, VUAA, or another S&P 500 ETF. The ticker decides domicile, dividend style, and exchange.
+  </InfoCard>
+
+  <InfoCard title="2. Confirm Currency">
+    Check whether your ETF trades in USD, GBP, or another currency. This affects conversion before withdrawing to MYR.
+  </InfoCard>
+
+  <InfoCard title="3. Check Broker Fee">
+    Review sell commission, platform fee, exchange fee, and any settlement cost before selling.
+  </InfoCard>
+
+  <InfoCard title="4. Check FX Rate">
+    The USD to MYR conversion can materially change final money received in your Malaysian bank.
+  </InfoCard>
+
+  <InfoCard title="5. Export Reports">
+    Download statements, trade confirmations, dividend records, FX records, and withdrawal records before closing or moving funds.
+  </InfoCard>
+
+  <InfoCard title="6. Review Tax">
+    For large withdrawals or active trading activity, verify current Malaysian and foreign tax treatment before remitting money.
+  </InfoCard>
+</CardGrid>
+
+Do not wait until the final year to understand this process. The right ETF structure should be chosen before the portfolio becomes large.
+
+## Practical Final Money Model
+
+A clean way to estimate your real final money is:
+
+```text
+Final broker value
+- sell commission
+- ETF spread
+- FX conversion cost
+- withdrawal fee
+- possible tax
+= estimated final MYR received
+```
+
+Example:
+
+```text
+Projected portfolio value: RM1,137,998
+Sell and spread cost: RM500
+FX cost at 0.40%: RM4,552
+Withdrawal and bank cost: RM100
+Possible extra tax: depends on tax status and rules
+
+Estimated received before extra tax:
+RM1,137,998 - RM500 - RM4,552 - RM100
+= RM1,132,846
+```
+
+This example shows why FX matters. Even if the platform has low trading commission, a weak conversion rate can remove thousands of ringgit from a large portfolio.
+
+## Source Notes
+
+Useful reference pages:
+
+- [LHDN guideline on tax treatment for income received from abroad](https://www.hasil.gov.my/media/fzofh1gz/20240620-guidelines-tax-treatment-in-relation-to-income-received-from-abroad-amendment-june-2024.pdf)
+- [LHDN guideline on gains from disposal of foreign capital assets](https://www.hasil.gov.my/media/xh0fp0pt/20240327-tax-treatment-on-gains-from-the-disposal-of-foreign-capital-assets-received-from-outside-malaysia.pdf)
+- [IRS taxation of nonresident aliens](https://www.irs.gov/individuals/international-taxpayers/taxation-of-nonresident-aliens)
+- [IRS capital gains rules for certain nonresident aliens](https://www.irs.gov/individuals/international-taxpayers/the-taxation-of-capital-gains-of-nonresident-students-scholars-and-employees-of-foreign-governments)
+- [SSGA comparison of US-domiciled ETFs and Irish-domiciled UCITS ETFs](https://www.ssga.com/sg/en/institutional/insights/considerations-for-non-us-investors-us-etfs-vs-irish-ucits)
+- [Endowus explanation on US-listed ETF dividend withholding and Irish-domiciled UCITS ETFs](https://endowus.com/insights/an-inconvenient-truth-tax-on-us-listed-etfs-04c7532c5d)
+
+## The Main Principle
+
+When you invest RM2000 monthly into the S&P 500, the final number is not only decided by market return.
+
+It is decided by the full chain:
+
+```text
+Monthly contribution
+→ ETF code
+→ ETF domicile
+→ dividend tax drag
+→ platform fee
+→ FX conversion
+→ withdrawal path
+→ tax treatment
+→ final MYR received
+```
+
+For simple access, VOO or IVV through Webull or Moomoo is easier. For long-term tax-efficient structure, VUAA or CSPX through IBKR is often cleaner for Malaysian non-US investors. But when you finally take money out, always calculate the full cycle, not just the portfolio value shown inside the app.
+
+</Lang>
+
+<Lang lang="zh">
+
+这篇 log 聚焦一个很实际的情况：你每个月投资 RM2000 到 S&P 500 ETF，然后持有 10 年、15 年或 20 年。重点不是预测未来一定会拿到多少钱，而是让你理解大概可能的金额、卖出和提款流程，以及不同平台和 ETF code 可能带来的税务和成本差异。
+
+## 简短答案
+
+如果你每个月投资 RM2000：
+
+| 持有时间 | 总投入本金 | 年化 6% 大概结果 | 年化 8% 大概结果 | 年化 10% 大概结果 |
+| --- | ---: | ---: | ---: | ---: |
+| 10 年 | RM240,000 | RM324,947 | RM360,249 | RM399,728 |
+| 15 年 | RM360,000 | RM573,824 | RM675,213 | RM796,888 |
+| 20 年 | RM480,000 | RM906,877 | RM1,137,998 | RM1,436,518 |
+
+这些是简化后的 projection。它假设你每个月固定投资、没有中断、回报率稳定，并且暂时不把平台费、FX 和税务全部扣进去。
+
+当你要拿钱出来时，流程通常是：
+
+```text
+卖出 ETF
+→ 券商账户收到 USD 或交易货币
+→ 如果需要，把外币换成 MYR
+→ 提款到马来西亚银行
+→ 检查是否有税务申报或记录要求
+```
+
+最常见会影响最终金额的东西是：
+
+- 持有期间的 dividend withholding tax。
+- ETF expense ratio。
+- 券商交易费。
+- MYR 换 USD、USD 换 MYR 的 FX spread。
+- 出金或转账费用。
+- 根据最新税务规则和个人情况，可能需要处理的马来西亚税务问题。
+
+## Projection 假设
+
+这篇使用简单的每月复利模型。
+
+```text
+每月投资：RM2000
+投资频率：每个月
+持有时间：10 年、15 年、20 年
+回报场景：每年 4%、6%、8%、10%
+货币显示：以 RM 等值显示
+```
+
+这不是保证结果。S&P 500 的回报不会每年稳定。有些年份会是负回报。你的真实结果会受到市场回报、汇率、平台成本、ETF 结构和投资行为影响。
+
+## 增长表
+
+| 年化回报 | 10 年 | 15 年 | 20 年 |
+| --- | ---: | ---: | ---: |
+| 4% | RM293,392 | RM489,314 | RM727,683 |
+| 6% | RM324,947 | RM573,824 | RM906,877 |
+| 8% | RM360,249 | RM675,213 | RM1,137,998 |
+| 10% | RM399,728 | RM796,888 | RM1,436,518 |
+
+重点是：当投资习惯稳定后，时间比每个月金额更重要。从 10 年到 20 年，本金从 RM240,000 变成 RM480,000，只是翻倍；但在较高回报场景下，最终金额可能不止翻倍。
+
+## 提款时会发生什么
+
+把钱拿出来不是一个动作，而是一条链。
+
+<FlowGraph
+  title="S&P 500 ETF 退出流程"
+  nodes={[
+    { id: "sell", label: "卖出 ETF", detail: "在券商里卖出 VOO、IVV、SPY、CSPX 或 VUAA。" },
+    { id: "cash", label: "收到现金", detail: "券商账户收到 USD 或 ETF 的交易货币。" },
+    { id: "fx", label: "货币转换", detail: "如果需要，把 USD 或 GBP 换回 MYR。" },
+    { id: "withdraw", label: "提款", detail: "把现金从券商转回马来西亚银行。" },
+    { id: "tax", label: "检查税务", detail: "确认股息、资本增值和 foreign income 规则。" }
+  ]}
+/>
+
+每一步都可能有成本或记录要求。ETF code 主要影响税务损耗和平台 access。平台主要影响交易费、汇率、提款路径和报表。
+
+## 平台和 Code 会改变最终金额
+
+两个人都每个月投资 RM2000 到 S&P 500，最后拿到的钱仍然可能不同。
+
+原因是：
+
+| 差异 | 例子 |
+| --- | --- |
+| ETF domicile | VOO 是美国注册；VUAA 是爱尔兰注册 |
+| 股息税务损耗 | 美国注册 ETF 对马来西亚非美国投资者通常是 30% dividend withholding |
+| 基金层面 withholding | 爱尔兰注册 ETF 持有美国股票时，通常是基金层面 15% withholding |
+| ETF expense ratio | VOO / IVV 常见约 0.03%；CSPX / VUAA 常见约 0.07% |
+| 平台 access | Webull / Moomoo 常见支持美国 ETF；IBKR 通常更适合买 Ireland UCITS ETF |
+| FX spread | 不同平台使用的换汇价可能不同 |
+| 出金成本 | 券商或银行可能收转账费用 |
+
+每年看起来差不多，但 10 到 20 年后会累积成明显差异。
+
+## 美国注册 ETF 路径：VOO、IVV、SPY
+
+常见美国注册 S&P 500 ETF：
+
+```text
+VOO
+IVV
+SPY
+```
+
+常见平台 access：
+
+```text
+Webull Malaysia
+Moomoo Malaysia
+Rakuten Trade
+Interactive Brokers
+其他美股平台
+```
+
+对马来西亚非美国投资者来说，常见税务和成本行为：
+
+| 项目 | 通常会发生什么 |
+| --- | --- |
+| Dividend withholding tax | 美国股息通常会被扣 30% withholding tax |
+| 在美国卖出 ETF 的 capital gain | 普通非美国投资者通常不会被美国征收 capital gains tax，除非特殊规则适用 |
+| Estate tax exposure | 如果 portfolio 变大，US-situs assets 可能需要关注 |
+| 提款 | 卖出 ETF，收到 USD，换成 MYR，然后提款 |
+| 主要优点 | 容易买，ticker 简单 |
+| 主要弱点 | 股息税务损耗和潜在 estate tax concern |
+
+股息例子：
+
+```text
+ETF 收到 USD 100 股息
+→ 30% US withholding tax
+→ 投资者大约收到 USD 70 现金股息
+```
+
+这个税是在持有期间派息时发生，不是你提款整个 portfolio 时才一次性扣 30%。
+
+## 爱尔兰注册 ETF 路径：CSPX、VUAA、VUAG
+
+常见爱尔兰注册 S&P 500 UCITS ETF：
+
+```text
+CSPX
+VUAA
+VUAG
+```
+
+常见平台 access：
+
+```text
+Interactive Brokers
+一些支持 London Stock Exchange 的全球券商
+```
+
+对马来西亚非美国投资者来说，常见税务和成本行为：
+
+| 项目 | 通常会发生什么 |
+| --- | --- |
+| Dividend withholding tax | 美国股息进入爱尔兰基金时通常被扣 15% |
+| 投资者收到的 dividend | Accumulating 版本通常不会派现金给你 |
+| 卖出 ETF 的 capital gain | 通常由你的税务居住国决定，不是按美国 ETF 规则处理 |
+| Estate tax exposure | 通常比直接持有美国注册 ETF 更少面对 US estate tax exposure |
+| 提款 | 卖出 ETF，收到交易货币，换成 MYR，然后提款 |
+| 主要优点 | 对很多非美国长期投资者结构更干净 |
+| 主要弱点 | 平台更复杂，access 没那么简单 |
+
+股息例子：
+
+```text
+美国公司派 USD 100 股息给爱尔兰 ETF
+→ 基金层面 15% US withholding tax
+→ 大约 USD 85 留在 ETF 内部
+→ ETF 内部再投资
+```
+
+对 accumulating ETF 来说，你通常不会看到现金股息。价值会反映在 ETF 价格里面。
+
+## 30% vs 15% 的长期差异
+
+假设 S&P 500 在扣费用和股息 withholding 前，每年回报是 8%。再假设 dividend yield 大约是 1.3%。
+
+这是一个简化模型：
+
+| ETF 类型 | Dividend Withholding | Expense Ratio 例子 | 使用的近似净回报 |
+| --- | ---: | ---: | ---: |
+| VOO 这类美国注册 ETF | 股息部分 30% | 0.03% | 约 7.58% |
+| VUAA 这类爱尔兰注册 ETF | 股息部分 15% | 0.07% | 约 7.74% |
+
+用每月 RM2000 投资：
+
+| 持有时间 | 美国注册 ETF 近似结果 | 爱尔兰注册 ETF 近似结果 | 差异 |
+| --- | ---: | ---: | ---: |
+| 10 年 | RM352,504 | RM355,341 | RM2,837 |
+| 15 年 | RM652,361 | RM660,693 | RM8,331 |
+| 20 年 | RM1,084,450 | RM1,103,878 | RM19,428 |
+
+这张表不是精确预测。它只是说明方向：爱尔兰注册 ETF 可能有更好的股息税务效率，但它也可能带来不同平台、交易点差、货币路径和操作复杂度。
+
+## 提款时可能会付什么
+
+当你卖出并提款时，可能遇到这些层：
+
+| 层级 | 适用于 | 说明 |
+| --- | --- | --- |
+| ETF 买卖价差 | 所有 ETF | bid 和 ask 之间的差距 |
+| 券商卖出佣金 | 取决于平台 | 有些平台收费，有些平台有活动 |
+| 平台费 | 取决于平台 | 可能有服务费、结算费等 |
+| 货币转换 | 通常会有 | USD 或 GBP 可能要换回 MYR |
+| 出金费用 | 取决于券商和银行 | 券商或中转银行可能收费 |
+| US dividend withholding | 持有期间发生 | 通常提款前已经扣过 |
+| 马来西亚税务检查 | 取决于最新规则和个人情况 | 可能需要确认 foreign income 或 gain 是否应税 |
+
+核心点是：
+
+```text
+提款通常不是 15% 或 30% dividend tax 发生的地方。
+股息税通常已经在持有期间发生。
+```
+
+## 马来西亚税务可能性
+
+马来西亚税务规则可能变化，所以这一段应该当成 checklist，不是个人税务建议。
+
+目前需要理解的方向：
+
+| 情况 | 可能税务问题 |
+| --- | --- |
+| 马来西亚 resident individual 收到外国股息 | 在豁免期和条件满足时，可能可以 exempt |
+| Foreign income received in Malaysia | LHDN guideline 对 resident individual 的某些 foreign income 提供到 2026 年 12 月 31 日的豁免条件 |
+| Foreign capital gains | 马来西亚有 foreign capital assets disposal gains 的规则，但相关官方 guideline 的 chargeable person 明确列出 company、LLP、trust body 和 co-operative society |
+| 个人卖出 foreign listed ETF 后汇回马来西亚 | 大额汇回前应该确认最新个人税务处理 |
+| 交易行为像 business | 如果频繁交易到像 business income，税务处理可能不同于长期投资 |
+
+简单实用规则：
+
+```text
+小额长期投资者：
+重点先看 dividend withholding、FX、broker fee 和记录保存。
+
+大额提款：
+汇回马来西亚前，先找税务专业人士确认。
+
+频繁交易者：
+不要自动假设长期投资税务处理一定适用。
+```
+
+## 退出场景 1：通过 Webull 或 Moomoo 持有 VOO
+
+假设：
+
+```text
+ETF: VOO
+平台: Webull Malaysia 或 Moomoo Malaysia
+投资者: 马来西亚非美国投资者
+```
+
+可能退出流程：
+
+```text
+卖出 VOO
+→ 收到 USD 现金
+→ 在平台内或提款过程中把 USD 换成 MYR
+→ 提款到马来西亚银行
+```
+
+可能成本：
+
+| 成本 | 意思 |
+| --- | --- |
+| US dividend withholding | 持有期间派息时已经发生 |
+| 卖出费用 | 根据当时平台价格表 |
+| FX spread | USD 换 MYR 的汇率差很重要 |
+| 出金费用 | 取决于平台和银行 |
+| 马来西亚税务检查 | 大额汇回或规则改变时尤其需要 |
+
+主要优点：
+
+```text
+比较容易通过新手友好的平台买卖。
+```
+
+主要弱点：
+
+```text
+股息 withholding 通常不如爱尔兰注册 ETF 有效率。
+```
+
+## 退出场景 2：通过 IBKR 持有 VUAA 或 CSPX
+
+假设：
+
+```text
+ETF: VUAA 或 CSPX
+平台: Interactive Brokers
+投资者: 马来西亚非美国投资者
+```
+
+可能退出流程：
+
+```text
+卖出 VUAA 或 CSPX
+→ 根据 listing 收到 USD、GBP 或其他交易货币
+→ 在券商内做货币转换
+→ 提款到马来西亚银行
+```
+
+可能成本：
+
+| 成本 | 意思 |
+| --- | --- |
+| 基金层面 US withholding | 美国股息再投资前通常已经扣 15% |
+| 卖出佣金 | 取决于交易所和 IBKR 价格表 |
+| FX conversion | 换回 MYR 时很重要 |
+| 出金或银行费用 | 取决于提款路径 |
+| 马来西亚税务检查 | 大额提款或规则改变时仍然需要 |
+
+主要优点：
+
+```text
+对非美国长期投资者来说，股息税务效率和 accumulating 结构通常更干净。
+```
+
+主要弱点：
+
+```text
+平台和产品 access 更复杂。
+```
+
+## 退出场景 3：SPY 用于交易
+
+假设：
+
+```text
+ETF: SPY
+投资者: 更偏交易者
+```
+
+SPY 流动性很高，经常被 trader 使用，但它通常不是长期 S&P 500 投资最省成本的选择。
+
+可能问题：
+
+| 问题 | 意思 |
+| --- | --- |
+| Expense ratio 比 VOO / IVV 高 | 长期会有更高拖累 |
+| Distributing dividend | 股息会派出来并被扣税 |
+| 美国注册 | 马来西亚非美国投资者通常面对 30% dividend withholding |
+| 流动性强 | 适合交易，但月投长期投资未必需要 |
+
+如果你是 20 年月投投资者，SPY 通常不是第一选择，除非你有明确交易理由。
+
+## 完整提款 Checklist
+
+卖出和提款前，可以检查这张清单。
+
+<CardGrid columns={2}>
+  <InfoCard title="1. 确认 ETF Code">
+    先知道自己持有的是 VOO、IVV、SPY、CSPX、VUAA，还是其他 S&P 500 ETF。Ticker 决定 domicile、派息方式和交易所。
+  </InfoCard>
+
+  <InfoCard title="2. 确认交易货币">
+    检查 ETF 是用 USD、GBP，还是其他货币交易。这会影响换回 MYR 的路径。
+  </InfoCard>
+
+  <InfoCard title="3. 检查券商费用">
+    卖出前确认 sell commission、platform fee、exchange fee 和 settlement cost。
+  </InfoCard>
+
+  <InfoCard title="4. 检查 FX Rate">
+    USD 换 MYR 的汇率会明显影响最终进入马来西亚银行的钱。
+  </InfoCard>
+
+  <InfoCard title="5. 导出报表">
+    先下载 statement、trade confirmation、dividend record、FX record 和 withdrawal record。
+  </InfoCard>
+
+  <InfoCard title="6. 检查税务">
+    大额提款或频繁交易情况下，汇回马来西亚前先确认最新税务处理。
+  </InfoCard>
+</CardGrid>
+
+不要等到最后一年才理解这个流程。ETF 结构应该在 portfolio 还没变大之前就先想清楚。
+
+## 实际最终金额模型
+
+你可以用这个方式估算最后真正进银行的钱：
+
+```text
+券商里显示的 portfolio value
+- 卖出佣金
+- ETF spread
+- FX conversion cost
+- 出金费用
+- 可能税务
+= 预计最终收到的 MYR
+```
+
+例子：
+
+```text
+Projected portfolio value: RM1,137,998
+Sell and spread cost: RM500
+FX cost at 0.40%: RM4,552
+Withdrawal and bank cost: RM100
+Possible extra tax: depends on tax status and rules
+
+Estimated received before extra tax:
+RM1,137,998 - RM500 - RM4,552 - RM100
+= RM1,132,846
+```
+
+这个例子说明 FX 很重要。即使平台交易佣金很低，如果换汇价差不好，大 portfolio 也可能被吃掉几千 ringgit。
+
+## 资料来源
+
+可以参考这些资料：
+
+- [LHDN guideline on tax treatment for income received from abroad](https://www.hasil.gov.my/media/fzofh1gz/20240620-guidelines-tax-treatment-in-relation-to-income-received-from-abroad-amendment-june-2024.pdf)
+- [LHDN guideline on gains from disposal of foreign capital assets](https://www.hasil.gov.my/media/xh0fp0pt/20240327-tax-treatment-on-gains-from-the-disposal-of-foreign-capital-assets-received-from-outside-malaysia.pdf)
+- [IRS taxation of nonresident aliens](https://www.irs.gov/individuals/international-taxpayers/taxation-of-nonresident-aliens)
+- [IRS capital gains rules for certain nonresident aliens](https://www.irs.gov/individuals/international-taxpayers/the-taxation-of-capital-gains-of-nonresident-students-scholars-and-employees-of-foreign-governments)
+- [SSGA comparison of US-domiciled ETFs and Irish-domiciled UCITS ETFs](https://www.ssga.com/sg/en/institutional/insights/considerations-for-non-us-investors-us-etfs-vs-irish-ucits)
+- [Endowus explanation on US-listed ETF dividend withholding and Irish-domiciled UCITS ETFs](https://endowus.com/insights/an-inconvenient-truth-tax-on-us-listed-etfs-04c7532c5d)
+
+## 核心原则
+
+当你每个月 RM2000 投资 S&P 500，最后结果不只是市场回报决定的。
+
+它是由完整链条决定的：
+
+```text
+每月投入
+→ ETF code
+→ ETF domicile
+→ 股息税务损耗
+→ 平台费用
+→ FX conversion
+→ 提款路径
+→ 税务处理
+→ 最终收到的 MYR
+```
+
+想简单买，Webull 或 Moomoo 上的 VOO / IVV 会比较容易。想长期结构更有效率，IBKR 上的 VUAA / CSPX 通常更适合马来西亚非美国长期投资者。但最终拿钱出来时，不要只看 App 里面显示的 portfolio value。你要看完整交易、换汇、提款和税务路径后，真正进到马来西亚银行的钱是多少。
+
+</Lang>
