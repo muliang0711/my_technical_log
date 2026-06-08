@@ -185,7 +185,19 @@ The exit paths are similar, but the weak points are different.
 | VUAA / CSPX through IBKR | Sell ETF → receive listing currency → convert in broker → withdraw to Malaysian bank | 15% fund-level withholding before reinvestment | Exchange commission, spread, FX conversion, withdrawal/bank fee | Cleaner long-term structure, but platform and product access are more complex |
 | SPY for trading | Sell SPY → receive USD → convert/withdraw as needed | 30% dividend withholding plus higher expense ratio than VOO / IVV | Usually tight spread, but still subject to trading and FX costs | Useful for liquidity/trading; usually not the first choice for 20-year monthly investing |
 
-Example: if your final portfolio shows RM1,137,998 and the exit costs are RM500 selling/spread, 0.40% FX cost, and RM100 bank cost, the ETF choice does not create a new 15% or 30% withdrawal tax. The visible exit cost in that example is RM5,152 before any personal tax review.
+Example: if your portfolio shows RM1,137,998 before exit, the deduction can be estimated step by step. Assume 0.03% sell commission, 0.02% bid-ask spread, RM20 platform/settlement fee, 0.40% FX conversion cost, RM100 withdrawal/bank cost, and RM0 extra tax in the base case.
+
+| Step | Assumption | Deducted Amount | Balance After Step |
+| --- | ---: | ---: | ---: |
+| Portfolio value before selling | Starting value | RM0 | RM1,137,998.00 |
+| Sell commission | 0.03% of RM1,137,998 | RM341.40 | RM1,137,656.60 |
+| ETF bid-ask spread | 0.02% of RM1,137,998 | RM227.60 | RM1,137,429.00 |
+| Platform / settlement fee | Fixed assumed fee | RM20.00 | RM1,137,409.00 |
+| FX conversion cost | 0.40% of RM1,137,409 | RM4,549.64 | RM1,132,859.36 |
+| Withdrawal / bank cost | Fixed assumed fee | RM100.00 | RM1,132,759.36 |
+| Extra withdrawal tax | Base case assumes no new 15% or 30% withdrawal tax | RM0.00 | RM1,132,759.36 |
+
+In this example, the total visible exit deduction is RM5,238.64, and the estimated amount reaching the Malaysian bank is RM1,132,759.36. The 15% or 30% dividend withholding is not added again here because it normally happened earlier during the holding period.
 
 ## Full Withdrawal Checklist
 
@@ -233,21 +245,20 @@ Final broker value
 = estimated final MYR received
 ```
 
-Example:
+Using the same assumptions above:
 
 ```text
-Projected portfolio value: RM1,137,998
-Sell and spread cost: RM500
-FX cost at 0.40%: RM4,552
-Withdrawal and bank cost: RM100
-Possible extra tax: depends on tax status and rules
-
-Estimated received before extra tax:
-RM1,137,998 - RM500 - RM4,552 - RM100
-= RM1,132,846
+Projected portfolio value: RM1,137,998.00
+- Sell commission at 0.03%: RM341.40
+- ETF spread at 0.02%: RM227.60
+- Platform / settlement fee: RM20.00
+- FX cost at 0.40%: RM4,549.64
+- Withdrawal and bank cost: RM100.00
+- Extra withdrawal tax in base case: RM0.00
+= Estimated MYR received: RM1,132,759.36
 ```
 
-This example shows why FX matters. Even if the platform has low trading commission, a weak conversion rate can remove thousands of ringgit from a large portfolio.
+This example shows why FX matters. Even in this low-fee example, the FX cost alone is RM4,549.64, which is much larger than the assumed sell commission, spread, platform fee, and withdrawal fee combined.
 
 ## Source Notes
 
@@ -451,7 +462,19 @@ For simple access, VOO or IVV through Webull or Moomoo is easier. For long-term 
 | IBKR 持有 VUAA / CSPX | 卖出 ETF → 收到 listing 货币 → 在券商换汇 → 提款到马来西亚银行 | 基金内部再投资前通常已扣 15% withholding | 交易所佣金、价差、FX conversion、银行/出金费 | 长期结构较干净，但平台和产品 access 更复杂 |
 | SPY 用于交易 | 卖出 SPY → 收到 USD → 按需要换汇和提款 | 30% 股息 withholding，加上比 VOO / IVV 更高的 expense ratio | 通常价差较窄，但仍有交易和 FX 成本 | 适合需要流动性的交易，不一定适合 20 年月投 |
 
-例子：如果最终 portfolio 显示 RM1,137,998，退出成本是 RM500 卖出/价差、0.40% FX cost、RM100 银行费用，ETF 选择本身不会让你提款时再被扣新的 15% 或 30%。这个例子里的可见退出成本是 RM5,152，还没计算个人税务审查结果。
+例子：如果卖出前 portfolio 显示 RM1,137,998，可以这样逐步估算。这里假设卖出佣金 0.03%、ETF 买卖价差 0.02%、平台/结算费 RM20、FX conversion cost 0.40%、出金/银行费用 RM100，并且 base case 假设没有额外提款税。
+
+| 步骤 | 假设 | 扣除金额 | 扣完后余额 |
+| --- | ---: | ---: | ---: |
+| 卖出前 portfolio value | 起始金额 | RM0 | RM1,137,998.00 |
+| 卖出佣金 | RM1,137,998 的 0.03% | RM341.40 | RM1,137,656.60 |
+| ETF 买卖价差 | RM1,137,998 的 0.02% | RM227.60 | RM1,137,429.00 |
+| 平台 / 结算费 | 固定假设费用 | RM20.00 | RM1,137,409.00 |
+| FX conversion cost | RM1,137,409 的 0.40% | RM4,549.64 | RM1,132,859.36 |
+| 出金 / 银行费用 | 固定假设费用 | RM100.00 | RM1,132,759.36 |
+| 额外提款税 | base case 假设没有新的 15% 或 30% 提款税 | RM0.00 | RM1,132,759.36 |
+
+这个例子里，可见退出扣除总额是 RM5,238.64，预计真正进到马来西亚银行的是 RM1,132,759.36。15% 或 30% dividend withholding 不会在这里再扣一次，因为它通常已经在持有期间发生。
 
 ## 完整提款 Checklist
 
@@ -499,21 +522,20 @@ For simple access, VOO or IVV through Webull or Moomoo is easier. For long-term 
 = 预计最终收到的 MYR
 ```
 
-例子：
+用上面同一组假设：
 
 ```text
-Projected portfolio value: RM1,137,998
-Sell and spread cost: RM500
-FX cost at 0.40%: RM4,552
-Withdrawal and bank cost: RM100
-Possible extra tax: depends on tax status and rules
-
-Estimated received before extra tax:
-RM1,137,998 - RM500 - RM4,552 - RM100
-= RM1,132,846
+Projected portfolio value: RM1,137,998.00
+- Sell commission at 0.03%: RM341.40
+- ETF spread at 0.02%: RM227.60
+- Platform / settlement fee: RM20.00
+- FX cost at 0.40%: RM4,549.64
+- Withdrawal and bank cost: RM100.00
+- Extra withdrawal tax in base case: RM0.00
+= Estimated MYR received: RM1,132,759.36
 ```
 
-这个例子说明 FX 很重要。即使平台交易佣金很低，如果换汇价差不好，大 portfolio 也可能被吃掉几千 ringgit。
+这个例子说明 FX 很重要。即使在这个低费用假设里，单是 FX cost 就是 RM4,549.64，比卖出佣金、价差、平台费和出金费加起来还大。
 
 ## 资料来源
 
