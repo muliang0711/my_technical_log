@@ -1,0 +1,665 @@
+---
+title: "HTTP Request Header and Body"
+category: "Software Development"
+createdAt: "2026-06-09"
+summary: "A practical explanation of how HTTP request headers and bodies carry metadata and business data in web systems."
+readTime: "7 min read"
+tags:
+  - "Backend"
+  - "HTTP"
+  - "Node.js"
+  - "System Design"
+featured: false
+---
+
+<Lang lang="en">
+
+Every HTTP request is not just a URL. A real request usually contains a request line, headers, and sometimes a body. The important distinction is simple: headers describe the request, while the body carries the main data the client wants to send.
+
+## Short Answer
+
+An HTTP request can be understood like this:
+
+```text
+Request Line  -> What action and what path
+Headers       -> Metadata about the request
+Body          -> Actual data being sent
+```
+
+For example, when a frontend sends a login request, the server does not only receive `/login`. It also receives metadata such as content type, authentication token, user agent, cookies, and the JSON payload containing the username and password.
+
+```text
+POST /api/login HTTP/1.1
+Host: example.com
+Content-Type: application/json
+Authorization: Bearer token_here
+
+{
+  "email": "user@example.com",
+  "password": "password123"
+}
+```
+
+In this example:
+
+| Part | Purpose |
+| --- | --- |
+| `POST /api/login` | Tells the server which endpoint is being called |
+| `Content-Type` | Tells the server how to parse the body |
+| `Authorization` | Carries authentication information |
+| Body | Carries the login data |
+
+The header is not the main business payload. The body is usually the main business payload.
+
+## What an HTTP Request Contains
+
+A common HTTP request has three main parts.
+
+<FlowGraph
+  title="HTTP Request Structure"
+  nodes={[
+    { id: "line", label: "Request Line", detail: "Method, path, and HTTP version" },
+    { id: "headers", label: "Headers", detail: "Metadata used by server, proxy, browser, and framework" },
+    { id: "body", label: "Body", detail: "Optional payload such as JSON, form data, or file content" }
+  ]}
+/>
+
+The request line says what the client wants to do.
+
+```text
+GET /api/products HTTP/1.1
+POST /api/orders HTTP/1.1
+PUT /api/users/123 HTTP/1.1
+DELETE /api/posts/456 HTTP/1.1
+```
+
+The headers describe how the request should be interpreted.
+
+```text
+Content-Type: application/json
+Authorization: Bearer token_here
+Cookie: sessionId=abc123
+User-Agent: Mozilla/5.0
+Accept: application/json
+```
+
+The body carries data when the request needs to send data to the server.
+
+```json
+{
+  "productId": "P1001",
+  "quantity": 2
+}
+```
+
+Not every request has a body. `GET` requests usually do not have a body. `POST`, `PUT`, and `PATCH` requests commonly have one.
+
+## What Headers Are For
+
+Headers are request metadata. They help the server, browser, framework, API gateway, proxy, CDN, and authentication layer understand how to handle the request.
+
+Common request headers:
+
+| Header | Meaning |
+| --- | --- |
+| `Host` | Which domain the request is targeting |
+| `Content-Type` | Format of the request body |
+| `Accept` | Format the client wants back |
+| `Authorization` | Authentication token or credential |
+| `Cookie` | Browser-stored session data |
+| `User-Agent` | Client software information |
+| `Origin` | Where the browser request came from |
+| `Referer` | Previous page that linked to the request |
+
+The key point is that headers are not usually where you put large business data. Headers should stay small and descriptive.
+
+For example, this is normal:
+
+```text
+Authorization: Bearer eyJhbGciOi...
+Content-Type: application/json
+```
+
+This is a bad idea:
+
+```text
+X-User-Profile: {"name":"John","address":"...","orders":[...large data...]}
+```
+
+Large business data belongs in the body, not the header.
+
+## What the Body Is For
+
+The request body is the data payload sent from the client to the server.
+
+It is commonly used for:
+
+- Creating a resource
+- Updating a resource
+- Submitting a form
+- Uploading a file
+- Sending JSON data to an API
+
+Example JSON body:
+
+```json
+{
+  "name": "Keyboard",
+  "price": 299,
+  "category": "Accessories"
+}
+```
+
+Example form body:
+
+```text
+name=Keyboard&price=299&category=Accessories
+```
+
+Example multipart body is usually used for file upload:
+
+```text
+------boundary
+Content-Disposition: form-data; name="avatar"; filename="profile.png"
+Content-Type: image/png
+
+<binary file content>
+------boundary--
+```
+
+The server needs the `Content-Type` header to know how to parse the body.
+
+| `Content-Type` | Body Format |
+| --- | --- |
+| `application/json` | JSON object or array |
+| `application/x-www-form-urlencoded` | Traditional HTML form format |
+| `multipart/form-data` | File upload or mixed form data |
+| `text/plain` | Plain text |
+| `application/octet-stream` | Raw binary data |
+
+If the `Content-Type` is wrong, the backend may fail to parse the body correctly.
+
+## Header vs Body
+
+The easiest way to separate them is this:
+
+| Question | Header | Body |
+| --- | --- | --- |
+| What is it? | Metadata | Payload |
+| Is it usually large? | No | Can be larger |
+| Does every request have it? | Almost always | No |
+| Common usage | Auth, content type, cookies, client info | JSON, form data, files |
+| Example | `Authorization: Bearer token` | `{ "email": "a@test.com" }` |
+
+A request can have headers without a body.
+
+```text
+GET /api/products HTTP/1.1
+Host: example.com
+Accept: application/json
+```
+
+A request can also have both headers and body.
+
+```text
+POST /api/products HTTP/1.1
+Host: example.com
+Content-Type: application/json
+Authorization: Bearer token_here
+
+{
+  "name": "Mouse",
+  "price": 99
+}
+```
+
+For backend development, the most common mistake is mixing responsibilities. Authentication token belongs in headers. Business data belongs in the body.
+
+## How It Looks in Node.js
+
+In Express, headers and body are accessed differently.
+
+Run this from a small Express project to create an endpoint that prints request headers and body:
+
+```javascript
+import express from "express";
+
+const app = express();
+
+app.use(express.json());
+
+app.post("/api/orders", (req, res) => {
+  console.log("headers:", req.headers);
+  console.log("body:", req.body);
+
+  res.json({ ok: true });
+});
+
+app.listen(3000, () => {
+  console.log("Server running on port 3000");
+});
+```
+
+Send this request from your terminal to see how headers and body arrive at the server:
+
+```bash
+curl -X POST http://localhost:3000/api/orders \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer fake_token" \
+  -d '{"productId":"P1001","quantity":2}'
+```
+
+The server will receive the `Authorization` and `Content-Type` values inside `req.headers`, while the JSON payload will appear inside `req.body`.
+
+Example output:
+
+```text
+headers: {
+  host: 'localhost:3000',
+  'content-type': 'application/json',
+  authorization: 'Bearer fake_token',
+  ...
+}
+
+body: {
+  productId: 'P1001',
+  quantity: 2
+}
+```
+
+This shows the boundary clearly. The framework parses headers and body into different places because they have different responsibilities.
+
+## Common Mistakes
+
+<CardGrid columns={2}>
+  <InfoCard title="1. Forgetting Content-Type">
+    If the client sends JSON but does not set `Content-Type: application/json`, the backend may not parse the body correctly.
+  </InfoCard>
+
+  <InfoCard title="2. Putting Business Data in Headers">
+    Headers should describe the request. Large business objects should be sent in the body.
+  </InfoCard>
+
+  <InfoCard title="3. Expecting GET Body">
+    Most APIs should avoid request bodies in `GET` requests. Use query parameters for filtering and body payloads for write operations.
+  </InfoCard>
+
+  <InfoCard title="4. Logging Sensitive Headers">
+    Headers may contain tokens, cookies, and session IDs. Logging them directly can leak credentials.
+  </InfoCard>
+</CardGrid>
+
+Another common issue is assuming that the body is automatically available. In many frameworks, body parsing must be enabled.
+
+For example, in Express, this middleware is needed to parse JSON request bodies:
+
+```javascript
+app.use(express.json());
+```
+
+Without it, `req.body` may be `undefined` or empty.
+
+## Practical Debugging Workflow
+
+When an API request does not behave correctly, inspect the request in this order.
+
+| Step | What to Check | Why It Matters |
+| --- | --- | --- |
+| 1 | HTTP method | Confirms whether the endpoint action is correct |
+| 2 | URL path | Confirms the request reached the expected route |
+| 3 | Query parameters | Confirms filter or search values |
+| 4 | Headers | Confirms auth, content type, cookies, origin |
+| 5 | Body | Confirms the submitted payload |
+| 6 | Server parser | Confirms the framework can parse the body |
+
+Run this from your terminal when you want to inspect exactly what your backend receives from a manual request:
+
+```bash
+curl -v -X POST http://localhost:3000/api/orders \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer fake_token" \
+  -d '{"productId":"P1001","quantity":2}'
+```
+
+The `-v` flag prints request and response details. It is useful when you need to confirm whether the client really sent the expected headers.
+
+## The Main Principle
+
+Headers explain the request. Body carries the data.
+
+When designing an API, keep the responsibility clean:
+
+- Put authentication, content type, cookies, tracing IDs, and client metadata in headers.
+- Put business payloads such as user input, product data, order data, and file content in the body.
+- Use query parameters for simple filtering, searching, and pagination.
+- Do not log sensitive headers or raw bodies without masking.
+
+A clean request structure makes APIs easier to debug, safer to operate, and easier for other services to integrate.
+
+</Lang>
+
+<Lang lang="zh">
+
+HTTP request 不只是一个 URL。一个真实的请求通常会包含 request line、headers，有时候还会包含 body。最重要的区别是：header 是用来描述这个请求的 metadata，body 才是客户端真正要提交的数据。
+
+## 简短答案
+
+你可以这样理解一个 HTTP request：
+
+```text
+Request Line  -> 要做什么动作，访问什么路径
+Headers       -> 这个请求的 metadata
+Body          -> 真正要发送的数据
+```
+
+例如前端发送一个 login 请求时，后端收到的不只是 `/login`。它还会收到 content type、authentication token、user agent、cookie，以及包含 username 和 password 的 JSON payload。
+
+```text
+POST /api/login HTTP/1.1
+Host: example.com
+Content-Type: application/json
+Authorization: Bearer token_here
+
+{
+  "email": "user@example.com",
+  "password": "password123"
+}
+```
+
+在这个例子里：
+
+| 部分 | 作用 |
+| --- | --- |
+| `POST /api/login` | 告诉 server 正在调用哪个 endpoint |
+| `Content-Type` | 告诉 server body 应该怎样解析 |
+| `Authorization` | 携带身份验证信息 |
+| Body | 携带 login 数据 |
+
+Header 不是主要业务数据。Body 通常才是主要业务数据。
+
+## HTTP Request 里面有什么
+
+一个常见的 HTTP request 有三个主要部分。
+
+<FlowGraph
+  title="HTTP Request 结构"
+  nodes={[
+    { id: "line", label: "Request Line", detail: "HTTP method、path 和 HTTP version" },
+    { id: "headers", label: "Headers", detail: "给 server、proxy、browser、framework 使用的 metadata" },
+    { id: "body", label: "Body", detail: "可选的数据 payload，例如 JSON、form data 或 file content" }
+  ]}
+/>
+
+Request line 说明客户端想做什么。
+
+```text
+GET /api/products HTTP/1.1
+POST /api/orders HTTP/1.1
+PUT /api/users/123 HTTP/1.1
+DELETE /api/posts/456 HTTP/1.1
+```
+
+Headers 说明这个请求应该怎样被理解。
+
+```text
+Content-Type: application/json
+Authorization: Bearer token_here
+Cookie: sessionId=abc123
+User-Agent: Mozilla/5.0
+Accept: application/json
+```
+
+Body 则是在 request 需要提交数据时使用。
+
+```json
+{
+  "productId": "P1001",
+  "quantity": 2
+}
+```
+
+不是每一个 request 都有 body。`GET` request 通常没有 body。`POST`、`PUT` 和 `PATCH` request 通常会有 body。
+
+## Header 是用来做什么的
+
+Header 是 request metadata。它帮助 server、browser、framework、API gateway、proxy、CDN 和 authentication layer 判断应该怎样处理这个请求。
+
+常见 request headers：
+
+| Header | 意思 |
+| --- | --- |
+| `Host` | 这个请求要访问哪个 domain |
+| `Content-Type` | Request body 的格式 |
+| `Accept` | Client 希望收到什么格式的 response |
+| `Authorization` | Authentication token 或 credential |
+| `Cookie` | Browser 保存的 session data |
+| `User-Agent` | Client 软件信息 |
+| `Origin` | Browser request 来自哪里 |
+| `Referer` | 这个请求是从哪个页面跳过来的 |
+
+重点是：header 通常不是用来放大量业务数据的。Header 应该保持小、明确、偏描述性质。
+
+这个是正常的：
+
+```text
+Authorization: Bearer eyJhbGciOi...
+Content-Type: application/json
+```
+
+这个就不适合：
+
+```text
+X-User-Profile: {"name":"John","address":"...","orders":[...large data...]}
+```
+
+大的业务数据应该放在 body，不应该塞进 header。
+
+## Body 是用来做什么的
+
+Request body 是 client 发送给 server 的数据 payload。
+
+它常用于：
+
+- 创建资源
+- 更新资源
+- 提交表单
+- 上传文件
+- 发送 JSON data 给 API
+
+JSON body 例子：
+
+```json
+{
+  "name": "Keyboard",
+  "price": 299,
+  "category": "Accessories"
+}
+```
+
+Form body 例子：
+
+```text
+name=Keyboard&price=299&category=Accessories
+```
+
+Multipart body 通常用于 file upload：
+
+```text
+------boundary
+Content-Disposition: form-data; name="avatar"; filename="profile.png"
+Content-Type: image/png
+
+<binary file content>
+------boundary--
+```
+
+Server 需要依赖 `Content-Type` header 来判断 body 应该怎样解析。
+
+| `Content-Type` | Body 格式 |
+| --- | --- |
+| `application/json` | JSON object 或 array |
+| `application/x-www-form-urlencoded` | 传统 HTML form 格式 |
+| `multipart/form-data` | 文件上传或混合表单数据 |
+| `text/plain` | 普通文字 |
+| `application/octet-stream` | 原始 binary data |
+
+如果 `Content-Type` 错了，backend 就可能无法正确解析 body。
+
+## Header vs Body
+
+最简单的区分方式是：
+
+| 问题 | Header | Body |
+| --- | --- | --- |
+| 它是什么？ | Metadata | Payload |
+| 通常会很大吗？ | 不会 | 可以比较大 |
+| 每个 request 都有吗？ | 几乎都有 | 不一定 |
+| 常见用途 | Auth、content type、cookies、client info | JSON、form data、files |
+| 例子 | `Authorization: Bearer token` | `{ "email": "a@test.com" }` |
+
+一个 request 可以只有 headers，没有 body。
+
+```text
+GET /api/products HTTP/1.1
+Host: example.com
+Accept: application/json
+```
+
+一个 request 也可以同时有 headers 和 body。
+
+```text
+POST /api/products HTTP/1.1
+Host: example.com
+Content-Type: application/json
+Authorization: Bearer token_here
+
+{
+  "name": "Mouse",
+  "price": 99
+}
+```
+
+做 backend 时，最常见的错误是把职责混在一起。Authentication token 应该放在 headers。业务数据应该放在 body。
+
+## 在 Node.js 里面怎么看
+
+在 Express 里面，headers 和 body 是从不同位置读取的。
+
+在一个简单的 Express project 里运行这段代码，可以创建一个 endpoint 来打印 request headers 和 body：
+
+```javascript
+import express from "express";
+
+const app = express();
+
+app.use(express.json());
+
+app.post("/api/orders", (req, res) => {
+  console.log("headers:", req.headers);
+  console.log("body:", req.body);
+
+  res.json({ ok: true });
+});
+
+app.listen(3000, () => {
+  console.log("Server running on port 3000");
+});
+```
+
+从 terminal 发送这个 request，可以观察 headers 和 body 是怎样到达 server 的：
+
+```bash
+curl -X POST http://localhost:3000/api/orders \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer fake_token" \
+  -d '{"productId":"P1001","quantity":2}'
+```
+
+Server 会在 `req.headers` 里面收到 `Authorization` 和 `Content-Type`，而 JSON payload 会出现在 `req.body`。
+
+Example output：
+
+```text
+headers: {
+  host: 'localhost:3000',
+  'content-type': 'application/json',
+  authorization: 'Bearer fake_token',
+  ...
+}
+
+body: {
+  productId: 'P1001',
+  quantity: 2
+}
+```
+
+这就能看出边界。Framework 会把 headers 和 body 解析到不同地方，因为它们负责的事情不一样。
+
+## 常见错误
+
+<CardGrid columns={2}>
+  <InfoCard title="1. 忘记 Content-Type">
+    Client 明明发送 JSON，但是没有设置 `Content-Type: application/json`，backend 就可能解析不到 body。
+  </InfoCard>
+
+  <InfoCard title="2. 把业务数据塞进 Header">
+    Header 应该描述 request。大的业务 object 应该放在 body。
+  </InfoCard>
+
+  <InfoCard title="3. 期待 GET Body">
+    大多数 API 不应该依赖 `GET` request body。过滤和搜索用 query parameters，写入操作才用 body payload。
+  </InfoCard>
+
+  <InfoCard title="4. 直接记录敏感 Header">
+    Header 里面可能有 token、cookie 和 session ID。直接 logging 可能泄露 credential。
+  </InfoCard>
+</CardGrid>
+
+另一个常见问题是以为 body 会自动存在。很多 framework 都需要先启用 body parser。
+
+例如 Express 需要这个 middleware 才能解析 JSON request body：
+
+```javascript
+app.use(express.json());
+```
+
+没有它，`req.body` 可能会是 `undefined` 或空对象。
+
+## 实际 Debug Workflow
+
+当一个 API request 行为不正确时，可以按照这个顺序检查。
+
+| 步骤 | 检查什么 | 为什么重要 |
+| --- | --- | --- |
+| 1 | HTTP method | 确认 endpoint action 是否正确 |
+| 2 | URL path | 确认 request 是否打到正确 route |
+| 3 | Query parameters | 确认 filter 或 search value |
+| 4 | Headers | 确认 auth、content type、cookies、origin |
+| 5 | Body | 确认提交的数据 payload |
+| 6 | Server parser | 确认 framework 是否能解析 body |
+
+当你想手动检查 backend 到底收到什么时，可以在 terminal 运行这个 request：
+
+```bash
+curl -v -X POST http://localhost:3000/api/orders \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer fake_token" \
+  -d '{"productId":"P1001","quantity":2}'
+```
+
+`-v` 会打印 request 和 response 的细节。当你需要确认 client 是否真的发送了预期 headers 时，它很有用。
+
+## 核心原则
+
+Headers 解释这个 request。Body 携带真正的数据。
+
+设计 API 时，把职责分清楚：
+
+- Authentication、content type、cookies、tracing ID、client metadata 放在 headers。
+- User input、product data、order data、file content 这些业务 payload 放在 body。
+- 简单 filtering、searching、pagination 用 query parameters。
+- 不要在没有 masking 的情况下记录 sensitive headers 或 raw bodies。
+
+Request 结构干净，API 才更容易 debug、更安全，也更容易被其他 service 集成。
+
+</Lang>
