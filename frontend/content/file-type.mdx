@@ -1,9 +1,9 @@
 ---
-title: "Common Programming File Types and Why They Exist"
+title: "Common Programming File Types Beyond Normal Source Code"
 category: "Software Development"
 createdAt: "2026-06-10"
-summary: "A practical guide to common file types in programming projects and how to understand their purpose."
-readTime: "10 min read"
+summary: "A practical guide to common non-source file types that appear often in programming projects."
+readTime: "9 min read"
 tags:
   - "Programming"
   - "File Formats"
@@ -14,26 +14,21 @@ featured: false
 
 <Lang lang="en">
 
-Programming projects contain many file types because software is not only code. A real project also needs configuration, documentation, dependency management, data exchange, styling, database scripts, automation, deployment rules, environment variables, certificates, logs, and sometimes AI prompt files. Each file type exists because a specific tool needs a predictable format to read.
+Programming projects contain many file types beyond normal source code. These files usually exist because tools need configuration, documentation, dependency metadata, database instructions, deployment rules, API contracts, environment variables, or structured AI prompts. Once you understand which tool reads the file, the file type becomes much easier to understand.
 
 ## Short Answer
 
 A file type tells the developer and the toolchain what kind of content is inside a file.
 
-It usually answers five questions:
+It usually answers four questions:
 
-- Is this file executable code?
 - Is this file configuration?
-- Is this file documentation?
+- Is this file documentation or content?
 - Is this file structured data?
 - Which tool is supposed to read this file?
 
-For example:
-
 | File Type | Main Purpose | Common Reader |
 | --- | --- | --- |
-| `.js`, `.ts`, `.java`, `.py`, `.go` | Application logic | Compiler or runtime |
-| `.html`, `.css`, `.scss` | Web page structure and styling | Browser or build tool |
 | `.json`, `.yaml`, `.toml`, `.ini` | Configuration or structured data | App, framework, DevOps tool |
 | `.xml` | Strict structured markup | Maven, Android, SOAP, enterprise tools |
 | `.md`, `.mdx` | Documentation and rich content | Documentation site or blog engine |
@@ -43,98 +38,32 @@ For example:
 | `.sh`, `.ps1` | Automation scripts | Shell or PowerShell |
 | `.proto`, `.graphql` | API contracts | API tooling |
 | `.lock` files | Exact dependency versions | Package manager |
+| `.pem`, `.crt`, `.key` | Certificates and keys | TLS, SSH, infrastructure tools |
+| `.prompt`, `.prompty`, `.poml` | AI prompt structure | AI tooling or agent framework |
 
 The extension is not decoration. It is a signal to the toolchain.
 
 ## The Main Categories
 
-Most programming file types fit into a few practical groups.
+Most non-source programming file types fit into a few practical groups.
 
 <FlowGraph
-  title="Programming File Type Categories"
+  title="Common Non-Source File Responsibilities"
   nodes={[
-    { id: "source", label: "Source Code", detail: "Defines application behavior" },
     { id: "config", label: "Configuration", detail: "Controls tools, frameworks, and runtime behavior" },
     { id: "content", label: "Content", detail: "Stores documentation, articles, and UI text" },
     { id: "data", label: "Data", detail: "Moves structured information between systems" },
     { id: "automation", label: "Automation", detail: "Runs build, deploy, and maintenance tasks" },
-    { id: "contracts", label: "Contracts", detail: "Defines APIs, schemas, and communication formats" }
+    { id: "contracts", label: "Contracts", detail: "Defines APIs, schemas, and communication formats" },
+    { id: "security", label: "Security Files", detail: "Stores certificates, keys, and secure connection material" }
   ]}
 />
 
-This is why one project can contain many files even before the real business logic is large.
+A backend project may contain `pom.xml`, `application.properties`, `.sql`, `.env`, `Dockerfile`, `docker-compose.yml`, `.gitignore`, `.md`, and lock files.
 
-A backend project may have `.java`, `pom.xml`, `.properties`, `.sql`, `.env`, `Dockerfile`, `.yml`, `.md`, and `.gitignore`.
+A frontend or documentation project may contain `package.json`, `tsconfig.json`, `.mdx`, `.env`, `.svg`, `.json`, `.yaml`, and lock files.
 
-A frontend project may have `.tsx`, `.css`, `.json`, `.mdx`, `.env`, `.svg`, `.config.js`, and `.lock` files.
-
-## Source Code Files
-
-Source code files define program behavior.
-
-These files are usually compiled, interpreted, bundled, or executed.
-
-| File Type | Language / Meaning | Common Use |
-| --- | --- | --- |
-| `.js` | JavaScript | Browser apps, Node.js backend |
-| `.ts` | TypeScript | JavaScript with type checking |
-| `.jsx` | JavaScript + JSX | React components |
-| `.tsx` | TypeScript + JSX | Typed React components |
-| `.java` | Java | Spring Boot, Android, enterprise systems |
-| `.py` | Python | Scripts, AI tooling, backend services |
-| `.go` | Go | Backend services, CLI tools, infrastructure tools |
-| `.rs` | Rust | System tools, backend services, performance-critical code |
-| `.cpp`, `.c`, `.h` | C / C++ | System programming, embedded systems, native libraries |
-| `.cs` | C# | .NET applications, game development with Unity |
-| `.php` | PHP | Server-rendered websites, Laravel apps |
-| `.rb` | Ruby | Rails apps, scripts |
-| `.swift` | Swift | iOS and macOS apps |
-| `.kt` | Kotlin | Android apps, JVM backend |
-
-Example TypeScript code:
-
-```typescript
-export function calculateTotal(price: number, quantity: number) {
-  return price * quantity;
-}
-```
-
-This file describes executable behavior. A compiler or runtime must understand the syntax before the application can run.
-
-## Web UI Files
-
-Web projects often separate structure, style, and behavior.
-
-| File Type | Purpose | Common Use |
-| --- | --- | --- |
-| `.html` | Page structure | Static pages, templates |
-| `.css` | Styling | Colors, layout, spacing |
-| `.scss`, `.sass` | CSS with extra features | Variables, nesting, reusable style logic |
-| `.less` | CSS preprocessor format | Older frontend projects |
-| `.svg` | Vector image markup | Icons, logos, scalable graphics |
-| `.vue` | Vue single-file component | Template, script, and style in one file |
-| `.svelte` | Svelte component | Component source compiled by Svelte |
-
-Example HTML:
-
-```html
-<button class="primary-button">
-  Submit
-</button>
-```
-
-Example CSS:
-
-```css
-.primary-button {
-  padding: 8px 12px;
-  border-radius: 6px;
-}
-```
-
-HTML describes what exists on the page. CSS describes how it looks. JavaScript or TypeScript describes how it behaves.
-
-Modern frameworks may combine these responsibilities, but the underlying idea still exists.
+These files are not random. They separate different project responsibilities.
 
 ## Configuration Files
 
@@ -608,9 +537,6 @@ Use this table when deciding what a file probably does.
 
 | If the File Is For | It Is Usually |
 | --- | --- |
-| Application behavior | Source code |
-| UI structure | HTML or component file |
-| UI styling | CSS, SCSS, Sass, Less |
 | Tool settings | JSON, YAML, TOML, INI, properties |
 | Java build and dependencies | `pom.xml` or `build.gradle` |
 | Rich technical article | MDX |
@@ -621,7 +547,8 @@ Use this table when deciding what a file probably does.
 | Automation | Shell, PowerShell, Makefile |
 | Secrets and runtime settings | `.env`, environment config |
 | Exact dependency versions | Lock file |
-| Prompt orchestration | Prompt file, Prompty, POML |
+| Prompt orchestration | Prompt file, Promty, POML |
+| Certificates and secure connection material | PEM, CRT, KEY files |
 
 File types are not random. They are boundaries between different responsibilities in a software project.
 
@@ -629,7 +556,7 @@ File types are not random. They are boundaries between different responsibilitie
 
 Different file types exist because programming projects contain different kinds of information.
 
-Source code defines behavior. Config files control tools. Markdown explains. MDX renders rich content. XML represents strict structured markup. JSON and YAML move or configure structured data. SQL controls databases. Docker and CI files automate deployment. Lock files preserve dependency consistency. Prompt files structure AI behavior.
+Configuration files control tools. Markdown explains. MDX renders rich content. XML represents strict structured markup. JSON and YAML move or configure structured data. SQL controls databases. Docker and CI files automate deployment. Lock files preserve dependency consistency. Certificate files support secure communication. Prompt files structure AI behavior.
 
 When you see a new file type, do not ask only what the extension means. Ask which tool reads it, what responsibility it owns, and whether it is meant to be edited by humans or generated by machines.
 
@@ -637,26 +564,21 @@ When you see a new file type, do not ask only what the extension means. Ask whic
 
 <Lang lang="zh">
 
-编程项目里面会出现很多文件类型，是因为软件项目不只有代码。一个真实项目还会有配置、文档、依赖管理、数据交换、样式、数据库脚本、自动化流程、部署规则、环境变量、证书、日志，甚至 AI prompt 文件。每一种文件类型存在的原因，都是因为某个工具需要一种稳定、可预测的格式来读取它。
+编程项目里面除了普通源码以外，还会出现很多其他文件类型。这些文件通常是为了让工具读取配置、文档、依赖信息、数据库指令、部署规则、API contract、环境变量，或者结构化 AI prompt。只要你知道是哪一个工具读取这个文件，这个文件类型就会容易理解很多。
 
 ## 简短答案
 
 文件类型会告诉 developer 和 toolchain：这个文件里面大概是什么内容。
 
-它通常回答五个问题：
+它通常回答四个问题：
 
-- 这个文件是不是可执行代码？
 - 这个文件是不是配置？
-- 这个文件是不是文档？
+- 这个文件是不是文档或内容？
 - 这个文件是不是结构化数据？
 - 哪一个工具应该读取这个文件？
 
-例如：
-
 | 文件类型 | 主要用途 | 常见读取者 |
 | --- | --- | --- |
-| `.js`, `.ts`, `.java`, `.py`, `.go` | 应用逻辑 | Compiler 或 runtime |
-| `.html`, `.css`, `.scss` | 网页结构和样式 | Browser 或 build tool |
 | `.json`, `.yaml`, `.toml`, `.ini` | 配置或结构化数据 | App、framework、DevOps tool |
 | `.xml` | 严格结构化标记 | Maven、Android、SOAP、企业工具 |
 | `.md`, `.mdx` | 文档和 rich content | 文档站或 blog engine |
@@ -666,98 +588,32 @@ When you see a new file type, do not ask only what the extension means. Ask whic
 | `.sh`, `.ps1` | 自动化脚本 | Shell 或 PowerShell |
 | `.proto`, `.graphql` | API contract | API tooling |
 | `.lock` files | 精确 dependency version | Package manager |
+| `.pem`, `.crt`, `.key` | Certificate 和 key | TLS、SSH、infra tool |
+| `.prompt`, `.prompty`, `.poml` | AI prompt structure | AI tooling 或 agent framework |
 
 文件 extension 不是装饰。它是给 toolchain 的信号。
 
 ## 主要分类
 
-大多数编程文件类型都可以放进几个实际分类。
+大多数非源码文件类型都可以放进几个实际分类。
 
 <FlowGraph
-  title="编程文件类型分类"
+  title="常见非源码文件职责"
   nodes={[
-    { id: "source", label: "源码", detail: "定义应用程序行为" },
     { id: "config", label: "配置", detail: "控制工具、框架和运行时行为" },
     { id: "content", label: "内容", detail: "保存文档、文章和 UI 文案" },
     { id: "data", label: "数据", detail: "在系统之间传递结构化信息" },
     { id: "automation", label: "自动化", detail: "执行构建、部署和维护任务" },
-    { id: "contracts", label: "契约", detail: "定义 API、schema 和通信格式" }
+    { id: "contracts", label: "契约", detail: "定义 API、schema 和通信格式" },
+    { id: "security", label: "安全文件", detail: "保存 certificate、key 和安全连接材料" }
   ]}
 />
 
-所以一个项目即使业务逻辑还不大，也可能已经有很多文件。
+一个 backend 项目可能有 `pom.xml`、`application.properties`、`.sql`、`.env`、`Dockerfile`、`docker-compose.yml`、`.gitignore`、`.md`、lock file。
 
-一个 backend 项目可能有 `.java`、`pom.xml`、`.properties`、`.sql`、`.env`、`Dockerfile`、`.yml`、`.md`、`.gitignore`。
+一个 frontend 或 documentation 项目可能有 `package.json`、`tsconfig.json`、`.mdx`、`.env`、`.svg`、`.json`、`.yaml`、lock file。
 
-一个 frontend 项目可能有 `.tsx`、`.css`、`.json`、`.mdx`、`.env`、`.svg`、`.config.js`、lock file。
-
-## 源码文件
-
-源码文件用来定义程序行为。
-
-这些文件通常会被编译、解释、打包或执行。
-
-| 文件类型 | 语言 / 意义 | 常见用途 |
-| --- | --- | --- |
-| `.js` | JavaScript | Browser app、Node.js backend |
-| `.ts` | TypeScript | 带类型检查的 JavaScript |
-| `.jsx` | JavaScript + JSX | React component |
-| `.tsx` | TypeScript + JSX | 带类型的 React component |
-| `.java` | Java | Spring Boot、Android、企业系统 |
-| `.py` | Python | 脚本、AI 工具、backend service |
-| `.go` | Go | Backend service、CLI tool、infra tool |
-| `.rs` | Rust | 系统工具、backend service、高性能代码 |
-| `.cpp`, `.c`, `.h` | C / C++ | 系统编程、嵌入式、native library |
-| `.cs` | C# | .NET 应用、Unity 游戏开发 |
-| `.php` | PHP | SSR 网站、Laravel 应用 |
-| `.rb` | Ruby | Rails 应用、脚本 |
-| `.swift` | Swift | iOS 和 macOS 应用 |
-| `.kt` | Kotlin | Android 应用、JVM backend |
-
-TypeScript 例子：
-
-```typescript
-export function calculateTotal(price: number, quantity: number) {
-  return price * quantity;
-}
-```
-
-这个文件是在描述可以执行的行为。compiler 或 runtime 必须理解它的语法，应用才能运行。
-
-## Web UI 文件
-
-Web 项目经常会把结构、样式和行为分开。
-
-| 文件类型 | 目的 | 常见用途 |
-| --- | --- | --- |
-| `.html` | 页面结构 | 静态页面、template |
-| `.css` | 样式 | 颜色、layout、spacing |
-| `.scss`, `.sass` | 增强版 CSS | variable、nesting、可复用样式逻辑 |
-| `.less` | CSS preprocessor | 较旧的 frontend 项目 |
-| `.svg` | 向量图片标记 | icon、logo、可缩放图形 |
-| `.vue` | Vue single-file component | template、script、style 放同一个文件 |
-| `.svelte` | Svelte component | Svelte 编译的组件源码 |
-
-HTML 例子：
-
-```html
-<button class="primary-button">
-  Submit
-</button>
-```
-
-CSS 例子：
-
-```css
-.primary-button {
-  padding: 8px 12px;
-  border-radius: 6px;
-}
-```
-
-HTML 描述页面上有什么。CSS 描述它长什么样。JavaScript 或 TypeScript 描述它怎样互动。
-
-现代 framework 可能会把这些责任组合在一起，但底层概念还是存在。
+这些文件不是随机出现的。它们是在拆分不同的项目责任。
 
 ## 配置文件
 
@@ -1231,9 +1087,6 @@ dist
 
 | 如果文件是为了 | 通常属于 |
 | --- | --- |
-| 应用行为 | Source code |
-| UI 结构 | HTML 或 component file |
-| UI 样式 | CSS、SCSS、Sass、Less |
 | 工具设置 | JSON、YAML、TOML、INI、properties |
 | Java build 和 dependency | `pom.xml` 或 `build.gradle` |
 | Rich technical article | MDX |
@@ -1245,6 +1098,7 @@ dist
 | Secret 和 runtime setting | `.env`、environment config |
 | 精确 dependency version | Lock file |
 | Prompt orchestration | Prompt file、Prompty、POML |
+| Certificate 和安全连接材料 | PEM、CRT、KEY files |
 
 文件类型不是随机的。它们是软件项目中不同责任的边界。
 
@@ -1252,7 +1106,7 @@ dist
 
 不同文件类型存在，是因为编程项目里面有不同种类的信息。
 
-源码定义行为。配置文件控制工具。Markdown 解释东西。MDX 渲染 rich content。XML 表示严格结构化 markup。JSON 和 YAML 传递或配置结构化数据。SQL 控制数据库。Docker 和 CI 文件自动化部署。Lock file 保证 dependency 一致性。Prompt 文件结构化 AI 行为。
+配置文件控制工具。Markdown 解释东西。MDX 渲染 rich content。XML 表示严格结构化 markup。JSON 和 YAML 传递或配置结构化数据。SQL 控制数据库。Docker 和 CI 文件自动化部署。Lock file 保证 dependency 一致性。Certificate 文件支持安全通信。Prompt 文件结构化 AI 行为。
 
 看到新的 file type 时，不要只问 extension 是什么意思。要问是哪一个工具读取它、它负责哪一层、它是给人编辑的，还是机器生成的。
 
