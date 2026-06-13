@@ -1,0 +1,609 @@
+---
+title: "WebSocket and Webhook: Two Different Ways Systems Communicate"
+category: "Software Development"
+createdAt: "2026-06-13"
+summary: "A practical comparison of WebSocket and webhook, explaining how each communication model works and when to use each one."
+readTime: "8 min read"
+tags:
+  - "Backend"
+  - "HTTP"
+  - "Node.js"
+  - "System Design"
+featured: false
+---
+
+<Lang lang="en">
+
+WebSocket and webhook are both used when one system needs to send information to another system, but they solve different problems. WebSocket is for a live connection between client and server. Webhook is for one server notifying another server when an event happens.
+
+The mistake is thinking both are just “real-time communication”. The real difference is connection ownership, lifecycle, direction, and reliability responsibility.
+
+## Short Answer
+
+Use **WebSocket** when your application needs a long-lived, interactive connection.
+
+Typical examples:
+
+- Chat message updates
+- Live trading price updates
+- Multiplayer game state
+- Real-time dashboard
+- User presence status
+- Live order tracking
+
+Use **webhook** when one backend system needs to notify another backend system after an event happens.
+
+Typical examples:
+
+- Stripe tells your backend that payment succeeded
+- GitHub tells your CI service that code was pushed
+- Clerk/Auth0 tells your backend that a user was created
+- Shopify tells your system that an order was paid
+- Payment gateway tells your system that settlement failed
+
+A simple mental model:
+
+```text
+WebSocket = client and server keep talking through one open connection
+
+Webhook = server A calls server B when something happens
+```
+
+## The Core Difference
+
+| Area | WebSocket | Webhook |
+| --- | --- | --- |
+| Communication style | Persistent connection | One HTTP request per event |
+| Common direction | Client ↔ Server | Server → Server |
+| Connection owner | Client usually opens the connection | Event producer sends request |
+| Lifetime | Long-lived | Short-lived |
+| Real-time level | Very fast, continuous | Event-driven, near real-time |
+| Best for | Live interaction | External event notification |
+| Failure handling | Reconnect, heartbeat, resubscribe | Retry, signature verification, idempotency |
+| Example | Chat app receives new messages instantly | Payment gateway notifies payment success |
+
+The key is not speed only. The key is whether both sides need a live session.
+
+If yes, WebSocket is usually the better fit. If not, webhook is usually simpler and more reliable.
+
+## How WebSocket Works
+
+WebSocket starts as an HTTP request, then upgrades into a persistent TCP-based connection.
+
+The flow looks like this:
+
+<FlowGraph
+  title="WebSocket Connection Flow"
+  nodes={[
+    { id: "client", label: "Client Opens Connection", detail: "Browser or app requests a WebSocket endpoint" },
+    { id: "upgrade", label: "HTTP Upgrade", detail: "Server accepts and upgrades the connection" },
+    { id: "session", label: "Persistent Session", detail: "Both sides can send messages anytime" },
+    { id: "heartbeat", label: "Heartbeat", detail: "Ping and pong detect dead connections" },
+    { id: "reconnect", label: "Reconnect", detail: "Client reconnects if the connection drops" }
+  ]}
+/>
+
+A browser may connect like this:
+
+```javascript
+const socket = new WebSocket("wss://api.example.com/ws");
+
+socket.onopen = () => {
+  socket.send(JSON.stringify({ type: "join_room", roomId: "order-123" }));
+};
+
+socket.onmessage = (event) => {
+  const message = JSON.parse(event.data);
+  console.log("Received:", message);
+};
+
+socket.onclose = () => {
+  console.log("Connection closed");
+};
+```
+
+The server keeps a connection object in memory while the client is connected. That is why WebSocket systems must care about connection count, memory usage, load balancing, and reconnect behavior.
+
+WebSocket is not just an endpoint. It is a live communication channel.
+
+## How Webhook Works
+
+A webhook is usually a normal HTTP POST request sent by one backend system to another backend system.
+
+The flow looks like this:
+
+<FlowGraph
+  title="Webhook Event Flow"
+  nodes={[
+    { id: "event", label: "Event Happens", detail: "Payment, order, push, or user action occurs" },
+    { id: "request", label: "Provider Sends POST", detail: "External service calls your webhook URL" },
+    { id: "verify", label: "Verify Signature", detail: "Your backend confirms the request is authentic" },
+    { id: "store", label: "Store Event", detail: "Save event id and payload before processing" },
+    { id: "process", label: "Process Safely", detail: "Update internal state with idempotency" }
+  ]}
+/>
+
+A webhook endpoint may look like this:
+
+```typescript
+import express from "express";
+
+const app = express();
+
+app.post("/webhooks/payment", express.json(), async (req, res) => {
+  const event = req.body;
+
+  if (event.type === "payment.succeeded") {
+    await markOrderAsPaid(event.data.orderId);
+  }
+
+  res.status(200).send("ok");
+});
+```
+
+In real production systems, this example is not enough. A serious webhook endpoint should verify signature, store the event, deduplicate repeated events, and process the event asynchronously.
+
+A better production shape is:
+
+```text
+Receive webhook
+→ verify signature
+→ save raw event
+→ return 200 quickly
+→ process event in background job
+→ update business state idempotently
+```
+
+The webhook sender may retry the same event multiple times. Your system must not treat repeated delivery as a new business action.
+
+## Real System Example: Order Payment
+
+Assume you are building an order system.
+
+When the user is watching the order page, WebSocket can push live order status to the browser:
+
+```text
+Order page opened
+→ browser connects to WebSocket
+→ backend pushes status changes
+→ user sees "Payment confirmed" without refreshing
+```
+
+But when the payment gateway completes the payment, it should not use WebSocket to notify your backend. It should send a webhook:
+
+```text
+Payment gateway receives money
+→ payment gateway sends webhook to your backend
+→ backend verifies the event
+→ backend marks order as paid
+→ backend pushes update to user through WebSocket
+```
+
+In this design, webhook updates your backend state. WebSocket updates the user's screen.
+
+They are not competing tools. They often work together.
+
+## When to Use WebSocket
+
+Use WebSocket when the user experience depends on a live connection.
+
+<CardGrid columns={2}>
+  <InfoCard title="Live UI Updates">
+    Use it when the browser or mobile app must receive updates without refreshing, such as chat messages, order tracking, or dashboard metrics.
+  </InfoCard>
+
+  <InfoCard title="Two-Way Interaction">
+    Use it when both client and server send messages frequently, such as games, collaborative editing, or live support rooms.
+  </InfoCard>
+
+  <InfoCard title="Low-Latency Events">
+    Use it when delays from polling would make the product feel broken, such as live prices or real-time monitoring screens.
+  </InfoCard>
+
+  <InfoCard title="Session Awareness">
+    Use it when the server needs to know who is currently connected, online, typing, watching, or active.
+  </InfoCard>
+</CardGrid>
+
+WebSocket is powerful, but it adds operational cost. You need to manage connection state, authentication, reconnection, scaling, and message delivery strategy.
+
+For small systems, avoid WebSocket unless polling or Server-Sent Events clearly cannot solve the problem.
+
+## When to Use Webhook
+
+Use webhook when your system needs to react to events created by another backend system.
+
+<CardGrid columns={2}>
+  <InfoCard title="Payment Events">
+    Use webhook for payment success, refund, chargeback, payout, subscription renewal, and failed invoice events.
+  </InfoCard>
+
+  <InfoCard title="Third-Party Integration">
+    Use webhook when a SaaS platform needs to notify your backend, such as GitHub, Stripe, Shopify, Clerk, or Slack.
+  </InfoCard>
+
+  <InfoCard title="Backend State Change">
+    Use webhook when the event should update your database even if no user is currently online.
+  </InfoCard>
+
+  <InfoCard title="Decoupled Notification">
+    Use webhook when the sender should not need to hold an open connection with your system.
+  </InfoCard>
+</CardGrid>
+
+A webhook should be treated like an external API exposed to another machine. It needs authentication, validation, logging, retry handling, and idempotency.
+
+## Common Mistakes
+
+| Mistake | Why It Is Wrong | Better Approach |
+| --- | --- | --- |
+| Using WebSocket for payment gateway notification | Payment state must update even if user is offline | Use webhook |
+| Using webhook to update browser UI directly | Browser usually cannot receive webhook directly | Backend receives webhook, then updates UI through WebSocket or polling |
+| Treating webhook delivery as exactly once | Providers may retry events | Use event id and idempotency |
+| Keeping heavy logic inside webhook request | Provider may timeout and retry | Save event, return 200, process async |
+| Assuming WebSocket guarantees delivery | Connection can drop anytime | Add reconnect and resync logic |
+| Scaling WebSocket like normal HTTP | Connections are long-lived | Use sticky sessions, shared pub/sub, or gateway architecture |
+
+The most dangerous mistake is mixing business truth with UI state.
+
+Payment success should be stored because a verified webhook says it happened, not because the user's browser received a WebSocket message.
+
+## Practical Implementation Checklist
+
+For WebSocket, check these areas before production:
+
+- Authenticate the connection.
+- Validate every message from the client.
+- Add heartbeat or ping-pong detection.
+- Implement client reconnect.
+- Resync important state after reconnect.
+- Decide whether messages need acknowledgement.
+- Use Redis Pub/Sub, Kafka, or another broker if multiple server instances need to broadcast.
+- Avoid storing critical business state only in memory.
+
+For webhook, check these areas before production:
+
+- Use HTTPS.
+- Verify provider signature.
+- Store the raw event payload.
+- Deduplicate by event id.
+- Return `2xx` quickly after accepting the event.
+- Process expensive work asynchronously.
+- Make business updates idempotent.
+- Log event id, provider, status, and processing result.
+- Alert on repeated failures.
+
+The implementation is not hard because of syntax. It is hard because both patterns fail differently.
+
+## Decision Rule
+
+Use this decision rule:
+
+```text
+Need a live connection with a user or device?
+→ Use WebSocket.
+
+Need another backend system to notify your backend after an event?
+→ Use webhook.
+
+Need external event to update database and then update user screen?
+→ Use webhook first, then WebSocket.
+```
+
+For example, in a trading or KYC system:
+
+```text
+KYC provider finished review
+→ provider sends webhook to backend
+→ backend updates KYC status
+→ backend publishes internal event
+→ WebSocket pushes latest status to user dashboard
+```
+
+The webhook is responsible for accepting the external truth. The WebSocket is responsible for showing the latest state to the user.
+
+## The Main Principle
+
+WebSocket is a live communication channel. Webhook is an event callback between backend systems.
+
+Use WebSocket for interactive real-time user experience. Use webhook for durable external event notification. In serious systems, webhook usually changes the business state first, and WebSocket only broadcasts that state to connected users.
+
+</Lang>
+
+<Lang lang="zh">
+
+WebSocket 和 webhook 都是在解决“一个系统怎么把消息告诉另一个系统”的问题，但它们不是同一种东西。WebSocket 是客户端和服务端之间的一条长期连接。webhook 是一个服务在事件发生后，主动调用另一个服务的 HTTP 接口。
+
+很多人会把它们都理解成“实时通信”，但真正的区别不是实时不实时，而是谁发起连接、连接活多久、通信方向是什么、失败后谁负责补偿。
+
+## 简短答案
+
+需要**长期在线、双向通信、页面即时更新**时，用 **WebSocket**。
+
+常见例子：
+
+- 聊天消息
+- 实时交易价格
+- 多人游戏状态
+- 实时监控面板
+- 用户在线状态
+- 订单实时追踪
+
+需要**一个后端系统在事件发生后通知另一个后端系统**时，用 **webhook**。
+
+常见例子：
+
+- Stripe 通知你的后端付款成功
+- GitHub 通知 CI 系统代码被 push
+- Clerk/Auth0 通知你的后端用户创建成功
+- Shopify 通知你的系统订单已付款
+- 支付网关通知你的系统结算失败
+
+可以这样记：
+
+```text
+WebSocket = 客户端和服务端保持一条打开的连接，持续沟通
+
+webhook = A 服务发生事件后，主动 HTTP 调用 B 服务
+```
+
+## 核心区别
+
+| 对比点 | WebSocket | Webhook |
+| --- | --- | --- |
+| 通信方式 | 长连接 | 每个事件一次 HTTP 请求 |
+| 常见方向 | Client ↔ Server | Server → Server |
+| 连接发起方 | 通常是客户端发起 | 事件生产方主动请求 |
+| 生命周期 | 长时间存在 | 很短，请求结束就断 |
+| 实时程度 | 很快，适合连续更新 | 事件驱动，接近实时 |
+| 适合场景 | 实时交互 | 外部事件通知 |
+| 失败处理 | 重连、心跳、重新同步 | 重试、签名验证、幂等 |
+| 例子 | 聊天室即时收到新消息 | 支付平台通知付款成功 |
+
+重点不是“哪个更快”。重点是你是否真的需要一条活着的连接。
+
+如果需要，通常用 WebSocket。如果不需要，webhook 通常更简单，也更适合后端集成。
+
+## WebSocket 是怎么工作的
+
+WebSocket 一开始也是一个 HTTP 请求，然后通过 upgrade 变成一条持久连接。
+
+流程大概是这样：
+
+<FlowGraph
+  title="WebSocket 连接流程"
+  nodes={[
+    { id: "client", label: "客户端发起连接", detail: "浏览器或 App 请求 WebSocket endpoint" },
+    { id: "upgrade", label: "HTTP Upgrade", detail: "服务端接受请求并升级连接" },
+    { id: "session", label: "保持长期会话", detail: "双方都可以随时发送消息" },
+    { id: "heartbeat", label: "心跳检测", detail: "通过 ping 和 pong 判断连接是否还活着" },
+    { id: "reconnect", label: "断线重连", detail: "连接断开后客户端重新连接" }
+  ]}
+/>
+
+浏览器端可能会这样连接：
+
+```javascript
+const socket = new WebSocket("wss://api.example.com/ws");
+
+socket.onopen = () => {
+  socket.send(JSON.stringify({ type: "join_room", roomId: "order-123" }));
+};
+
+socket.onmessage = (event) => {
+  const message = JSON.parse(event.data);
+  console.log("Received:", message);
+};
+
+socket.onclose = () => {
+  console.log("Connection closed");
+};
+```
+
+当用户连接上来后，服务端通常会在内存里保存这个 connection 对象。只要用户在线，这条连接就一直占用资源。
+
+所以 WebSocket 系统要考虑连接数量、内存、负载均衡、断线重连、消息广播和状态同步。它不是普通的一个 API endpoint，而是一条活的通信通道。
+
+## Webhook 是怎么工作的
+
+webhook 通常就是一个普通的 HTTP POST 请求。区别是这个请求不是你的前端发来的，而是另一个后端服务发来的。
+
+流程大概是这样：
+
+<FlowGraph
+  title="Webhook 事件流程"
+  nodes={[
+    { id: "event", label: "事件发生", detail: "付款、订单、代码 push 或用户行为发生" },
+    { id: "request", label: "外部服务发送 POST", detail: "第三方服务调用你的 webhook URL" },
+    { id: "verify", label: "验证签名", detail: "你的后端确认请求确实来自可信来源" },
+    { id: "store", label: "保存事件", detail: "先保存 event id 和 payload" },
+    { id: "process", label: "安全处理", detail: "用幂等逻辑更新内部业务状态" }
+  ]}
+/>
+
+一个简单的 webhook endpoint 可能是这样：
+
+```typescript
+import express from "express";
+
+const app = express();
+
+app.post("/webhooks/payment", express.json(), async (req, res) => {
+  const event = req.body;
+
+  if (event.type === "payment.succeeded") {
+    await markOrderAsPaid(event.data.orderId);
+  }
+
+  res.status(200).send("ok");
+});
+```
+
+但在真实生产系统里，这个例子还不够。一个正式的 webhook endpoint 应该验证签名、保存原始事件、避免重复处理，并且尽量异步处理业务逻辑。
+
+更合理的生产形态是：
+
+```text
+接收 webhook
+→ 验证签名
+→ 保存原始事件
+→ 尽快返回 200
+→ 后台任务处理事件
+→ 用幂等逻辑更新业务状态
+```
+
+webhook 发送方可能会因为 timeout 或网络问题重复发送同一个事件。所以你的系统不能假设 webhook 只会送达一次。
+
+## 真实系统例子：订单付款
+
+假设你在做一个订单系统。
+
+当用户打开订单页面时，WebSocket 可以把订单状态实时推给浏览器：
+
+```text
+用户打开订单页面
+→ 浏览器连接 WebSocket
+→ 后端推送订单状态变化
+→ 用户不用刷新页面就看到「付款已确认」
+```
+
+但支付网关完成付款后，不应该用 WebSocket 通知你的后端。它应该用 webhook：
+
+```text
+支付网关收到钱
+→ 支付网关发送 webhook 给你的后端
+→ 后端验证事件
+→ 后端把订单标记为已付款
+→ 后端再通过 WebSocket 推送状态给用户
+```
+
+在这个设计里，webhook 负责更新后端业务状态。WebSocket 负责更新用户看到的画面。
+
+它们不是二选一关系。很多系统会同时使用两者。
+
+## 什么时候用 WebSocket
+
+当用户体验依赖实时连接时，使用 WebSocket。
+
+<CardGrid columns={2}>
+  <InfoCard title="实时 UI 更新">
+    当浏览器或手机 App 需要不刷新页面就收到更新时使用，例如聊天消息、订单追踪、dashboard 指标。
+  </InfoCard>
+
+  <InfoCard title="双向互动">
+    当客户端和服务端都需要频繁发送消息时使用，例如游戏、协作编辑、在线客服房间。
+  </InfoCard>
+
+  <InfoCard title="低延迟事件">
+    当 polling 的延迟会让产品体验明显变差时使用，例如实时价格、实时监控、实时告警。
+  </InfoCard>
+
+  <InfoCard title="在线状态感知">
+    当服务端需要知道用户是否在线、正在输入、正在观看、正在活动时使用。
+  </InfoCard>
+</CardGrid>
+
+WebSocket 很强，但它会增加运维复杂度。你需要处理连接状态、认证、重连、扩容、广播和消息丢失后的重新同步。
+
+如果只是普通后台业务，不要为了“看起来实时”就直接上 WebSocket。先确认 polling、long polling 或 Server-Sent Events 是否已经足够。
+
+## 什么时候用 Webhook
+
+当你的系统需要响应另一个后端系统产生的事件时，使用 webhook。
+
+<CardGrid columns={2}>
+  <InfoCard title="支付事件">
+    付款成功、退款、拒付、打款、订阅续费、账单失败等场景应该用 webhook。
+  </InfoCard>
+
+  <InfoCard title="第三方系统集成">
+    GitHub、Stripe、Shopify、Clerk、Slack 这类平台需要通知你的后端时，通常都是 webhook。
+  </InfoCard>
+
+  <InfoCard title="后端状态变化">
+    即使没有用户在线，事件也必须更新你的数据库时，应该用 webhook。
+  </InfoCard>
+
+  <InfoCard title="解耦通知">
+    当发送方不应该和你的系统保持长期连接时，webhook 更适合。
+  </InfoCard>
+</CardGrid>
+
+webhook 本质上是你暴露给另一个机器调用的 API。它需要认证、签名验证、日志、重试处理和幂等设计。
+
+## 常见错误
+
+| 错误 | 为什么错 | 更好的做法 |
+| --- | --- | --- |
+| 用 WebSocket 接收支付网关通知 | 用户离线时，付款状态也必须更新 | 用 webhook |
+| 想让 webhook 直接更新浏览器页面 | 浏览器通常不能直接接收 webhook | 后端接收 webhook，再用 WebSocket 或 polling 更新 UI |
+| 以为 webhook 一定只送达一次 | 第三方服务可能重试 | 用 event id 做幂等 |
+| 在 webhook 请求里做很重的业务逻辑 | 第三方可能 timeout 后重复发送 | 先保存事件，快速返回 200，再异步处理 |
+| 以为 WebSocket 保证消息一定送达 | 连接随时可能断 | 加重连和状态重新同步 |
+| 把 WebSocket 当普通 HTTP 扩容 | WebSocket 是长连接 | 使用 sticky session、共享 pub/sub 或 gateway 架构 |
+
+最危险的错误，是把业务事实和 UI 状态混在一起。
+
+付款成功应该是因为你的后端收到并验证了支付平台的 webhook，而不是因为某个用户浏览器收到了 WebSocket 消息。
+
+## 实作检查清单
+
+WebSocket 上生产前，至少检查这些点：
+
+- 连接要做认证。
+- 客户端发来的每条消息都要验证。
+- 加 heartbeat 或 ping-pong 检测。
+- 客户端要有断线重连。
+- 重连后要重新同步重要状态。
+- 判断消息是否需要 acknowledgement。
+- 多个服务实例广播时，使用 Redis Pub/Sub、Kafka 或其他消息系统。
+- 不要只把关键业务状态放在内存里。
+
+webhook 上生产前，至少检查这些点：
+
+- 使用 HTTPS。
+- 验证第三方平台的签名。
+- 保存原始事件 payload。
+- 根据 event id 去重。
+- 接收成功后尽快返回 `2xx`。
+- 重业务逻辑放到异步任务处理。
+- 业务状态更新必须幂等。
+- 记录 event id、provider、处理状态和处理结果。
+- 对连续失败做告警。
+
+这两个东西难的地方不是语法，而是失败模式不同。
+
+## 决策规则
+
+可以用这个规则判断：
+
+```text
+需要和用户或设备保持实时连接？
+→ 用 WebSocket。
+
+需要另一个后端系统在事件发生后通知你的后端？
+→ 用 webhook。
+
+需要外部事件先更新数据库，然后再更新用户页面？
+→ 先用 webhook，再用 WebSocket。
+```
+
+例如在交易或 KYC 系统里：
+
+```text
+KYC provider 完成人工审核
+→ provider 发送 webhook 给后端
+→ 后端更新 KYC 状态
+→ 后端发布内部事件
+→ WebSocket 把最新状态推给用户 dashboard
+```
+
+webhook 负责接收外部系统带来的业务事实。WebSocket 负责把最新状态展示给在线用户。
+
+## 核心原则
+
+WebSocket 是一条活着的通信通道。webhook 是后端系统之间的事件回调。
+
+需要实时交互体验时，用 WebSocket。需要可靠接收外部事件通知时，用 webhook。在严肃业务系统里，通常是 webhook 先改变业务状态，然后 WebSocket 只负责把这个状态广播给在线用户。
+
+</Lang>
