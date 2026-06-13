@@ -5,7 +5,11 @@ import GithubSlugger from "github-slugger";
 import { categoryDefinitions, getCategoryDefinition } from "./categories.js";
 
 const contentDirectory = path.join(process.cwd(), "content");
-const TECHNICAL_CATEGORY_NAME = "Software Development";
+const VISIBLE_TECHNICAL_CATEGORY_NAMES = new Set([
+  "Software Development",
+  "Interesting Tech Questions",
+  "Problem Logs"
+]);
 
 function slugify(value) {
   return String(value ?? "")
@@ -129,7 +133,7 @@ export function getAllPosts() {
 }
 
 export function getTechnicalPosts() {
-  return getAllPosts().filter((post) => post.category.name === TECHNICAL_CATEGORY_NAME);
+  return getAllPosts().filter((post) => VISIBLE_TECHNICAL_CATEGORY_NAMES.has(post.category.name));
 }
 
 export function getFeaturedPosts() {
@@ -214,9 +218,9 @@ export function getCategoriesWithCounts() {
   const posts = getTechnicalPosts();
 
   return categoryDefinitions
+    .filter((category) => VISIBLE_TECHNICAL_CATEGORY_NAMES.has(category.name))
     .map((category) => ({
       ...category,
       posts: posts.filter((post) => post.category.name === category.name).length
-    }))
-    .filter((category) => category.posts > 0);
+    }));
 }

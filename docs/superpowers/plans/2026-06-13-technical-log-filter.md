@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Hide non-technical MDX content from public frontend post surfaces while keeping the files in the repository.
+**Goal:** Hide non-technical MDX content from public frontend post surfaces while keeping the files in the repository and allowing the technical categories `Software Development`, `Interesting Tech Questions`, and `Problem Logs`.
 
-**Architecture:** Centralize visibility in `frontend/lib/posts.js` with a `getTechnicalPosts()` helper. Replace public listing and route generation consumers with that helper so `Software Development` becomes the only visible category.
+**Architecture:** Centralize visibility in `frontend/lib/posts.js` with a `getTechnicalPosts()` helper. Replace public listing and route generation consumers with that helper so only the technical category allowlist is visible.
 
 **Tech Stack:** Next.js, MDX content files, Node test runner.
 
@@ -18,7 +18,7 @@
 
 - [ ] **Step 1: Write the filter helper test**
 
-Create `frontend/lib/posts.test.mjs` with assertions that `getTechnicalPosts()` returns posts and every returned post has category name `Software Development`.
+Create `frontend/lib/posts.test.mjs` with assertions that `getTechnicalPosts()` returns posts and every returned post has a category name in the visible technical category allowlist.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -27,7 +27,7 @@ Expected: FAIL because `getTechnicalPosts` is not exported yet.
 
 - [ ] **Step 3: Implement the helper**
 
-Add `const TECHNICAL_CATEGORY_NAME = "Software Development";` and export `getTechnicalPosts()` from `frontend/lib/posts.js`.
+Add a visible technical category allowlist and export `getTechnicalPosts()` from `frontend/lib/posts.js`.
 
 - [ ] **Step 4: Run test to verify it passes**
 

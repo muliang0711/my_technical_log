@@ -1,10 +1,12 @@
 import {
   BookOpen,
   BriefcaseBusiness,
+  Bug,
   Code2,
   Globe2,
   GraduationCap,
   Heart,
+  HelpCircle,
   MapPin,
   Sparkles,
   TrendingUp
@@ -17,6 +19,20 @@ export const categoryDefinitions = [
     description: "Programming languages, frameworks, tools, and best...",
     fullDescription: "Programming languages, frameworks, tools, and architecture patterns",
     icon: Code2
+  },
+  {
+    name: "Interesting Tech Questions",
+    slug: "interesting-tech-questions",
+    description: "Interview questions, tricky technical prompts, and worked solutions",
+    fullDescription: "Interview questions, tricky technical prompts, reasoning paths, and worked solutions",
+    icon: HelpCircle
+  },
+  {
+    name: "Problem Logs",
+    slug: "problem-logs",
+    description: "Real problems, debugging notes, fixes, and prevention lessons",
+    fullDescription: "Real problems encountered during development, debugging notes, fixes, and prevention lessons",
+    icon: Bug
   },
   {
     name: "Fitness & Health",
@@ -57,11 +73,13 @@ export const categoryDefinitions = [
 
 export const focusAreas = [
   { ...categoryDefinitions[0], name: "Software Development" },
-  { ...categoryDefinitions[1], name: "Health & Fitness" },
-  { ...categoryDefinitions[2], icon: TrendingUp },
-  { ...categoryDefinitions[3], name: "Travel & Culture", icon: Globe2 },
-  { ...categoryDefinitions[4], name: "Life Philosophy", icon: BookOpen },
-  { ...categoryDefinitions[5], name: "Continuous Learning", icon: GraduationCap }
+  { ...categoryDefinitions[1], name: "Interesting Tech Questions" },
+  { ...categoryDefinitions[2], name: "Problem Logs" },
+  { ...categoryDefinitions[3], name: "Health & Fitness" },
+  { ...categoryDefinitions[4], icon: TrendingUp },
+  { ...categoryDefinitions[5], name: "Travel & Culture", icon: Globe2 },
+  { ...categoryDefinitions[6], name: "Life Philosophy", icon: BookOpen },
+  { ...categoryDefinitions[7], name: "Continuous Learning", icon: GraduationCap }
 ];
 
 export function getCategoryDefinition(name) {

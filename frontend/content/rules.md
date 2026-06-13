@@ -208,6 +208,8 @@ series:
 Use one exact category name:
 
 - `Software Development`
+- `Interesting Tech Questions`
+- `Problem Logs`
 - `Fitness & Health`
 - `Finance`
 - `Travel`
@@ -217,11 +219,27 @@ Use one exact category name:
 Category guidance:
 
 - Backend, frontend, infrastructure, database, Linux, performance, programming, architecture: `Software Development`
+- Interview questions, tricky technical questions, CS concepts, backend/frontend/system-design prompts, and worked solutions: `Interesting Tech Questions`
+- Real bugs, deployment failures, confusing errors, debugging sessions, production issues, and problems personally encountered during development: `Problem Logs`
 - Exercise, nutrition, sleep, habits, wellness: `Fitness & Health`
 - Investing, budgeting, income, financial planning: `Finance`
 - Destinations, culture, travel planning, trip reflections: `Travel`
 - Personal growth, philosophy, productivity, reflection: `Life Reflections`
 - Study systems, books, courses, note-taking, learning methods: `Learning`
+
+Frontend visibility rule:
+
+- The public frontend shows only technical categories.
+- Visible categories are `Software Development`, `Interesting Tech Questions`, and `Problem Logs`.
+- Other categories may remain in `frontend/content/`, but they are hidden from the visible log archive.
+
+When choosing between technical categories:
+
+| Use This Category | When The Log Is About |
+| --- | --- |
+| `Software Development` | A reusable concept, architecture pattern, implementation guide, infrastructure topic, or performance technique |
+| `Interesting Tech Questions` | A question you saw in an interview, discussion, article, or code review that is worth answering clearly |
+| `Problem Logs` | A specific problem you met, how it appeared, how you debugged it, what fixed it, and how to avoid it next time |
 
 ## Writing Voice
 
@@ -663,6 +681,112 @@ Recommended sequence.
 
 Final takeaway.
 ```
+
+### Interesting Tech Question Log
+
+Use this when recording an interview question or tricky technical question you saw.
+
+Set the frontmatter category exactly:
+
+```yaml
+category: "Interesting Tech Questions"
+```
+
+Recommended structure:
+
+```mdx
+Opening paragraph explaining where this question appears and why it matters.
+
+## The Question
+
+State the question clearly. Include the input, expected behavior, assumptions, or system constraints if relevant.
+
+## Short Answer
+
+Give the direct answer first.
+
+## Reasoning Path
+
+Explain how to think through the problem step by step.
+
+## Worked Solution
+
+Show the solution using prose, code, SQL, diagrams, or examples.
+
+## Edge Cases
+
+List the cases that often break shallow answers.
+
+## Interview Takeaway
+
+Explain what the question is really testing.
+```
+
+Rules:
+
+- Do not only paste the answer. Teach the reasoning path.
+- Make assumptions explicit before solving.
+- If there are multiple valid answers, compare them and explain the trade-off.
+- If code is included, keep it small and explain the key line or algorithm.
+- If the question is about system design, include constraints, bottlenecks, data flow, and failure modes.
+- End with the principle the reader should remember for similar questions.
+
+### Problem Log
+
+Use this when recording a real problem you met while building, deploying, debugging, or maintaining something.
+
+Set the frontmatter category exactly:
+
+```yaml
+category: "Problem Logs"
+```
+
+Recommended structure:
+
+```mdx
+Opening paragraph naming the problem and the context where it happened.
+
+## Symptom
+
+Describe what looked wrong from the user's or developer's view.
+
+## Context
+
+Describe the stack, environment, files, service, deployment target, or recent change involved.
+
+## First Assumption
+
+Record what you first thought was wrong, even if it was later proven wrong.
+
+## Debugging Path
+
+Show the checks, commands, logs, diffs, or experiments that narrowed the problem.
+
+## Root Cause
+
+Explain the actual cause in concrete technical terms.
+
+## Fix
+
+Describe the change that resolved the problem.
+
+## Prevention
+
+Explain what test, guardrail, note, naming rule, monitoring check, or workflow would prevent repeating it.
+
+## The Main Principle
+
+End with the reusable lesson.
+```
+
+Rules:
+
+- Keep the log factual. Separate symptoms, assumptions, evidence, and root cause.
+- Include exact error messages when useful, but do not paste huge logs.
+- Show the command or check that confirmed the issue when possible.
+- If the problem came from a wrong assumption, state that assumption clearly.
+- If the fix was small, still explain why it worked.
+- Do not turn a problem log into a vague reflection. It should be useful during future debugging.
 
 ## Article Length
 
