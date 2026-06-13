@@ -3,7 +3,7 @@ import LogsPage from "../../components/logs/LogsPage";
 
 export const metadata = {
   title: "All Logs | Knowledge Log",
-  description: "Every knowledge log ordered by newest date first."
+  description: "Technical logs ordered by newest date first."
 };
 
 export default function Page() {

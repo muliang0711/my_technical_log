@@ -12,8 +12,8 @@ export default function Footer() {
               <span>Knowledge Log</span>
             </div>
             <p>
-              A personal archive of learning and discovery across technology,
-              health, finance, and life experiences.
+              A technical archive for software development, infrastructure,
+              system design, and debugging notes.
             </p>
           </div>
           <div>

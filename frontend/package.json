@@ -4,7 +4,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node --test components/**/*.test.mjs",
+    "test": "node --test components/**/*.test.mjs lib/**/*.test.mjs",
     "lint": "eslint ."
   },
   "dependencies": {

@@ -2,9 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import matter from "gray-matter";
 import GithubSlugger from "github-slugger";
-import { categoryDefinitions, getCategoryDefinition } from "./categories";
+import { categoryDefinitions, getCategoryDefinition } from "./categories.js";
 
 const contentDirectory = path.join(process.cwd(), "content");
+const TECHNICAL_CATEGORY_NAME = "Software Development";
 
 function slugify(value) {
   return String(value ?? "")
@@ -127,24 +128,28 @@ export function getAllPosts() {
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 }
 
+export function getTechnicalPosts() {
+  return getAllPosts().filter((post) => post.category.name === TECHNICAL_CATEGORY_NAME);
+}
+
 export function getFeaturedPosts() {
-  return getAllPosts().filter((post) => post.featured);
+  return getTechnicalPosts().filter((post) => post.featured);
 }
 
 export function getPostBySlug(slug) {
-  return getAllPosts().find((post) => post.slug === slug);
+  return getTechnicalPosts().find((post) => post.slug === slug);
 }
 
 export function getPostSlugs() {
-  return getAllPosts().map((post) => post.slug);
+  return getTechnicalPosts().map((post) => post.slug);
 }
 
 export function getPostsByCategorySlug(slug) {
-  return getAllPosts().filter((post) => post.category.slug === slug);
+  return getTechnicalPosts().filter((post) => post.category.slug === slug);
 }
 
 export function getPostsBySeriesSlug(slug) {
-  return getAllPosts()
+  return getTechnicalPosts()
     .filter((post) => post.series?.slug === slug)
     .sort((a, b) => {
       const orderDelta = a.series.order - b.series.order;
@@ -159,7 +164,7 @@ export function getPostsBySeriesSlug(slug) {
 
 export function getSeriesSlugs() {
   return Array.from(
-    new Set(getAllPosts().map((post) => post.series?.slug).filter(Boolean))
+    new Set(getTechnicalPosts().map((post) => post.series?.slug).filter(Boolean))
   );
 }
 
@@ -206,10 +211,12 @@ export function getSeriesNavigation(post) {
 }
 
 export function getCategoriesWithCounts() {
-  const posts = getAllPosts();
+  const posts = getTechnicalPosts();
 
-  return categoryDefinitions.map((category) => ({
-    ...category,
-    posts: posts.filter((post) => post.category.name === category.name).length
-  }));
+  return categoryDefinitions
+    .map((category) => ({
+      ...category,
+      posts: posts.filter((post) => post.category.name === category.name).length
+    }))
+    .filter((category) => category.posts > 0);
 }

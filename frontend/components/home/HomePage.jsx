@@ -1,21 +1,21 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { getContributionActivity } from "../../lib/contributions";
-import { getAllPosts } from "../../lib/posts";
+import { getTechnicalPosts } from "../../lib/posts";
 import PostList from "../blog/PostList";
 import ContributionGraph from "./ContributionGraph";
 import Hero from "../ui/Hero";
 import Section from "../ui/Section";
 
 export default function HomePage() {
-  const posts = getAllPosts();
+  const posts = getTechnicalPosts();
   const recentPosts = posts.slice(0, 4);
   const activity = getContributionActivity();
 
   return (
     <main>
       <Hero
-        title="A Personal Archive of Learning and Discovery"
+        title="Technical Knowledge Log"
         actions={(
           <>
             <Link className="btn btn--primary" href="/categories">
@@ -26,9 +26,8 @@ export default function HomePage() {
         )}
       >
         <p>
-          Welcome to my knowledge log - a curated collection of insights,
-          lessons, and reflections gathered across software development,
-          fitness, finance, travel, and life&apos;s continuous journey of growth.
+          A focused archive of software development notes, architecture decisions,
+          infrastructure concepts, debugging records, and system design trade-offs.
         </p>
       </Hero>
       <ContributionGraph activity={activity} />

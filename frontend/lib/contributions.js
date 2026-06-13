@@ -1,4 +1,4 @@
-import { getAllPosts } from "./posts";
+import { getTechnicalPosts } from "./posts";
 
 const dayMs = 24 * 60 * 60 * 1000;
 const weekCount = 53;
@@ -22,7 +22,7 @@ function startOfWeek(date) {
 }
 
 function getPostDateCounts() {
-  return getAllPosts().reduce((counts, post) => {
+  return getTechnicalPosts().reduce((counts, post) => {
     counts.set(post.createdAt, (counts.get(post.createdAt) ?? 0) + 1);
     return counts;
   }, new Map());

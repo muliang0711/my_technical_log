@@ -10,8 +10,8 @@ export default function CategoriesPage() {
     <main>
       <Hero title="All Categories" compact>
         <p>
-          Explore knowledge across different domains. Each category represents a
-          distinct area of learning and discovery.
+          Explore the visible technical categories used by the software
+          development log archive.
         </p>
       </Hero>
       <Section tall>

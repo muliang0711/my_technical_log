@@ -1,13 +1,13 @@
 import { notFound } from "next/navigation";
 import CategoryDetailPage from "../../../components/categories/CategoryDetailPage";
 import PageWrapper from "../../../components/layout/PageWrapper";
-import { getCategoryBySlug, getCategorySlugs } from "../../../lib/categories";
-import { getPostsByCategorySlug } from "../../../lib/posts";
+import { getCategoryBySlug } from "../../../lib/categories";
+import { getCategoriesWithCounts, getPostsByCategorySlug } from "../../../lib/posts";
 
 export const dynamicParams = false;
 
 export function generateStaticParams() {
-  return getCategorySlugs().map((slug) => ({ slug }));
+  return getCategoriesWithCounts().map((category) => ({ slug: category.slug }));
 }
 
 export async function generateMetadata({ params }) {
