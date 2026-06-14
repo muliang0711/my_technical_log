@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import CategoryDetailPage from "../../../components/categories/CategoryDetailPage";
 import PageWrapper from "../../../components/layout/PageWrapper";
 import { getCategoryBySlug } from "../../../lib/categories";
-import { getCategoriesWithCounts, getPostsByCategorySlug } from "../../../lib/posts";
+import { getCategoriesWithCounts, getPostsByCategorySlug, getSeriesByCategorySlug } from "../../../lib/posts";
 
 export const dynamicParams = false;
 
@@ -34,7 +34,11 @@ export default async function Page({ params }) {
 
   return (
     <PageWrapper>
-      <CategoryDetailPage category={category} posts={getPostsByCategorySlug(slug)} />
+      <CategoryDetailPage
+        category={category}
+        posts={getPostsByCategorySlug(slug)}
+        series={getSeriesByCategorySlug(slug)}
+      />
     </PageWrapper>
   );
 }

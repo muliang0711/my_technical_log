@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { ListTree } from "lucide-react";
 
-export default function SeriesCard({ series }) {
+export default function SeriesCard({ series, href = `/series/${series.slug}` }) {
   const postLabel = series.count === 1 ? "log" : "logs";
   const firstPost = series.posts[0];
 
   return (
-    <Link className="card series-card" href={`/series/${series.slug}`}>
+    <Link className="card series-card" href={href}>
       <div className="series-card__icon">
         <ListTree size={22} />
       </div>

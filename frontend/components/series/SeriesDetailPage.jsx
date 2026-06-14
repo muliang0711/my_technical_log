@@ -3,7 +3,7 @@ import PostList from "../blog/PostList";
 import Hero from "../ui/Hero";
 import Section from "../ui/Section";
 
-export default function SeriesDetailPage({ series, posts }) {
+export default function SeriesDetailPage({ series, posts, backHref = "/", backLabel = "Home" }) {
   const postLabel = posts.length === 1 ? "log" : "logs";
 
   return (
@@ -15,7 +15,7 @@ export default function SeriesDetailPage({ series, posts }) {
       </Hero>
       <Section
         title={`${series.title} Series`}
-        action={<Link className="view-link" href="/">{"<-"} Home</Link>}
+        action={<Link className="view-link" href={backHref}>{"<-"} {backLabel}</Link>}
         tall
       >
         {posts.length > 0 ? (

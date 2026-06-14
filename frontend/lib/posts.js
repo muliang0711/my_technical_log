@@ -10,6 +10,11 @@ const VISIBLE_TECHNICAL_CATEGORY_NAMES = new Set([
   "Interesting Tech Questions",
   "Problem Logs"
 ]);
+const STANDALONE_SERIES = {
+  title: "Standalone Logs",
+  slug: "standalone",
+  order: 0
+};
 
 function slugify(value) {
   return String(value ?? "")
@@ -152,6 +157,28 @@ export function getPostsByCategorySlug(slug) {
   return getTechnicalPosts().filter((post) => post.category.slug === slug);
 }
 
+function sortSeriesPosts(posts) {
+  return [...posts].sort((a, b) => {
+    const orderDelta = (a.series?.order ?? 0) - (b.series?.order ?? 0);
+
+    if (orderDelta !== 0) {
+      return orderDelta;
+    }
+
+    return new Date(a.createdAt) - new Date(b.createdAt);
+  });
+}
+
+function toSeriesGroup(series, posts) {
+  const sortedPosts = sortSeriesPosts(posts);
+
+  return {
+    ...series,
+    posts: sortedPosts,
+    count: sortedPosts.length
+  };
+}
+
 export function getPostsBySeriesSlug(slug) {
   return getTechnicalPosts()
     .filter((post) => post.series?.slug === slug)
@@ -164,6 +191,34 @@ export function getPostsBySeriesSlug(slug) {
 
       return new Date(a.createdAt) - new Date(b.createdAt);
     });
+}
+
+export function getSeriesByCategorySlug(categorySlug) {
+  const posts = getPostsByCategorySlug(categorySlug);
+  const groups = new Map();
+
+  posts.forEach((post) => {
+    const series = post.series ?? STANDALONE_SERIES;
+    const group = groups.get(series.slug) ?? {
+      series,
+      posts: []
+    };
+
+    group.posts.push(post);
+    groups.set(series.slug, group);
+  });
+
+  return Array.from(groups.values())
+    .map((group) => toSeriesGroup(group.series, group.posts))
+    .sort((a, b) => a.title.localeCompare(b.title));
+}
+
+export function getCategorySeriesBySlug(categorySlug, seriesSlug) {
+  return getSeriesByCategorySlug(categorySlug).find((series) => series.slug === seriesSlug) ?? null;
+}
+
+export function getPostsByCategoryAndSeriesSlug(categorySlug, seriesSlug) {
+  return getCategorySeriesBySlug(categorySlug, seriesSlug)?.posts ?? [];
 }
 
 export function getSeriesSlugs() {
