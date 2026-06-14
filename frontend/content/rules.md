@@ -1,74 +1,85 @@
-# Knowledge Log MDX Writing Rules
+# Knowledge Log LLM Response Rules
 
-Use this file as prompt context when asking an AI to create a new log for this project.
+Use this file as the base prompt context when asking an LLM to create a new log for this project.
 
-The goal is not to write a generic blog post. The goal is to produce a practical, readable knowledge log that can be saved directly as an `.mdx` file in `frontend/content/`.
+This file defines what the LLM response must look like. Category-specific writing style lives in separate files:
 
-## AI Task
+- `software-development.md`
+- `interesting-tech-questions.md`
+- `problem-logs.md`
+
+The goal is not to write a generic blog post. The goal is to produce one practical, readable `.mdx` knowledge log that can be saved directly into `frontend/content/`.
+
+## LLM Task Contract
 
 When asked to create a log, generate exactly one complete MDX article.
 
-The answer should include:
+The response must include only:
 
-- A suggested filename in lowercase kebab-case.
-- The full `.mdx` content.
-- No extra commentary inside the MDX file.
+1. A suggested filename in lowercase kebab-case.
+2. The full `.mdx` source.
 
-The MDX must be ready to paste into `frontend/content/<filename>.mdx`.
+Do not add commentary, explanations, summaries, or extra notes outside the required response format.
 
-## Bilingual Requirement
+## Strict Response Format
 
-Every new log must include two body versions:
+The final answer must follow this exact shape:
 
-- English: `<Lang lang="en">`
-- Chinese: `<Lang lang="zh">`
-
-The frontmatter is written once at the top. Do not duplicate frontmatter for each language.
-
-Use this exact body structure after the closing frontmatter `---`:
+`````text
+Filename: article-name.mdx
 
 ````mdx
+---
+title: "Clear Article Title"
+category: "Software Development"
+createdAt: "2026-06-14"
+summary: "One concise sentence explaining what the article teaches."
+readTime: "8 min read"
+tags:
+  - "Backend"
+  - "System Design"
+  - "Performance"
+featured: false
+---
+
 <Lang lang="en">
 
-English opening paragraph.
+Opening paragraph.
 
 ## Short Answer
 
-English section content.
+Direct answer.
 
 ## The Main Principle
 
-English takeaway.
+Practical takeaway.
 
 </Lang>
 
 <Lang lang="zh">
 
-中文开头段落。
+Chinese opening paragraph.
 
-## 简短答案
+## Short Answer
 
-中文章节内容。
+Chinese direct answer.
 
-## 核心原则
+## The Main Principle
 
-中文总结。
+Chinese practical takeaway.
 
 </Lang>
 ````
+`````
 
-Bilingual rules:
+Rules:
 
-- Do not put `<Lang>` inside frontmatter.
-- Do not write English and Chinese paragraphs mixed together in the same section.
-- The English version must be complete.
-- The Chinese version must be complete.
-- The Chinese version should be a natural Chinese explanation, not a word-by-word translation.
-- Both versions must have a similar section structure.
-- Both versions must include at least four `##` headings.
-- The website automatically shows a language switcher when both versions exist.
-- The Contents sidebar is generated from the selected language's `##` headings.
-- Do not add a manual `## Contents` or `## Table of Contents` section.
+- The first line outside the code block must be `Filename: <filename>.mdx`.
+- The MDX article must be inside one outer fenced code block labelled `mdx`.
+- The outer MDX fence must use four backticks.
+- If the MDX article contains inner code blocks, use normal triple-backtick fences inside the outer fence.
+- Do not render any part of the article as normal Markdown outside the MDX code block.
+- Do not use canvas, document blocks, rich text blocks, or split code blocks.
 
 ## File Naming
 
@@ -85,19 +96,19 @@ Rules:
 - Use `.mdx`, not `.md`.
 - The filename becomes the URL slug.
 - Keep filenames short but clear.
-- Do not include dates in filenames unless the date is part of the topic.
+- Do not include dates unless the date is part of the topic.
 
 ## Required Frontmatter
 
 Every log must start at line 1 with YAML frontmatter.
 
-Use this exact shape:
+Required shape:
 
 ```mdx
 ---
 title: "Clear Article Title"
 category: "Software Development"
-createdAt: "2026-06-03"
+createdAt: "2026-06-14"
 summary: "One concise sentence explaining what the article teaches."
 readTime: "8 min read"
 tags:
@@ -108,19 +119,39 @@ featured: false
 ---
 ```
 
-For technical backend logs, copy this exact tag block format:
+Rules:
 
-```yaml
-tags:
-  - "Backend"
-  - "HTTP"
-  - "Node.js"
-  - "System Design"
-featured: false
----
-```
+- The first line of the MDX must be `---`.
+- Use exactly one opening `---` and one closing `---` for frontmatter.
+- `title`, `category`, `createdAt`, `summary`, `readTime`, `tags`, and `featured` are required.
+- `createdAt` must use `YYYY-MM-DD`.
+- `readTime` must look like `"6 min read"`.
+- `featured` is usually `false`.
+- Do not include an H1 in the body. The app renders the title from frontmatter.
+- Do not add a blank frontmatter block.
 
-Critical YAML rule:
+## Category Selection
+
+Use one exact category name:
+
+- `Software Development`
+- `Interesting Tech Questions`
+- `Problem Logs`
+
+Category guide files:
+
+| Category | Guide File | Use When |
+| --- | --- | --- |
+| `Software Development` | `software-development.md` | The log explains a reusable technical concept, architecture pattern, implementation guide, infrastructure topic, or performance technique |
+| `Interesting Tech Questions` | `interesting-tech-questions.md` | The log records an interview question, system-design prompt, tricky technical question, or worked solution |
+| `Problem Logs` | `problem-logs.md` | The log records a real problem encountered during development, debugging, deployment, or maintenance |
+
+Frontend visibility rule:
+
+- The public frontend shows only the three categories above.
+- Non-technical files may remain in `frontend/content/`, but new visible logs should use one of the three categories above.
+
+## YAML Rules
 
 Inside frontmatter, lists must use YAML hyphens, not Markdown asterisks.
 
@@ -131,7 +162,6 @@ tags:
   - "Backend"
   - "HTTP"
   - "Node.js"
-  - "System Design"
 featured: false
 ```
 
@@ -142,26 +172,17 @@ tags:
 * "Backend"
 * "HTTP"
 * "Node.js"
-* "System Design"
   featured: false
 ```
 
 Rules:
 
-- The first line must be `---`.
-- There must be exactly one opening `---` and one closing `---` for frontmatter.
-- Do not add a blank frontmatter block.
 - Do not add a blank line after `tags:`.
-- Do not put `featured` inside `tags`.
 - `tags` must be a YAML list.
-- Every tag item must start with two spaces, then `-`, for example `  - "Backend"`.
-- Follow this exact tag indentation: `tags:` on one line, then `  - "Tag"` on the next lines.
-- Never use Markdown bullets such as `* "Backend"` inside frontmatter.
+- Use three to five tags.
+- Every tag item must start with exactly two spaces, then `-`, for example `  - "Backend"`.
 - `featured: false` must be aligned with `tags:`, not indented under `tags`.
-- `featured` is usually `false`.
-- `createdAt` must use `YYYY-MM-DD`.
-- `readTime` must look like `"6 min read"`.
-- Do not include an H1 in the body. The app renders the title from frontmatter.
+- Never use Markdown bullets such as `* "Backend"` inside frontmatter.
 
 ## Optional Series Frontmatter
 
@@ -182,66 +203,135 @@ Series rules:
 - Increase the order by one for each next log.
 - Omit the entire `series` block for standalone logs.
 
-Full frontmatter example with series:
+## Bilingual Requirement
 
-```mdx
----
-title: "How to Diagnose Server Performance: CPU vs I/O Overhead"
-category: "Software Development"
-createdAt: "2026-06-03"
-summary: "A practical Linux workflow for identifying whether server slowness comes from CPU execution or storage I/O waits."
-readTime: "6 min read"
-tags:
-  - "Linux"
-  - "Performance"
-  - "Observability"
-featured: false
-series:
-  title: "Server Performance"
-  slug: "server-performance"
-  order: 1
----
+Every new log must include two body versions:
+
+- English: `<Lang lang="en">`
+- Chinese: `<Lang lang="zh">`
+
+The frontmatter is written once at the top. Do not duplicate frontmatter for each language.
+
+Required body shape:
+
+````mdx
+<Lang lang="en">
+
+English opening paragraph.
+
+## Short Answer
+
+English section content.
+
+## The Main Principle
+
+English takeaway.
+
+</Lang>
+
+<Lang lang="zh">
+
+Chinese opening paragraph.
+
+## Short Answer
+
+Chinese section content.
+
+## The Main Principle
+
+Chinese takeaway.
+
+</Lang>
+````
+
+Bilingual rules:
+
+- Do not put `<Lang>` inside frontmatter.
+- Do not write English and Chinese paragraphs mixed together in the same section.
+- The English version must be complete.
+- The Chinese version must be complete.
+- The Chinese version should be natural Chinese, not word-by-word translation.
+- Both versions must have similar section structure.
+- Both versions must include at least four `##` headings.
+- Do not add a manual `## Contents` or `## Table of Contents` section.
+
+## MDX Component Rules
+
+Available MDX components:
+
+- `<Lang lang="en">...</Lang>`
+- `<Lang lang="zh">...</Lang>`
+- `<CardGrid columns={2}>...</CardGrid>`
+- `<CardGrid columns={3}>...</CardGrid>`
+- `<InfoCard title="...">...</InfoCard>`
+- `<CodeTabs>...</CodeTabs>`
+- `<CodeTab label="Java">...</CodeTab>`
+- `<CodeTab label="Go">...</CodeTab>`
+- `<CodeTab label="Node.js">...</CodeTab>`
+- `<FlowGraph title="..." nodes={[...]}/>`
+
+Rules:
+
+- Use `CardGrid` only for groups of strategies, checks, principles, or trade-offs.
+- Use `FlowGraph` only when a sequence, request path, lifecycle, or architecture flow is clearer visually.
+- If the English version uses a `FlowGraph`, the Chinese version must include an equivalent Chinese `FlowGraph`.
+- Do not put large code blocks inside cards.
+
+## Code And Command Rules
+
+Every command block must have a context sentence immediately before it.
+
+The context sentence must explain:
+
+- Where to run the command.
+- Why to run it.
+- What it should reveal.
+
+Good:
+
+````mdx
+Run this from the `frontend` directory to build the static site and catch MDX compile errors:
+
+```bash
+npm run build
 ```
+````
 
-## Allowed Categories
+Bad:
 
-Use one exact category name:
+- `Run:`
+- `Use this command:`
+- A command block with no explanation before it.
 
-- `Software Development`
-- `Interesting Tech Questions`
-- `Problem Logs`
-- `Fitness & Health`
-- `Finance`
-- `Travel`
-- `Life Reflections`
-- `Learning`
+Code fence labels:
 
-Category guidance:
+- Shell commands: `bash`
+- SQL: `sql`
+- JavaScript: `javascript`
+- TypeScript: `typescript`
+- JSON: `json`
+- Logs or terminal output: `text`
+- Config snippets: use the closest matching language, or `text`
 
-- Backend, frontend, infrastructure, database, Linux, performance, programming, architecture: `Software Development`
-- Interview questions, tricky technical questions, CS concepts, backend/frontend/system-design prompts, and worked solutions: `Interesting Tech Questions`
-- Real bugs, deployment failures, confusing errors, debugging sessions, production issues, and problems personally encountered during development: `Problem Logs`
-- Exercise, nutrition, sleep, habits, wellness: `Fitness & Health`
-- Investing, budgeting, income, financial planning: `Finance`
-- Destinations, culture, travel planning, trip reflections: `Travel`
-- Personal growth, philosophy, productivity, reflection: `Life Reflections`
-- Study systems, books, courses, note-taking, learning methods: `Learning`
+Rules:
 
-Frontend visibility rule:
+- Close every code fence.
+- Do not put command output in a `bash` block; use `text`.
+- Keep code blocks short and focused.
 
-- The public frontend shows only technical categories.
-- Visible categories are `Software Development`, `Interesting Tech Questions`, and `Problem Logs`.
-- Other categories may remain in `frontend/content/`, but they are hidden from the visible log archive.
+## Structure Rules
 
-When choosing between technical categories:
+Rules:
 
-| Use This Category | When The Log Is About |
-| --- | --- |
-| `Software Development` | A reusable concept, architecture pattern, implementation guide, infrastructure topic, or performance technique |
-| `Interesting Tech Questions` | A question you saw in an interview, discussion, article, or code review that is worth answering clearly |
-| `Problem Logs` | A specific problem you met, how it appeared, how you debugged it, what fixed it, and how to avoid it next time |
+- Use `##` for main sections.
+- Use `###` only for subsections.
+- Every article must include at least four `##` headings.
+- Practical technical articles should usually include five to eight `##` headings.
+- Do not write more than three paragraphs in a row without a `##` or `###` heading.
+- Start the body with a strong opening paragraph.
+- End with a practical takeaway, not a vague conclusion.
 
-## Writing Voice
+## Voice Rules
 
 Write like a practical engineering notebook.
 
@@ -260,594 +350,6 @@ Reader experience:
 - Use sections, tables, cards, and examples to reduce dense text.
 - Teach the reader how to think, not only what command to run.
 
-## Article Structure
-
-Most technical logs should follow this order:
-
-1. Define the concept or problem.
-2. Explain how it appears in real systems.
-3. Show how to confirm or inspect it.
-4. Explain the important signals.
-5. Present practical strategies or fixes.
-6. End with the main principle or workflow.
-
-Recommended section patterns:
-
-```mdx
-## What the Problem Means
-
-## How It Appears in Production
-
-## Confirm the Bottleneck
-
-## Step 1: Identify the Expensive Process
-
-## Step 2: Find the Expensive Query
-
-## Strategy 1: Reduce Unnecessary Work
-
-## Strategy 2: Bound the Request
-
-## A Practical Resolution Workflow
-
-## The Main Principle
-```
-
-Rules:
-
-- Use `##` for main sections.
-- Use `###` only for subsections.
-- The app builds the table of contents from `##` headings.
-- Do not add a manual `## Contents` or `## Table of Contents` section inside the MDX.
-- The frontend automatically renders the right-side Contents panel from the article's `##` headings.
-- Every article must include at least four `##` headings.
-- Practical technical articles should usually include five to eight `##` headings.
-- Do not write more than three paragraphs in a row without a `##` or `###` heading.
-- Do not hide important ideas inside one long paragraph. Turn them into named sections.
-- Do not start the body with `# Title`.
-- Start the body with a strong opening paragraph.
-- End with a practical takeaway, not a vague conclusion.
-
-Bad structure:
-
-```mdx
-Opening paragraph...
-
-Long paragraph...
-
-Another long paragraph...
-
-More explanation...
-```
-
-Good structure:
-
-```mdx
-Opening paragraph...
-
-## What Polling Means
-
-Explain the concept.
-
-## Why Short Polling Creates Waste
-
-Explain the problem.
-
-## How Long Polling Changes the Flow
-
-Explain the alternative.
-
-## When to Use Each Approach
-
-Give a decision rule.
-```
-
-## Technical Command Rules
-
-Every command block must have a context sentence immediately before it.
-
-The context sentence must explain:
-
-- Where to run the command.
-- Why to run it.
-- What it should reveal.
-
-Good pattern:
-
-````mdx
-Run this on the affected Linux server to check whether processes are waiting on disk I/O:
-
-```bash
-iostat -xz 1 5
-```
-````
-
-Bad patterns:
-
-- `Run:`
-- `Use this command:`
-- `Check this:`
-- A command block with no explanation before it.
-
-For project commands:
-
-````mdx
-Run this from the `frontend` directory to build the static site and catch MDX compile errors:
-
-```bash
-npm run build
-```
-````
-
-For database commands:
-
-````mdx
-Run this in PostgreSQL to identify queries with the highest total execution time:
-
-```sql
-SELECT
-  calls,
-  total_exec_time,
-  query
-FROM pg_stat_statements
-ORDER BY total_exec_time DESC
-LIMIT 5;
-```
-````
-
-After example output, explain the signal:
-
-````mdx
-Example output:
-
-```text
-CPU   %usr  %sys  %iowait  %idle
-all   84.1  10.4      0.3    4.5
-```
-
-This suggests CPU pressure because `%usr` is high, `%idle` is low, and `%iowait` is not the dominant value.
-````
-
-## Code Fence Rules
-
-Use language labels:
-
-- Shell commands: `bash`
-- SQL: `sql`
-- JavaScript: `javascript`
-- TypeScript: `typescript`
-- JSON: `json`
-- Logs or terminal output: `text`
-- Config snippets: use the closest matching language, or `text`
-
-Rules:
-
-- Close every code fence.
-- Do not put very large code blocks in the article.
-- Prefer short examples that teach the point.
-- Do not put command output in a `bash` block; use `text`.
-
-## Tabbed Code and Log Examples
-
-Use tabbed examples when the same concept needs to be shown in multiple programming languages, such as Java, Go, and Node.js. This keeps the article compact while still giving readers language-specific examples.
-
-Available tab components:
-
-- `<CodeTabs>...</CodeTabs>`
-- `<CodeTab label="Java">...</CodeTab>`
-- `<CodeTab label="Go">...</CodeTab>`
-- `<CodeTab label="Node.js">...</CodeTab>`
-
-Preferred pattern:
-
-````mdx
-<CodeTabs>
-  <CodeTab label="Java">
-
-```java
-logger.info("orderId={} status={}", orderId, status);
-```
-
-  </CodeTab>
-
-  <CodeTab label="Go">
-
-```go
-log.Printf("orderId=%s status=%s", orderID, status)
-```
-
-  </CodeTab>
-
-  <CodeTab label="Node.js">
-
-```javascript
-console.log({ orderId, status });
-```
-
-  </CodeTab>
-</CodeTabs>
-````
-
-Tabbed example rules:
-
-- Use tabs only when the examples teach the same idea in different languages or frameworks.
-- Keep every tab short and equivalent in purpose.
-- Do not use tabs for unrelated examples.
-- Put only one code fence inside each `<CodeTab>` unless the comparison genuinely needs more.
-- Use accurate code fence labels, for example `java`, `go`, `javascript`, `typescript`, or `text`.
-- If the example is log output rather than source code, use `text` inside every tab.
-- Do not duplicate a long explanation inside every tab. Explain the principle before or after the tabbed block.
-
-## Table Style
-
-Use normal Markdown tables. The frontend renders them with a styled table component automatically.
-
-Use tables for:
-
-- Comparisons.
-- Symptom-to-cause mappings.
-- Command output interpretation.
-- Trade-off summaries.
-- Decision matrices.
-
-Example:
-
-```mdx
-| Observation | Likely Direction | Next Check |
-| --- | --- | --- |
-| High `%usr`, low `%idle` | CPU-bound work | Profile the application process |
-| High `%iowait`, high disk latency | I/O-bound work | Inspect database queries and storage |
-| Low CPU, slow requests | External waits or locks | Check downstream calls and lock waits |
-```
-
-Table rules:
-
-- Keep cells short.
-- Do not put long paragraphs inside table cells.
-- Explain the important interpretation after the table.
-- Use tables to compress repeated patterns, not to decorate the article.
-
-## Card Style
-
-Use cards when a section has several strategies, checks, principles, or trade-offs that should be scanned quickly.
-
-Available MDX components:
-
-- `<Lang lang="en">...</Lang>`
-- `<Lang lang="zh">...</Lang>`
-- `<CardGrid columns={2}>`
-- `<CardGrid columns={3}>`
-- `<InfoCard title="...">...</InfoCard>`
-- `<CodeTabs>...</CodeTabs>`
-- `<CodeTab label="Java">...</CodeTab>`
-- `<FlowGraph title="..." nodes={[...]}/>`
-
-Preferred strategy pattern:
-
-````mdx
-<CardGrid columns={2}>
-  <InfoCard title="1. Measure First">
-    Identify the process, endpoint, query, or job responsible before changing code.
-  </InfoCard>
-
-  <InfoCard title="2. Remove Waste">
-    Eliminate duplicate loops, unnecessary transformations, oversized responses, and noisy logging.
-  </InfoCard>
-
-  <InfoCard title="3. Bound Work">
-    Add pagination, request limits, timeouts, and queue controls so one request cannot consume unlimited resources.
-  </InfoCard>
-
-  <InfoCard title="4. Reuse Results">
-    Cache or precompute only when freshness, invalidation, and ownership are understood.
-  </InfoCard>
-</CardGrid>
-````
-
-Card rules:
-
-- Use two columns for most articles.
-- Use three columns only when card text is very short.
-- Give every card a clear title.
-- Keep card bodies to one to three sentences.
-- Do not put large code blocks inside cards.
-- Use cards for summaries; put deep explanation in normal sections.
-
-## Flow Graph Style
-
-Use `FlowGraph` when a section needs to explain a process, request path, architecture flow, lifecycle, or concept sequence.
-
-Preferred pattern:
-
-````mdx
-<FlowGraph
-  title="RAG Pipeline Overview"
-  nodes={[
-    { id: "indexing", label: "Indexing", detail: "Prepare searchable knowledge units" },
-    { id: "retrieval", label: "Retrieval", detail: "Return candidate chunks" },
-    { id: "reranking", label: "Reranking", detail: "Move useful chunks to the top" },
-    { id: "llm", label: "LLM Design", detail: "Generate a grounded answer" }
-  ]}
-/>
-````
-
-Flow graph rules:
-
-- Use `FlowGraph` only when the visual sequence makes the explanation clearer than a paragraph or table.
-- Keep graphs short. Three to six nodes is the normal range.
-- Keep each `label` short.
-- Keep each `detail` to one compact sentence fragment.
-- Use stable lowercase `id` values.
-- The rendered graph should stay clean: do not add manual text below it that repeats every edge such as `A to B`.
-- If the English version uses a `FlowGraph`, the Chinese version must include a matching Chinese `FlowGraph`.
-- Translate `title`, `label`, and `detail` naturally in the Chinese graph.
-- Keep the English and Chinese graph structure equivalent unless the Chinese explanation genuinely needs a clearer local phrasing.
-
-## Readability Rules
-
-Use these rules to make the log readable:
-
-- Prefer one to three sentences per paragraph.
-- Use bullet lists for symptoms, causes, checks, and fixes.
-- Use tables when multiple rows share the same shape.
-- Use cards when five or more strategies would create too much vertical text.
-- Avoid giant sections. Split them with `##` or `###`.
-- Avoid repeating the same sentence pattern too many times.
-- Do not overuse bold text.
-- Keep the opening paragraph concise and useful.
-
-## Common Article Templates
-
-### Diagnostic Technical Log
-
-Use this when the article teaches how to identify a system problem:
-
-```mdx
-Opening definition and why the issue matters.
-
-## How the Problem Appears
-
-Symptoms and common false assumptions.
-
-## Confirm the Diagnosis
-
-Commands, metrics, or checks.
-
-## Interpret the Signals
-
-Table or bullets explaining what each signal means.
-
-## Fix the Highest-Impact Cause
-
-Strategies ordered from safest to most invasive.
-
-## The Main Principle
-
-One practical takeaway.
-```
-
-### Concept Comparison Log
-
-Use this when comparing two or more ideas:
-
-```mdx
-Opening paragraph explaining why the comparison matters.
-
-## Short Answer
-
-Direct practical summary.
-
-## Core Difference
-
-Table comparing the concepts.
-
-## When to Use Each
-
-Bullets or cards.
-
-## Common Mistakes
-
-Warnings and edge cases.
-
-## Decision Rule
-
-Simple selection framework.
-```
-
-### Strategy Log
-
-Use this when explaining multiple ways to improve something:
-
-```mdx
-Opening paragraph defining the goal.
-
-## What Good Looks Like
-
-Describe the target state.
-
-## Constraints
-
-Explain cost, risk, trade-offs, or prerequisites.
-
-## Strategies
-
-Use cards for quick scanning.
-
-## Implementation Order
-
-Recommended sequence.
-
-## The Main Principle
-
-Final takeaway.
-```
-
-### Interesting Tech Question Log
-
-Use this when recording an interview question or tricky technical question you saw.
-
-Set the frontmatter category exactly:
-
-```yaml
-category: "Interesting Tech Questions"
-```
-
-Recommended structure:
-
-```mdx
-Opening paragraph explaining where this question appears and why it matters.
-
-## The Question
-
-State the question clearly. Include the input, expected behavior, assumptions, or system constraints if relevant.
-
-## Short Answer
-
-Give the direct answer first.
-
-## Reasoning Path
-
-Explain how to think through the problem step by step.
-
-## Worked Solution
-
-Show the solution using prose, code, SQL, diagrams, or examples.
-
-## Edge Cases
-
-List the cases that often break shallow answers.
-
-## Interview Takeaway
-
-Explain what the question is really testing.
-```
-
-Rules:
-
-- Do not only paste the answer. Teach the reasoning path.
-- Make assumptions explicit before solving.
-- If there are multiple valid answers, compare them and explain the trade-off.
-- If code is included, keep it small and explain the key line or algorithm.
-- If the question is about system design, include constraints, bottlenecks, data flow, and failure modes.
-- End with the principle the reader should remember for similar questions.
-
-### Problem Log
-
-Use this when recording a real problem you met while building, deploying, debugging, or maintaining something.
-
-Set the frontmatter category exactly:
-
-```yaml
-category: "Problem Logs"
-```
-
-Recommended structure:
-
-```mdx
-Opening paragraph naming the problem and the context where it happened.
-
-## Symptom
-
-Describe what looked wrong from the user's or developer's view.
-
-## Context
-
-Describe the stack, environment, files, service, deployment target, or recent change involved.
-
-## First Assumption
-
-Record what you first thought was wrong, even if it was later proven wrong.
-
-## Debugging Path
-
-Show the checks, commands, logs, diffs, or experiments that narrowed the problem.
-
-## Root Cause
-
-Explain the actual cause in concrete technical terms.
-
-## Fix
-
-Describe the change that resolved the problem.
-
-## Prevention
-
-Explain what test, guardrail, note, naming rule, monitoring check, or workflow would prevent repeating it.
-
-## The Main Principle
-
-End with the reusable lesson.
-```
-
-Rules:
-
-- Keep the log factual. Separate symptoms, assumptions, evidence, and root cause.
-- Include exact error messages when useful, but do not paste huge logs.
-- Show the command or check that confirmed the issue when possible.
-- If the problem came from a wrong assumption, state that assumption clearly.
-- If the fix was small, still explain why it worked.
-- Do not turn a problem log into a vague reflection. It should be useful during future debugging.
-
-## Article Length
-
-Recommended length:
-
-- Short concept note: 700-1,200 words.
-- Practical engineering guide: 1,500-2,500 words.
-- Deep diagnostic article: 2,500-4,000 words.
-
-If the user asks for a short log, prioritize clarity over completeness.
-
-## Bad Frontmatter Examples
-
-Do not produce these:
-
-```yaml
----
-
----
-title: "Bad Extra Frontmatter Block"
-```
-
-```yaml
-tags:
-  - "Linux"
-  featured: false
-```
-
-```yaml
-tags:
-* "Backend"
-* "HTTP"
-* "Node.js"
-* "System Design"
-  featured: false
-```
-
-Why this is wrong:
-
-- `*` is not valid YAML list syntax here. YAML treats it as an alias marker.
-- `featured: false` is incorrectly nested under `tags`.
-- There is no two-space indentation before each tag item.
-- The correct YAML list marker is `-`, not `*`.
-
-Correct version:
-
-```yaml
-tags:
-  - "Backend"
-  - "HTTP"
-  - "Node.js"
-  - "System Design"
-featured: false
----
-```
-
-```mdx
-title: "Missing Opening Delimiter"
----
-```
-
 ## Final Validation Checklist
 
 Before returning the MDX, verify:
@@ -858,126 +360,14 @@ Before returning the MDX, verify:
 - `category` exactly matches one allowed category.
 - `tags` is a YAML list with three to five tags.
 - There is no blank line between `tags:` and the first tag.
-- Every tag line starts with exactly two spaces and a hyphen: `  - "Tag"`.
+- Every tag line starts with exactly two spaces and a hyphen.
 - `featured` is not inside `tags`.
-- `featured: false` is aligned with `tags:`.
 - If `series` exists, it has `title`, `slug`, and `order`.
 - The body does not include an H1.
 - The body has one `<Lang lang="en">` block and one `<Lang lang="zh">` block.
 - Each language block is complete and has at least four `##` headings.
-- Main sections use `##`.
 - Commands have context sentences before them.
 - Code fences have language labels and are closed.
-- Multi-language examples use `CodeTabs` when tabs save space.
 - Tables are short and readable.
 - Cards use only `CardGrid` and `InfoCard`.
-- Flow diagrams use `FlowGraph`, and every English `FlowGraph` has a matching Chinese `FlowGraph`.
 - The article ends with a practical takeaway.
-
-## Strict MDX Response Format Rule
-
-When generating a complete `.mdx` article, the assistant must return the article as raw source code only.
-
-Required response shape:
-
-1. First line outside the code block:
-
-```text
-Filename: article-name.mdx
-```
-
-2. Then return the full MDX article inside one single outer fenced code block labelled `mdx`.
-
-3. The outer fence must use four backticks:
-
-````text
-````mdx
-FULL MDX CONTENT HERE
-
-
-4. Do not render any part of the MDX article outside the fenced code block.
-
-5. Do not put explanations, comments, summaries, or notes inside the MDX code block.
-
-6. If the MDX article contains inner code blocks, keep them as normal triple-backtick fences.
-
-Correct output format:
-
-`````text
-Filename: example-log.mdx
-
-````mdx
----
-title: "Example Log"
-category: "Software Development"
-createdAt: "2026-06-06"
-summary: "One concise sentence explaining what the article teaches."
-readTime: "6 min read"
-tags:
-  - "Backend"
-  - "HTTP"
-  - "Node.js"
-featured: false
----
-
-<Lang lang="en">
-
-Opening paragraph.
-
-## Short Answer
-
-Run this from the project root to check the build:
-
-```bash
-npm run build
-```
-
-</Lang>
-
-<Lang lang="zh">
-
-开头段落。
-
-## 简短答案
-
-在项目根目录运行这个命令来检查构建：
-
-```bash
-npm run build
-```
-
-</Lang>
-
-
-Wrong output format:
-
-```md
----
-title: "Example Log"
----
-
-<Lang lang="en">
-
-## Short Answer
-
-Content here.
-
-</Lang>
-```
-
-Why this is wrong:
-
-- The MDX is not wrapped in one outer fenced code block.
-- The chat UI may render headings, tables, and MDX components.
-- YAML indentation or JSX formatting may be transformed.
-````
-
-```md
-When the user asks for a log, the final answer must contain only:
-
-- `Filename: <filename>.mdx`
-- One fenced `mdx` code block containing the full article
-
-Do not return the article as rendered Markdown.
-Do not use canvas, document blocks, rich text blocks, or split code blocks.
-```
