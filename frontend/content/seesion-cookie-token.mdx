@@ -1,0 +1,629 @@
+---
+title: "Session, Cookie, and Token"
+category: "Software Development"
+createdAt: "2026-06-14"
+summary: "A practical explanation of how session, cookie, and token authentication work in real backend systems."
+readTime: "8 min read"
+tags:
+  - "Backend"
+  - "HTTP"
+  - "Authentication"
+  - "Security"
+featured: false
+---
+
+<Lang lang="en">
+
+Login is not only about checking email and password. The real backend problem is how the server remembers that the same user is still logged in across many separate HTTP requests. Session, cookie, and token are three related concepts used to solve this problem, but they are not the same thing.
+
+## Short Answer
+
+A **session** is login state stored on the server.
+
+A **cookie** is browser storage that can be automatically sent with HTTP requests.
+
+A **token** is a portable proof of identity or permission, usually signed by the server.
+
+```txt
+Session = server-side login state
+Cookie = browser storage and automatic request transport
+Token = signed or random proof carried by the client
+```
+
+The most common confusion is thinking that cookie and session are the same thing. They are not. A cookie can carry a session id, a JWT, a tracking id, a language preference, or other small browser data.
+
+## What the Problem Means
+
+HTTP is stateless by default.
+
+That means this request:
+
+```txt
+POST /login
+```
+
+and this later request:
+
+```txt
+GET /profile
+```
+
+are separate requests. The server does not automatically know that they came from the same logged-in user.
+
+So authentication systems need a way to answer these questions:
+
+| Question | Meaning |
+| --- | --- |
+| Who is this user? | Identity |
+| Is this user still logged in? | Login validity |
+| What can this user access? | Authorization |
+| Has this login expired? | Expiration |
+| Can this login be revoked? | Logout or forced logout |
+
+Session, cookie, and token are different parts of this authentication design.
+
+## How Session Works
+
+A session means the server stores the login state.
+
+Example session data:
+
+```json
+{
+  "sessionId": "sess_abc123",
+  "userId": "user_42",
+  "role": "admin",
+  "createdAt": "2026-06-14T10:00:00Z",
+  "expiresAt": "2026-06-14T18:00:00Z"
+}
+```
+
+The browser does not need to store the full user data. It usually stores only a session id.
+
+```txt
+Cookie: sessionId=sess_abc123
+```
+
+Then every time the browser sends a request, the backend uses the session id to find the real login state.
+
+```txt
+sessionId=sess_abc123
+→ find session in Redis or database
+→ get userId=user_42
+→ allow or reject request
+```
+
+This is called session-based authentication.
+
+It is common in:
+
+| Use Case | Why Session Fits |
+| --- | --- |
+| Admin dashboard | Server can control login state directly |
+| CMS | Logout and permission changes are easy |
+| E-commerce website | Server can manage cart and user state |
+| Internal company tool | Centralized access control is useful |
+| Server-rendered app | Browser cookie flow is simple |
+
+## How Cookie Works
+
+A cookie is a browser mechanism.
+
+The server can ask the browser to save a cookie by returning this header:
+
+```txt
+Set-Cookie: sessionId=sess_abc123; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=3600
+```
+
+After that, the browser automatically sends the cookie back to the matching domain:
+
+```txt
+Cookie: sessionId=sess_abc123
+```
+
+Important cookie attributes:
+
+| Attribute | Purpose |
+| --- | --- |
+| `HttpOnly` | JavaScript cannot read the cookie |
+| `Secure` | Cookie is only sent over HTTPS |
+| `SameSite` | Reduces cross-site request risk |
+| `Max-Age` / `Expires` | Controls cookie lifetime |
+| `Path` | Controls which routes receive the cookie |
+| `Domain` | Controls which domain receives the cookie |
+
+For authentication cookies, production systems usually need `HttpOnly` and `Secure`.
+
+A cookie is not automatically secure just because it is a cookie. The security depends on what is stored inside it and which attributes are configured.
+
+## How Token Works
+
+A token is a piece of proof carried by the client.
+
+A token can be:
+
+| Token Type | Meaning |
+| --- | --- |
+| Opaque token | Random string that the server must look up |
+| JWT | Signed token that contains claims |
+| Access token | Short-lived token used to call APIs |
+| Refresh token | Longer-lived token used to get a new access token |
+
+A JWT usually contains claims like this:
+
+```json
+{
+  "sub": "user_42",
+  "role": "admin",
+  "iat": 1781424000,
+  "exp": 1781427600
+}
+```
+
+The server signs the JWT. Later, the server can verify the signature and expiry.
+
+Common API request format:
+
+```txt
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6...
+```
+
+Token-based authentication is common in:
+
+| Use Case | Why Token Fits |
+| --- | --- |
+| Mobile app | Mobile clients do not rely on browser cookies |
+| API-first backend | APIs can receive tokens in headers |
+| SPA frontend | Frontend can call a separate backend |
+| Microservices | Services can verify identity across boundaries |
+| Third-party API access | External clients can use access tokens |
+
+## Core Difference
+
+| Concept | Stored Where | Sent How | Server Lookup Needed? | Easy Logout? | Common Pattern |
+| --- | --- | --- | --- | --- | --- |
+| Session | Server | Usually cookie | Yes | Yes | Web app login |
+| Cookie | Browser | Automatically by browser | Depends on value | Depends | Browser transport |
+| Token | Client | Header or cookie | Not always | Harder if stateless | API or mobile auth |
+
+The important point is that these concepts can be combined.
+
+```txt
+Session + Cookie
+```
+
+This means the server stores the session, and the browser stores only the session id inside a cookie.
+
+```txt
+JWT + Cookie
+```
+
+This means the server sends a JWT inside an `HttpOnly` cookie.
+
+```txt
+JWT + Authorization Header
+```
+
+This means the client stores a JWT and manually sends it in the `Authorization` header.
+
+## Common Mistakes
+
+The first mistake is storing sensitive user data directly in a readable cookie.
+
+Bad example:
+
+```txt
+Cookie: userId=42; role=admin
+```
+
+If the cookie is not signed or protected, the user may modify it.
+
+Better direction:
+
+```txt
+Cookie: sessionId=random_unpredictable_id
+```
+
+Then the server decides what this session id means.
+
+The second mistake is using JWT just because it sounds modern.
+
+JWT is useful when stateless verification matters. But if the system needs immediate logout, account ban, forced device logout, or strict session control, pure stateless JWT can become harder to manage.
+
+The third mistake is storing access tokens in `localStorage` without thinking about XSS.
+
+If JavaScript can read the token, injected malicious JavaScript can also read the token. This does not mean `localStorage` is always forbidden, but the risk must be understood.
+
+The fourth mistake is using long-lived access tokens.
+
+A stolen access token should not remain useful for too long. This is why many systems use short-lived access tokens and longer-lived refresh tokens.
+
+## Practical Workflow
+
+For a normal browser web app, start with this design:
+
+```txt
+Session + HttpOnly Secure Cookie
+```
+
+Flow:
+
+```txt
+1. User sends email and password to POST /login
+2. Server verifies password
+3. Server creates a session in Redis or database
+4. Server sends Set-Cookie: sessionId=...
+5. Browser stores the cookie
+6. Browser automatically sends the cookie on later requests
+7. Server uses sessionId to load the session
+```
+
+Logout is simple:
+
+```txt
+1. Delete the session from Redis or database
+2. Clear the cookie in the browser
+```
+
+For an API-first or mobile system, use this design:
+
+```txt
+Short-lived access token + refresh token
+```
+
+Flow:
+
+```txt
+1. User logs in
+2. Server returns access token and refresh token
+3. Client sends access token to API
+4. Server verifies access token
+5. When access token expires, client uses refresh token to get a new one
+6. If refresh token is invalid, user must log in again
+```
+
+A common lifetime design:
+
+```txt
+Access token: 5 to 15 minutes
+Refresh token: days or weeks
+```
+
+## Important Trade-Offs
+
+| Design | Strength | Risk |
+| --- | --- | --- |
+| Session + Cookie | Easy logout and server control | Needs session storage |
+| JWT Access Token | Stateless verification | Harder immediate revocation |
+| Token in Header | Good for APIs and mobile | Client must manage storage |
+| JWT in HttpOnly Cookie | Reduces token exposure to JavaScript | Needs correct CSRF and CORS setup |
+| Refresh Token Flow | Better user experience | More complex security design |
+
+There is no single best option for every system. The correct design depends on whether the system needs server-side control, stateless verification, mobile support, third-party clients, or strict logout behavior.
+
+## The Main Principle
+
+Do not ask whether cookie, session, or token is better before asking where the authentication state should live.
+
+The real design question is:
+
+```txt
+Should the server store login state,
+or should the client carry verifiable proof?
+```
+
+If the server stores login state, use session-based authentication with an `HttpOnly` secure cookie.
+
+If the client carries proof, use short-lived access tokens with a carefully designed refresh token flow.
+
+For most normal browser apps, the practical default is session plus `HttpOnly` cookie. For mobile apps, API-first systems, and separated clients, token-based authentication is usually more flexible.
+
+</Lang>
+
+<Lang lang="zh">
+
+登录不是只有检查 email 和 password。后端真正要解决的问题是：用户只登录了一次，但之后会发送很多个独立的 HTTP request，服务器要知道这些 request 还是不是来自同一个已登录用户。Session、cookie、token 都是在解决这个问题，但它们不是同一个东西。
+
+## Short Answer
+
+**Session** 是存在服务端的登录状态。
+
+**Cookie** 是浏览器提供的存储和自动发送机制。
+
+**Token** 是客户端携带的身份或权限证明，通常会被服务端签名。
+
+```txt
+Session = 服务端保存的登录状态
+Cookie = 浏览器存储 + 自动随 request 发送
+Token = 客户端携带的证明
+```
+
+最常见的误解是以为 cookie 等于 session。它们不一样。Cookie 可以存 session id，也可以存 JWT、tracking id、language preference，甚至其他小型浏览器数据。
+
+## What the Problem Means
+
+HTTP 默认是无状态的。
+
+也就是说，这个 request：
+
+```txt
+POST /login
+```
+
+和之后这个 request：
+
+```txt
+GET /profile
+```
+
+本质上是两个独立请求。服务器不会天然知道它们来自同一个已登录用户。
+
+所以认证系统需要回答这些问题：
+
+| 问题 | 意思 |
+| --- | --- |
+| 这个用户是谁？ | Identity |
+| 这个用户是否还登录着？ | Login validity |
+| 这个用户能访问什么？ | Authorization |
+| 这个登录状态有没有过期？ | Expiration |
+| 能不能强制让这个登录失效？ | Logout or forced logout |
+
+Session、cookie、token 是这个认证设计里的不同工具。
+
+## How Session Works
+
+Session 的意思是：登录状态存在服务端。
+
+例如服务端可能保存这样的 session 数据：
+
+```json
+{
+  "sessionId": "sess_abc123",
+  "userId": "user_42",
+  "role": "admin",
+  "createdAt": "2026-06-14T10:00:00Z",
+  "expiresAt": "2026-06-14T18:00:00Z"
+}
+```
+
+浏览器不需要保存完整用户资料。浏览器通常只保存一个 session id。
+
+```txt
+Cookie: sessionId=sess_abc123
+```
+
+之后浏览器每次发送请求，后端就用这个 session id 找回真正的登录状态。
+
+```txt
+sessionId=sess_abc123
+→ 去 Redis 或 database 找 session
+→ 得到 userId=user_42
+→ 决定允许或拒绝 request
+```
+
+这就是 session-based authentication。
+
+它常见于：
+
+| 使用场景 | 为什么适合 Session |
+| --- | --- |
+| Admin dashboard | 服务端可以直接控制登录状态 |
+| CMS | Logout 和权限修改比较简单 |
+| E-commerce website | 服务端可以管理购物车和用户状态 |
+| Internal company tool | 集中式访问控制更容易 |
+| Server-rendered app | 浏览器 cookie 流程简单 |
+
+## How Cookie Works
+
+Cookie 是浏览器机制。
+
+服务端可以通过 response header 要求浏览器保存 cookie：
+
+```txt
+Set-Cookie: sessionId=sess_abc123; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=3600
+```
+
+之后浏览器会自动把 cookie 带回相同 domain：
+
+```txt
+Cookie: sessionId=sess_abc123
+```
+
+重要 cookie 属性：
+
+| Attribute | 作用 |
+| --- | --- |
+| `HttpOnly` | JavaScript 不能读取这个 cookie |
+| `Secure` | 只允许通过 HTTPS 发送 |
+| `SameSite` | 降低跨站请求风险 |
+| `Max-Age` / `Expires` | 控制 cookie 生命周期 |
+| `Path` | 控制哪些 route 会收到 cookie |
+| `Domain` | 控制哪个 domain 会收到 cookie |
+
+认证 cookie 在生产环境通常应该加上 `HttpOnly` 和 `Secure`。
+
+Cookie 不会因为它叫 cookie 就自动安全。安全性取决于里面存了什么，以及 cookie attribute 有没有配置正确。
+
+## How Token Works
+
+Token 是客户端携带的一段证明。
+
+Token 可以是：
+
+| Token Type | 意思 |
+| --- | --- |
+| Opaque token | 随机字符串，服务端需要查询它代表什么 |
+| JWT | 包含 claims 的签名 token |
+| Access token | 短期 token，用来请求 API |
+| Refresh token | 较长期 token，用来换新的 access token |
+
+JWT 通常会包含这些 claims：
+
+```json
+{
+  "sub": "user_42",
+  "role": "admin",
+  "iat": 1781424000,
+  "exp": 1781427600
+}
+```
+
+服务端会签名这个 JWT。之后服务端可以验证签名和过期时间。
+
+常见 API request 格式：
+
+```txt
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6...
+```
+
+Token-based authentication 常见于：
+
+| 使用场景 | 为什么适合 Token |
+| --- | --- |
+| Mobile app | Mobile client 不依赖浏览器 cookie |
+| API-first backend | API 可以通过 header 接收 token |
+| SPA frontend | 前端可以调用独立 backend |
+| Microservices | 服务之间可以验证身份 |
+| Third-party API access | 外部 client 可以使用 access token |
+
+## Core Difference
+
+| 概念 | 存在哪里 | 怎么发送 | 服务端是否需要查询 | 是否容易 logout | 常见模式 |
+| --- | --- | --- | --- | --- | --- |
+| Session | 服务端 | 通常通过 cookie | 需要 | 容易 | Web app login |
+| Cookie | 浏览器 | 浏览器自动发送 | 取决于里面放什么 | 取决于设计 | Browser transport |
+| Token | 客户端 | Header 或 cookie | 不一定 | Stateless 时比较麻烦 | API or mobile auth |
+
+重点是：这些概念可以组合。
+
+```txt
+Session + Cookie
+```
+
+意思是服务端保存 session，浏览器只保存 session id cookie。
+
+```txt
+JWT + Cookie
+```
+
+意思是服务端把 JWT 放进 `HttpOnly` cookie。
+
+```txt
+JWT + Authorization Header
+```
+
+意思是客户端自己保存 JWT，然后每次 API request 手动放进 `Authorization` header。
+
+## Common Mistakes
+
+第一个错误是把敏感用户资料直接放进可读 cookie。
+
+错误例子：
+
+```txt
+Cookie: userId=42; role=admin
+```
+
+如果 cookie 没有签名或保护，用户可能自己修改它。
+
+更好的方向：
+
+```txt
+Cookie: sessionId=random_unpredictable_id
+```
+
+然后由服务端决定这个 session id 代表谁。
+
+第二个错误是因为 JWT 听起来比较 modern，所以强行使用 JWT。
+
+JWT 的价值在于 stateless verification。但是如果系统需要立即 logout、封号、强制踢设备、严格控制 session，那么纯 stateless JWT 反而会让系统更难管理。
+
+第三个错误是没有考虑 XSS，就把 access token 放进 `localStorage`。
+
+如果 JavaScript 可以读取 token，被注入的恶意 JavaScript 也可能读取 token。这不代表 `localStorage` 永远不能用，而是必须知道它的风险。
+
+第四个错误是使用太长寿命的 access token。
+
+如果 access token 被偷，它不应该长期有效。所以很多系统会使用短命 access token，再配合较长寿命的 refresh token。
+
+## Practical Workflow
+
+普通浏览器 web app，优先从这个设计开始：
+
+```txt
+Session + HttpOnly Secure Cookie
+```
+
+流程：
+
+```txt
+1. 用户发送 email 和 password 到 POST /login
+2. 服务端验证密码
+3. 服务端在 Redis 或 database 创建 session
+4. 服务端返回 Set-Cookie: sessionId=...
+5. 浏览器保存 cookie
+6. 之后浏览器自动带上 cookie
+7. 服务端用 sessionId 加载 session
+```
+
+Logout 很简单：
+
+```txt
+1. 删除 Redis 或 database 里的 session
+2. 清除浏览器 cookie
+```
+
+API-first 或 mobile system，可以使用这个设计：
+
+```txt
+Short-lived access token + refresh token
+```
+
+流程：
+
+```txt
+1. 用户登录
+2. 服务端返回 access token 和 refresh token
+3. 客户端用 access token 请求 API
+4. 服务端验证 access token
+5. access token 过期后，客户端用 refresh token 换新的 access token
+6. refresh token 无效时，用户需要重新登录
+```
+
+常见生命周期设计：
+
+```txt
+Access token: 5 到 15 分钟
+Refresh token: 几天到几周
+```
+
+## Important Trade-Offs
+
+| 设计 | 优点 | 风险 |
+| --- | --- | --- |
+| Session + Cookie | Logout 简单，服务端控制强 | 需要 session storage |
+| JWT Access Token | 可以 stateless verification | 立即撤销比较麻烦 |
+| Token in Header | 适合 API 和 mobile | 客户端必须管理存储 |
+| JWT in HttpOnly Cookie | 减少 JavaScript 读取 token 的风险 | 需要正确处理 CSRF 和 CORS |
+| Refresh Token Flow | 用户体验更好 | 安全设计更复杂 |
+
+没有一种方案适合所有系统。正确选择取决于系统是否需要服务端强控制、stateless verification、mobile support、third-party client，或者严格 logout 行为。
+
+## The Main Principle
+
+不要一开始就问 cookie、session、token 哪个更好。
+
+真正的问题是：
+
+```txt
+认证状态应该存在服务端，
+还是由客户端携带一段可验证的证明？
+```
+
+如果状态存在服务端，用 session-based authentication 加 `HttpOnly` secure cookie。
+
+如果客户端携带证明，用短命 access token 加设计良好的 refresh token flow。
+
+普通浏览器应用的实战默认方案是 session + `HttpOnly` cookie。Mobile app、API-first system、前后端分离系统通常更适合 token-based authentication。
+
+</Lang>
