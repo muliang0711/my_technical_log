@@ -1,0 +1,645 @@
+---
+title: "Two-Factor Authentication Core Idea"
+category: "Software Development"
+createdAt: "2026-06-15"
+summary: "A practical explanation of why accounts need more than passwords and how authentication factors prove account ownership."
+readTime: "8 min read"
+tags:
+  - "Security"
+  - "Authentication"
+  - "Backend"
+  - "System Design"
+featured: false
+---
+
+<Lang lang="en">
+
+Two-factor authentication exists because username and password alone are weak proof of account ownership. A username or email is often public, and a password can be leaked, guessed, reused, phished, or stolen. A secure login system should not only ask, “Do you know the password?” It should also ask, “Can you prove you control something linked to this account?”
+
+## Short Answer
+
+Authentication is usually based on three core ideas:
+
+| Factor | Meaning | Example |
+| --- | --- | --- |
+| Something you know | A secret stored in your memory | Password, PIN, recovery phrase |
+| Something you have | A physical or digital item you control | Phone, authenticator app, security key, hardware token |
+| Something you are | A biological trait | Face ID, fingerprint, voice |
+
+Two-factor authentication means the system requires at least two different types of proof.
+
+For example:
+
+```text
+Password + Gmail OTP
+```
+
+This means:
+
+```text
+You know the password
++ 
+You can access the email inbox
+```
+
+That is stronger than password-only login because stealing the password alone is not enough.
+
+## What the Problem Means
+
+The core problem is that password-based login assumes the password is private.
+
+In real systems, this assumption is often false.
+
+A user email can be easy to know because it may appear in:
+
+| Place | Why It Is Exposed |
+| --- | --- |
+| Login form | Email is commonly used as username |
+| Git commits | Developers may expose email in repositories |
+| Social profiles | Users reuse public contact emails |
+| Data breaches | Old platforms may leak email-password pairs |
+| Phishing pages | Users may type credentials into fake pages |
+
+The password can also be weak because users often reuse it across different services.
+
+So this login check is not enough:
+
+```text
+Is this email correct?
+Is this password correct?
+```
+
+A stronger system asks for another independent proof:
+
+```text
+Can this user also control the trusted email, phone, authenticator app, or device?
+```
+
+## The Three Authentication Factors
+
+### 1. Something You Know
+
+This is knowledge-based authentication.
+
+Examples:
+
+```text
+Password
+PIN
+Security question
+Recovery phrase
+```
+
+The weakness is that knowledge can be copied. If another person learns your password, the system cannot tell whether the real owner or an attacker typed it.
+
+```text
+Real user knows password
+Attacker also knows password
+System sees both as the same
+```
+
+That is why password-only authentication is fragile.
+
+### 2. Something You Have
+
+This proves control over an object, device, or account channel.
+
+Examples:
+
+```text
+Email inbox
+Phone number
+Authenticator app
+Hardware security key
+Trusted device
+```
+
+For example, when the system sends a one-time code to Gmail, it is checking whether the user can access the email account connected to the login account.
+
+```text
+Login account asks for OTP
+Gmail receives OTP
+User enters OTP
+System confirms user controls the email inbox
+```
+
+This does not prove the user is physically holding a device, but it proves the user controls an external trusted channel.
+
+### 3. Something You Are
+
+This is biometric authentication.
+
+Examples:
+
+```text
+Fingerprint
+Face ID
+Voice recognition
+Iris scan
+```
+
+Biometrics are convenient, but they should be handled carefully. Unlike passwords, a fingerprint or face cannot be easily changed after compromise.
+
+In most applications, biometrics are used locally on the device to unlock a private key or approve login, not directly stored as raw biometric data on the backend.
+
+## Why Email OTP Improves Security
+
+Email OTP improves security because it separates login into two checks:
+
+```text
+Password check
++
+Email ownership check
+```
+
+The attacker now needs more than one thing.
+
+| Attack Situation | Password Only | Password + Email OTP |
+| --- | --- | --- |
+| Attacker knows email | Can try password guessing | Still needs password and OTP |
+| Attacker steals password | Can log in directly | Still needs access to email |
+| Attacker has old leaked password | May succeed if reused | Blocked unless email is also controlled |
+| Attacker controls user email | Still needs password | Risk is higher, because OTP channel is compromised |
+
+This is why email OTP is better than password-only login.
+
+But email OTP is not the strongest form of 2FA because email accounts can also be compromised. For higher-risk systems, authenticator apps, passkeys, or hardware security keys are stronger.
+
+## Stronger Authentication Flow
+
+A practical login system can be designed in levels.
+
+```text
+Level 1:
+Email + password
+
+Level 2:
+Email + password + OTP
+
+Level 3:
+Email + password + authenticator app
+
+Level 4:
+Email + password/passkey + hardware security key
+```
+
+The stronger the account risk, the stronger the factor should be.
+
+For example:
+
+| System Type | Suggested Authentication |
+| --- | --- |
+| Normal blog account | Password + email verification |
+| E-commerce account | Password + email or phone OTP |
+| Banking account | Password + device binding + OTP |
+| Crypto exchange account | Password + authenticator app + withdrawal confirmation |
+| Admin panel | Password/passkey + hardware security key |
+
+The rule is simple: the more damage an attacker can cause, the more proof the system should require.
+
+## Example: Password + Gmail PIN Code
+
+A common implementation is:
+
+```text
+1. User enters email and password
+2. Backend verifies password
+3. Backend generates a short-lived OTP
+4. Backend sends OTP to Gmail
+5. User enters OTP
+6. Backend verifies OTP
+7. Backend creates login session
+```
+
+The important part is that the OTP must be short-lived.
+
+Example policy:
+
+```text
+OTP length: 6 digits
+Expiry time: 5 minutes
+Retry limit: 5 attempts
+One-time use: yes
+Rate limit: yes
+```
+
+Without these controls, OTP can become weak.
+
+For example, a 6-digit OTP only has 1,000,000 possible values. If the system allows unlimited retries, attackers can brute-force it.
+
+## Backend Design Notes
+
+A secure OTP system should not store the raw OTP directly.
+
+Better design:
+
+```text
+Generate OTP
+Hash OTP
+Store hashed OTP with expiry time
+Send raw OTP to user
+Compare hashed input later
+Delete OTP after success or expiry
+```
+
+Example database shape:
+
+```text
+otp_verifications
+- id
+- user_id
+- otp_hash
+- purpose
+- expires_at
+- used_at
+- failed_attempts
+- created_at
+```
+
+The backend should also bind the OTP to a purpose.
+
+```text
+login
+password_reset
+email_change
+withdrawal
+delete_account
+```
+
+This prevents one OTP from being reused for a different sensitive action.
+
+## Important Trade-Offs
+
+| Option | Good For | Risk |
+| --- | --- | --- |
+| Email OTP | Easy to implement, low friction | Weak if email is compromised |
+| SMS OTP | Familiar to users | SIM swap, interception, telecom dependency |
+| Authenticator app | Stronger than email/SMS | User may lose device |
+| Hardware security key | Very strong phishing resistance | Higher cost and lower user adoption |
+| Biometrics | Convenient local approval | Cannot be rotated like a password |
+
+Email OTP is acceptable for many normal applications, but it should not be treated as the strongest security model.
+
+## Practical Workflow
+
+Use this decision workflow:
+
+```text
+1. Start with password or passkey login.
+2. Add email verification for account ownership.
+3. Add OTP for login from new devices or risky locations.
+4. Add authenticator app for high-value accounts.
+5. Add hardware security key for admin or financial operations.
+6. Add rate limits, expiry, audit logs, and recovery flow.
+```
+
+Authentication is not only about login success. It is also about detecting suspicious behavior.
+
+Useful security signals include:
+
+```text
+New device
+New country
+Too many failed attempts
+Password changed recently
+Withdrawal requested
+Email changed recently
+Recovery flow started
+```
+
+When risk is higher, ask for stronger proof.
+
+## The Main Principle
+
+A password proves only what the user knows. It does not prove the person is the legitimate account owner.
+
+A better authentication system combines independent proofs:
+
+```text
+Something you know
++
+Something you control
++
+Sometimes something you are
+```
+
+Two-factor authentication works because an attacker must compromise more than one boundary. The main engineering principle is to increase the cost of account takeover without making normal users unable to log in.
+
+</Lang>
+
+<Lang lang="zh">
+
+二次验证的核心原因很简单：只靠邮箱和密码，不能充分证明这个人就是账号的真正拥有者。邮箱名通常很容易被别人知道，密码也可能被泄露、复用、猜中、钓鱼骗走。所以安全系统不应该只问：“你知不知道密码？”还应该问：“你能不能证明你控制了这个账号绑定的东西？”
+
+## Short Answer
+
+认证通常基于三个核心思路：
+
+| 因素 | 意思 | 例子 |
+| --- | --- | --- |
+| 你知道什么 | 存在你脑里的秘密 | 密码、PIN、恢复短语 |
+| 你拥有什么 | 你控制的设备、账号或物品 | 手机、邮箱、Authenticator App、安全密钥 |
+| 你是什么 | 你的生物特征 | Face ID、指纹、声音 |
+
+Two-factor authentication 的意思是：系统至少要求用户提供两种不同类型的证明。
+
+例如：
+
+```text
+密码 + Gmail PIN code
+```
+
+这代表：
+
+```text
+你知道密码
++
+你能进入这个账号绑定的 Gmail
+```
+
+这样会比只输入密码安全，因为攻击者就算知道密码，也还需要控制你的 Gmail 才能完成登录。
+
+## What the Problem Means
+
+问题的核心是：密码登录默认假设密码是私密的。
+
+但现实系统里，这个假设经常不成立。
+
+邮箱很容易被别人知道，因为它可能出现在：
+
+| 场景 | 为什么会暴露 |
+| --- | --- |
+| 登录页面 | 邮箱经常就是 username |
+| Git commit | 开发者邮箱可能出现在 repo 里 |
+| 社交平台 | 很多人公开联系邮箱 |
+| 数据泄露 | 旧平台可能泄露 email-password 组合 |
+| 钓鱼页面 | 用户可能把账号密码输入到假网站 |
+
+密码也一样脆弱，因为很多用户会在多个平台重复使用同一个密码。
+
+所以这个检查不够：
+
+```text
+邮箱对不对？
+密码对不对？
+```
+
+更安全的系统还要继续问：
+
+```text
+你能不能控制这个账号绑定的邮箱、手机、Authenticator App 或设备？
+```
+
+## The Three Authentication Factors
+
+### 1. Something You Know
+
+这是知识型认证。
+
+例子：
+
+```text
+密码
+PIN
+安全问题
+恢复短语
+```
+
+它的问题是：知识可以被复制。
+
+如果别人知道了你的密码，系统很难分辨输入密码的人到底是本人，还是攻击者。
+
+```text
+真实用户知道密码
+攻击者也知道密码
+系统看到的是同一个结果
+```
+
+所以 password-only login 本质上很脆弱。
+
+### 2. Something You Have
+
+这是证明你控制某个设备、账号或外部通道。
+
+例子：
+
+```text
+邮箱 inbox
+手机号
+Authenticator App
+硬件安全密钥
+已信任设备
+```
+
+例如系统发送一次性 PIN code 到 Gmail，本质上是在检查用户是否可以进入这个账号绑定的邮箱。
+
+```text
+登录账号要求 OTP
+Gmail 收到 OTP
+用户输入 OTP
+系统确认用户控制这个邮箱
+```
+
+这不一定证明用户手上拿着某个实体设备，但它证明用户控制了一个外部可信通道。
+
+### 3. Something You Are
+
+这是生物识别认证。
+
+例子：
+
+```text
+指纹
+Face ID
+声音识别
+虹膜识别
+```
+
+生物识别很方便，但要谨慎处理。密码泄露后可以换，指纹和脸不能真正“更换”。
+
+所以很多系统不会把原始生物数据直接交给后端保存，而是在本地设备上用 Face ID 或指纹解锁私钥，或者批准某次登录动作。
+
+## Why Email OTP Improves Security
+
+Email OTP 会提升安全性，因为它把登录拆成两个检查：
+
+```text
+密码检查
++
+邮箱控制权检查
+```
+
+攻击者现在需要同时拿到两样东西。
+
+| 攻击情况 | 只用密码 | 密码 + Email OTP |
+| --- | --- | --- |
+| 攻击者知道邮箱 | 可以尝试猜密码 | 还需要密码和 OTP |
+| 攻击者偷到密码 | 可以直接登录 | 还需要进入邮箱 |
+| 攻击者拿到旧泄露密码 | 如果用户复用密码，可能成功 | 没有邮箱控制权就会被挡住 |
+| 攻击者已经控制邮箱 | 仍然需要密码 | 风险变高，因为 OTP 通道也被攻破 |
+
+所以 email OTP 比 password-only login 更安全。
+
+但 email OTP 不是最强的 2FA，因为邮箱本身也可能被盗。对于高风险系统，Authenticator App、passkey 或硬件安全密钥会更强。
+
+## Stronger Authentication Flow
+
+实际系统可以按安全等级设计。
+
+```text
+Level 1:
+邮箱 + 密码
+
+Level 2:
+邮箱 + 密码 + OTP
+
+Level 3:
+邮箱 + 密码 + Authenticator App
+
+Level 4:
+邮箱 + 密码/passkey + 硬件安全密钥
+```
+
+账号风险越高，认证因素就应该越强。
+
+例如：
+
+| 系统类型 | 建议认证方式 |
+| --- | --- |
+| 普通博客账号 | 密码 + 邮箱验证 |
+| 电商账号 | 密码 + 邮箱或手机 OTP |
+| 银行账号 | 密码 + 设备绑定 + OTP |
+| 加密货币交易所账号 | 密码 + Authenticator App + 提币确认 |
+| 后台管理系统 | 密码/passkey + 硬件安全密钥 |
+
+规则很简单：攻击者能造成的损失越大，系统就应该要求更强的证明。
+
+## Example: Password + Gmail PIN Code
+
+常见流程是：
+
+```text
+1. 用户输入 email 和 password
+2. 后端验证 password
+3. 后端生成短期有效的 OTP
+4. 后端发送 OTP 到 Gmail
+5. 用户输入 OTP
+6. 后端验证 OTP
+7. 后端创建 login session
+```
+
+重点是 OTP 必须短期有效。
+
+例如：
+
+```text
+OTP 长度：6 位数字
+有效时间：5 分钟
+重试次数：最多 5 次
+是否一次性使用：是
+是否加 rate limit：是
+```
+
+如果没有这些限制，OTP 也会变弱。
+
+例如 6 位数字 OTP 只有 1,000,000 种可能。如果系统允许无限重试，攻击者就可以暴力破解。
+
+## Backend Design Notes
+
+安全的 OTP 系统不应该直接保存明文 OTP。
+
+更好的设计是：
+
+```text
+生成 OTP
+Hash OTP
+保存 hashed OTP 和过期时间
+把明文 OTP 发给用户
+用户输入后再 hash 比较
+成功或过期后删除 OTP
+```
+
+数据库可以这样设计：
+
+```text
+otp_verifications
+- id
+- user_id
+- otp_hash
+- purpose
+- expires_at
+- used_at
+- failed_attempts
+- created_at
+```
+
+后端也应该把 OTP 绑定到具体用途。
+
+```text
+login
+password_reset
+email_change
+withdrawal
+delete_account
+```
+
+这样可以避免用户拿 login OTP 去执行 password reset 或 withdrawal 这种高风险操作。
+
+## Important Trade-Offs
+
+| 方案 | 适合场景 | 风险 |
+| --- | --- | --- |
+| Email OTP | 容易实现，用户门槛低 | 邮箱被盗时会变弱 |
+| SMS OTP | 用户熟悉 | SIM swap、短信拦截、依赖电信商 |
+| Authenticator App | 比 email/SMS 更强 | 用户换机或遗失设备会麻烦 |
+| 硬件安全密钥 | 抗钓鱼能力很强 | 成本高，用户接受度低 |
+| 生物识别 | 方便 | 不能像密码一样随便更换 |
+
+Email OTP 对普通应用通常够用，但不应该把它当成最高等级的安全模型。
+
+## Practical Workflow
+
+可以用这个决策流程：
+
+```text
+1. 先做 password 或 passkey login。
+2. 加 email verification，确认账号控制权。
+3. 对新设备、异常地点、风险操作要求 OTP。
+4. 对高价值账号加入 Authenticator App。
+5. 对管理员或金融操作加入硬件安全密钥。
+6. 加 rate limit、过期时间、audit log 和 recovery flow。
+```
+
+认证不只是判断用户能不能登录成功，也要判断登录行为是否可疑。
+
+常见风险信号包括：
+
+```text
+新设备登录
+新国家登录
+失败次数过多
+刚刚修改密码
+请求提款
+刚刚修改邮箱
+触发账号恢复流程
+```
+
+风险越高，就要求越强的证明。
+
+## The Main Principle
+
+密码只能证明用户知道某个秘密，不能证明这个人一定是账号的真正拥有者。
+
+更好的认证系统会组合多个独立证明：
+
+```text
+你知道什么
++
+你控制什么
++
+必要时再证明你是什么
+```
+
+二次验证的价值在于提高账号被盗的成本。攻击者不只要偷到密码，还要同时攻破另一个边界。工程上的核心原则是：在不严重破坏用户体验的前提下，让 account takeover 变得更难。
+
+</Lang>
