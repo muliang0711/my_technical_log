@@ -1,0 +1,401 @@
+---
+title: "Popular Software Security Attacks"
+category: "Software Development"
+createdAt: "2026-06-22"
+summary: "A brief concept introduction to common software security attacks and what they usually target."
+readTime: "6 min read"
+tags:
+  - "Security"
+  - "Backend"
+  - "Web"
+  - "Software Development"
+featured: false
+---
+
+<Lang lang="en">
+
+Software security attacks usually happen because an application trusts the wrong input, exposes the wrong data, or gives users more power than they should have. This log gives a brief introduction to common attacks so the basic idea is easier to recognize when reading security materials, building APIs, or reviewing code.
+
+## Short Answer
+
+Most common software attacks are not magic. They usually abuse one of these areas:
+
+| Attack Area | Main Idea |
+| --- | --- |
+| Input attack | Send dangerous input to make the system behave wrongly |
+| Authentication attack | Pretend to be another user |
+| Authorization attack | Access something without permission |
+| Session attack | Steal or abuse login state |
+| Network attack | Read, modify, or interrupt communication |
+| Dependency attack | Attack the third-party packages used by the app |
+| Social attack | Trick humans instead of directly attacking code |
+
+Security means reducing trust, validating boundaries, and assuming attackers will try abnormal inputs and abnormal flows.
+
+## Injection Attacks
+
+Injection means the attacker sends input that becomes part of a command, query, or script.
+
+Common examples:
+
+| Attack | Brief Concept |
+| --- | --- |
+| SQL Injection | The attacker injects SQL into user input to read, modify, or delete database data |
+| Command Injection | The attacker injects operating system commands into an app that calls shell commands |
+| LDAP Injection | The attacker manipulates LDAP queries used for directory authentication |
+| NoSQL Injection | The attacker changes NoSQL query behavior using crafted JSON or object input |
+
+Example idea:
+
+```text
+Normal input:
+email = user@example.com
+
+Malicious input:
+email = ' OR '1'='1
+```
+
+The core problem is that the system treats user input as executable logic instead of plain data.
+
+## Cross-Site Scripting
+
+Cross-Site Scripting, or XSS, happens when an attacker injects malicious JavaScript into a page viewed by other users.
+
+| Type | Brief Concept |
+| --- | --- |
+| Stored XSS | Malicious script is saved in the database and shown later |
+| Reflected XSS | Malicious script comes from the request and appears immediately in the response |
+| DOM XSS | Browser-side JavaScript modifies the page unsafely using attacker-controlled data |
+
+XSS is dangerous because JavaScript runs inside the victim's browser. It may steal tokens, read page content, or perform actions as the user.
+
+## Cross-Site Request Forgery
+
+Cross-Site Request Forgery, or CSRF, tricks a logged-in user's browser into sending a request to a trusted website.
+
+The attacker does not need to know the user's password. The attack abuses the fact that the browser automatically includes cookies.
+
+Example flow:
+
+```text
+User logs in to bank.com
+User visits attacker.com
+attacker.com makes the browser send a request to bank.com
+bank.com sees valid cookies and may accept the request
+```
+
+CSRF mainly targets cookie-based session systems.
+
+## Authentication Attacks
+
+Authentication attacks try to prove identity incorrectly.
+
+| Attack | Brief Concept |
+| --- | --- |
+| Brute Force | Trying many passwords until one works |
+| Credential Stuffing | Using leaked username-password pairs from other websites |
+| Password Spraying | Trying one common password against many accounts |
+| Phishing | Tricking users into giving their login details |
+| MFA Fatigue | Spamming MFA prompts until the user approves one |
+
+The target is not always the code. Sometimes the target is the user, password habit, or login workflow.
+
+## Authorization Attacks
+
+Authorization attacks happen after identity is known, but permission checking is weak.
+
+| Attack | Brief Concept |
+| --- | --- |
+| IDOR | Changing an ID in the URL or request to access another user's data |
+| Privilege Escalation | A low-permission user gains admin or higher access |
+| Broken Access Control | The server does not properly check whether the user can perform the action |
+
+Example:
+
+```text
+/api/orders/1001
+/api/orders/1002
+```
+
+If user A can change the ID and read user B's order, that is an authorization problem.
+
+## Session And Token Attacks
+
+Session attacks target the proof that a user is already logged in.
+
+| Attack | Brief Concept |
+| --- | --- |
+| Session Hijacking | Stealing a session cookie or token and using it as the victim |
+| Session Fixation | Forcing the victim to use an attacker-known session ID |
+| JWT Theft | Stealing a JWT from local storage, logs, or unsafe frontend code |
+| Replay Attack | Reusing a captured request or token to repeat an action |
+
+A password proves login once. A session or token proves login repeatedly. That is why stolen sessions are serious.
+
+## Network Attacks
+
+Network attacks target communication between systems.
+
+| Attack | Brief Concept |
+| --- | --- |
+| Man-in-the-Middle | Attacker sits between client and server to read or change traffic |
+| Packet Sniffing | Capturing network traffic to inspect sensitive data |
+| DNS Spoofing | Sending users to the wrong server by manipulating DNS answers |
+| TLS Downgrade | Forcing weaker encryption so traffic becomes easier to attack |
+
+TLS/HTTPS helps protect data in transit, but misconfiguration can still create risk.
+
+## Denial-of-Service Attacks
+
+Denial-of-Service, or DoS, means making a service unavailable.
+
+| Attack | Brief Concept |
+| --- | --- |
+| DoS | One attacker overloads a service |
+| DDoS | Many machines overload a service together |
+| Application DoS | Expensive requests consume CPU, memory, database, or external APIs |
+| Rate Limit Bypass | Attacker avoids request limits using many IPs, accounts, or tokens |
+
+The goal is not to steal data. The goal is to break availability.
+
+## File And Upload Attacks
+
+Upload features are common attack surfaces.
+
+| Attack | Brief Concept |
+| --- | --- |
+| Malicious File Upload | Uploading executable or dangerous files |
+| Path Traversal | Using paths like `../` to read files outside the allowed folder |
+| Zip Bomb | Uploading a compressed file that expands into huge data |
+| MIME Spoofing | Pretending a dangerous file is a harmless image or document |
+
+Any system that accepts files must treat file name, file type, file size, and file content as untrusted.
+
+## Dependency And Supply Chain Attacks
+
+Modern software depends on many packages. Attackers can target those packages instead of the application directly.
+
+| Attack | Brief Concept |
+| --- | --- |
+| Vulnerable Package | The app uses a dependency with a known security bug |
+| Typosquatting | A fake package uses a name similar to a real package |
+| Dependency Confusion | The system installs a malicious public package instead of a private one |
+| Malicious Update | A trusted package update introduces harmful code |
+
+This is why dependency scanning, lockfiles, and careful package review matter.
+
+## Misconfiguration Attacks
+
+Many security issues come from bad settings, not complex hacking.
+
+| Misconfiguration | Brief Concept |
+| --- | --- |
+| Public Storage Bucket | Private files are accidentally exposed |
+| Default Password | Admin tools still use default credentials |
+| Exposed Debug Page | Debug routes leak environment or system data |
+| Over-Permissive CORS | Browsers are allowed to send requests from unsafe origins |
+| Leaked Secret | API keys or tokens are committed to GitHub or logs |
+
+Misconfiguration is dangerous because the system may be working correctly from a functional view while being insecure.
+
+## The Main Principle
+
+Most attacks exploit misplaced trust.
+
+Do not trust user input, frontend checks, request IDs, cookies, headers, filenames, package names, or default settings blindly. A secure system validates input, checks permission on the server, protects sessions, limits expensive work, keeps dependencies updated, and assumes every boundary can be attacked.
+
+</Lang>
+
+<Lang lang="zh">
+
+软件安全攻击通常不是很神秘。大多数攻击都是利用系统错误地相信了某些东西，例如相信用户输入、相信前端传来的 ID、相信 cookie、相信文件名，或者相信默认配置。这个 log 主要做一个简短概念介绍，帮助你先认识常见攻击类型。
+
+## Short Answer
+
+常见软件攻击大多集中在这些方向：
+
+| 攻击范围 | 核心意思 |
+| --- | --- |
+| 输入攻击 | 传入危险 input，让系统执行错误行为 |
+| 身份认证攻击 | 假装成另一个用户 |
+| 权限攻击 | 没有权限却访问到资源 |
+| Session 攻击 | 偷走或滥用登录状态 |
+| 网络攻击 | 读取、修改或干扰通信 |
+| 依赖攻击 | 攻击项目使用的第三方 package |
+| 社工攻击 | 不直接打代码，而是骗用户或管理员 |
+
+安全的核心不是相信系统正常流程，而是要思考攻击者会不会走异常流程。
+
+## Injection Attacks
+
+Injection 是指攻击者把危险 input 注入到 query、command 或 script 里面，让系统把 input 当成真正的逻辑执行。
+
+常见类型：
+
+| 攻击 | 简短概念 |
+| --- | --- |
+| SQL Injection | 注入 SQL，读取、修改或删除数据库数据 |
+| Command Injection | 注入操作系统命令，让服务器执行危险 command |
+| LDAP Injection | 修改 LDAP 查询逻辑，影响目录认证 |
+| NoSQL Injection | 用特殊 JSON 或 object input 改变 NoSQL 查询行为 |
+
+例子：
+
+```text
+正常 input:
+email = user@example.com
+
+恶意 input:
+email = ' OR '1'='1
+```
+
+问题本质是：系统没有把用户输入当成普通数据，而是让它变成了可执行逻辑的一部分。
+
+## Cross-Site Scripting
+
+Cross-Site Scripting，也叫 XSS，是指攻击者把恶意 JavaScript 放进网页，让其他用户打开页面时执行这段脚本。
+
+| 类型 | 简短概念 |
+| --- | --- |
+| Stored XSS | 恶意脚本被存进数据库，之后展示给其他用户 |
+| Reflected XSS | 恶意脚本从 request 进来，然后马上出现在 response |
+| DOM XSS | 前端 JavaScript 用不安全方式修改页面，导致脚本执行 |
+
+XSS 危险的原因是脚本会在受害者 browser 里面运行，所以它可能偷 token、读取页面内容，或者用用户身份发请求。
+
+## Cross-Site Request Forgery
+
+Cross-Site Request Forgery，也叫 CSRF，是指攻击者诱导已经登录的用户浏览器，向可信网站发送请求。
+
+攻击者不一定需要知道密码。它利用的是 browser 会自动带上 cookie 这个行为。
+
+流程大概是：
+
+```text
+用户登录 bank.com
+用户打开 attacker.com
+attacker.com 让浏览器发送 request 到 bank.com
+bank.com 看到 cookie 有效，可能就接受这个 request
+```
+
+CSRF 主要攻击基于 cookie 的 session 系统。
+
+## Authentication Attacks
+
+Authentication attack 的目标是错误地证明“我是这个用户”。
+
+| 攻击 | 简短概念 |
+| --- | --- |
+| Brute Force | 不断尝试大量密码，直到猜中 |
+| Credential Stuffing | 使用其他网站泄露的账号密码来登录 |
+| Password Spraying | 用一个常见密码尝试大量账号 |
+| Phishing | 伪造网站或信息，骗用户输入账号密码 |
+| MFA Fatigue | 一直发送 MFA 请求，直到用户误点同意 |
+
+这类攻击不一定是代码漏洞，也可能是用户习惯、密码复用、登录流程设计的问题。
+
+## Authorization Attacks
+
+Authorization attack 发生在系统已经知道你是谁之后，但权限检查做得不够严格。
+
+| 攻击 | 简短概念 |
+| --- | --- |
+| IDOR | 改 URL 或 request 里面的 ID，访问其他人的资料 |
+| Privilege Escalation | 低权限用户获得更高权限 |
+| Broken Access Control | Server 没有正确检查用户能不能执行某个动作 |
+
+例子：
+
+```text
+/api/orders/1001
+/api/orders/1002
+```
+
+如果 user A 只改了 ID 就能看到 user B 的订单，那就是权限控制问题。
+
+## Session And Token Attacks
+
+Session attack 主要攻击用户已经登录之后的证明。
+
+| 攻击 | 简短概念 |
+| --- | --- |
+| Session Hijacking | 偷走 session cookie 或 token，然后冒充用户 |
+| Session Fixation | 强迫用户使用攻击者已知的 session ID |
+| JWT Theft | 从 local storage、日志或不安全前端代码偷 JWT |
+| Replay Attack | 重放已捕获的 request 或 token，重复执行动作 |
+
+密码通常只用来登录一次。Session 或 token 会被重复用来证明登录状态，所以一旦被偷，风险很高。
+
+## Network Attacks
+
+Network attack 主要攻击系统之间的通信。
+
+| 攻击 | 简短概念 |
+| --- | --- |
+| Man-in-the-Middle | 攻击者站在 client 和 server 中间，读取或修改流量 |
+| Packet Sniffing | 捕获网络包，查看里面的敏感数据 |
+| DNS Spoofing | 篡改 DNS 结果，让用户去到错误 server |
+| TLS Downgrade | 强迫系统使用较弱加密，降低通信安全性 |
+
+TLS/HTTPS 可以保护传输中的数据，但如果配置错误，还是可能出现风险。
+
+## Denial-of-Service Attacks
+
+Denial-of-Service，也叫 DoS，目标是让服务不可用。
+
+| 攻击 | 简短概念 |
+| --- | --- |
+| DoS | 一个攻击来源把服务打爆 |
+| DDoS | 很多机器一起把服务打爆 |
+| Application DoS | 用很昂贵的 request 消耗 CPU、memory、database 或外部 API |
+| Rate Limit Bypass | 用多个 IP、账号或 token 绕过请求限制 |
+
+这类攻击不一定要偷数据。它的目标是破坏 availability。
+
+## File And Upload Attacks
+
+文件上传功能也是常见攻击入口。
+
+| 攻击 | 简短概念 |
+| --- | --- |
+| Malicious File Upload | 上传可执行文件或危险文件 |
+| Path Traversal | 使用 `../` 这类路径读取允许范围外的文件 |
+| Zip Bomb | 上传一个解压后极大的压缩包 |
+| MIME Spoofing | 把危险文件伪装成图片或普通文档 |
+
+只要系统接收文件，就不能完全相信文件名、文件类型、文件大小和文件内容。
+
+## Dependency And Supply Chain Attacks
+
+现代软件会依赖很多 package。攻击者不一定直接攻击你的 app，也可以攻击你使用的依赖。
+
+| 攻击 | 简短概念 |
+| --- | --- |
+| Vulnerable Package | 项目使用了有已知漏洞的 dependency |
+| Typosquatting | 发布一个名字很像正版 package 的恶意 package |
+| Dependency Confusion | 系统误装了 public 恶意 package，而不是 private package |
+| Malicious Update | 原本可信的 package 在某次 update 中加入恶意代码 |
+
+这就是为什么 dependency scanning、lockfile 和 package review 很重要。
+
+## Misconfiguration Attacks
+
+很多安全问题不是复杂攻击，而是配置错误。
+
+| 配置问题 | 简短概念 |
+| --- | --- |
+| Public Storage Bucket | 原本私有的文件被公开访问 |
+| Default Password | 管理工具还在使用默认密码 |
+| Exposed Debug Page | Debug 页面泄露环境变量或系统资料 |
+| Over-Permissive CORS | 允许不安全 origin 发请求 |
+| Leaked Secret | API key 或 token 被 commit 到 GitHub 或写进日志 |
+
+Misconfiguration 很危险，因为系统功能上看起来是正常的，但安全边界已经坏了。
+
+## The Main Principle
+
+大多数攻击都是在利用系统错误的信任。
+
+不要盲目信任 user input、frontend check、request ID、cookie、header、filename、package name 和 default setting。安全系统应该在 server 端验证 input、检查权限、保护 session、限制昂贵操作、更新依赖，并且假设每一个边界都有可能被攻击。
+
+</Lang>
