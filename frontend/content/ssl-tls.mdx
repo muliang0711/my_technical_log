@@ -1,0 +1,646 @@
+---
+title: "TLS and SSL"
+category: "Software Development"
+createdAt: "2026-06-22"
+summary: "Explain what TLS and SSL are, how HTTPS uses them, and why modern systems should use TLS instead of SSL."
+readTime: "8 min read"
+tags:
+  - "Backend"
+  - "HTTP"
+  - "Security"
+  - "Networking"
+featured: false
+---
+
+<Lang lang="en">
+
+TLS and SSL are security protocols used to protect data when a client communicates with a server. In daily development, we usually meet them through HTTPS. The practical idea is simple: HTTP sends readable data, while HTTPS uses TLS to encrypt the connection, verify the server identity, and protect the request from being modified in transit.
+
+## Short Answer
+
+SSL is the older name. TLS is the modern protocol.
+
+In most real conversations, people still say "SSL certificate", but technically modern HTTPS uses TLS, not SSL.
+
+```text
+HTTP  = request and response without encryption
+HTTPS = HTTP running inside a TLS-protected connection
+SSL   = old protocol name, now deprecated
+TLS   = modern protocol used by HTTPS
+```
+
+The most important point is this:
+
+```text
+TLS does not replace HTTP.
+TLS protects HTTP.
+```
+
+A browser still sends HTTP requests like `GET /login`, but before that request is sent, TLS creates a secure channel between the browser and the server.
+
+## What Problem TLS Solves
+
+Without TLS, data can travel across the network as readable text.
+
+For example, a normal HTTP login request may conceptually look like this:
+
+```text
+POST /login
+email=hy@example.com
+password=123456
+```
+
+If someone controls the same Wi-Fi, router, proxy, or network path, they may be able to inspect or modify that traffic.
+
+TLS solves three major problems:
+
+| Problem | What TLS Does |
+| --- | --- |
+| Eavesdropping | Encrypts the data so outsiders cannot read it easily |
+| Impersonation | Uses certificates to prove the server is really the intended domain |
+| Tampering | Detects if data was changed during transmission |
+
+So when a user visits:
+
+```text
+https://example.com
+```
+
+the browser is not only asking for a web page. It is also checking that the connection is protected and the server identity matches the certificate.
+
+## SSL vs TLS
+
+SSL means Secure Sockets Layer. TLS means Transport Layer Security.
+
+SSL came first. TLS replaced it.
+
+| Name | Status | Meaning |
+| --- | --- | --- |
+| SSL | Old and insecure | Historical protocol name |
+| TLS | Modern standard | Current protocol used by HTTPS |
+| SSL certificate | Common wording | Usually means a TLS certificate in practice |
+
+This is why the wording can be confusing.
+
+A hosting provider may still say:
+
+```text
+Install SSL certificate
+```
+
+But the actual connection usually uses TLS.
+
+The correct engineering understanding is:
+
+```text
+People say SSL.
+Systems use TLS.
+```
+
+## How HTTPS Uses TLS
+
+HTTPS has two layers working together:
+
+```text
+Application layer: HTTP
+Security layer: TLS
+Transport layer: TCP
+Network layer: IP
+```
+
+A simplified request flow looks like this:
+
+<FlowGraph
+  title="HTTPS Request Flow"
+  nodes={[
+    { label: "Browser connects to server" },
+    { label: "TLS handshake starts" },
+    { label: "Server sends certificate" },
+    { label: "Browser verifies certificate" },
+    { label: "Shared encryption keys are created" },
+    { label: "HTTP request is sent inside TLS" },
+    { label: "Encrypted response returns to browser" }
+  ]}
+/>
+
+After the TLS handshake succeeds, HTTP traffic is sent through the encrypted channel.
+
+So the browser does not send this openly:
+
+```text
+GET /account
+Cookie: session_id=abc123
+```
+
+Instead, that HTTP message is encrypted before it leaves the device.
+
+## What a Certificate Does
+
+A TLS certificate connects a public key to a domain name.
+
+For example, a certificate may say:
+
+```text
+This public key belongs to example.com
+```
+
+The certificate is issued by a Certificate Authority, usually called a CA.
+
+The browser trusts a list of known CAs. When the server sends a certificate, the browser checks:
+
+| Check | Purpose |
+| --- | --- |
+| Is the certificate expired? | Prevent use of outdated certificates |
+| Does the domain match? | Prevent wrong-domain impersonation |
+| Is it issued by a trusted CA? | Confirm the certificate chain is trusted |
+| Has the certificate been revoked? | Avoid trusting certificates that should no longer be used |
+
+If these checks fail, the browser shows a security warning.
+
+## What the TLS Handshake Does
+
+The TLS handshake is the setup phase before encrypted application data is sent.
+
+Its job is to answer these questions:
+
+```text
+Who is the server?
+Can the certificate be trusted?
+Which TLS version and cipher suite will be used?
+How do both sides create shared encryption keys?
+```
+
+A simplified version:
+
+```text
+ClientHello
+  -> browser sends supported TLS versions and cipher options
+
+ServerHello
+  -> server chooses protocol settings and sends certificate
+
+Certificate verification
+  -> browser checks domain, issuer, expiry, and trust chain
+
+Key exchange
+  -> client and server derive shared encryption keys
+
+Encrypted HTTP
+  -> real request and response begin
+```
+
+The important detail is that the password, cookie, token, or request body should not be sent before the secure channel is ready.
+
+## What TLS Protects and Does Not Protect
+
+TLS protects data in transit.
+
+It protects the path between the client and server:
+
+```text
+Browser <---- TLS protected connection ----> Server
+```
+
+But TLS does not automatically protect everything.
+
+| Area | Protected by TLS? | Reason |
+| --- | --- | --- |
+| Data moving over the network | Yes | The connection is encrypted |
+| Password inside the server database | No | Database security is separate |
+| XSS stealing tokens in the browser | No | Browser-side code execution is separate |
+| Server logs accidentally storing secrets | No | Logging policy is separate |
+| User sending data to a fake domain | Not if the user ignores warnings | TLS only verifies the current domain |
+
+This matters because HTTPS is required, but it is not the full security system.
+
+You still need:
+
+```text
+password hashing
+secure cookies
+CSRF protection when needed
+XSS prevention
+safe logging
+server-side authorization
+database access control
+```
+
+TLS protects the pipe. It does not automatically make the application logic safe.
+
+## Common Developer Checks
+
+When debugging HTTPS problems, start with the boundary where TLS is terminated.
+
+In many systems, TLS ends at the reverse proxy or load balancer:
+
+```text
+Browser
+  -> HTTPS
+Load Balancer / Nginx / Cloudflare
+  -> HTTP or HTTPS
+Application Server
+```
+
+That means your app may receive plain HTTP internally even though the user used HTTPS externally.
+
+Check these common signals:
+
+| Symptom | Possible Cause |
+| --- | --- |
+| Browser says certificate invalid | Wrong domain, expired certificate, or missing chain |
+| App thinks request is HTTP | Proxy headers are not forwarded or trusted |
+| Secure cookies not set | App does not detect HTTPS correctly |
+| Mixed content warning | HTTPS page loads HTTP script, image, or API |
+| API fails in production only | CORS, certificate, proxy, or HTTPS redirect issue |
+
+When debugging a live domain, run this from your local terminal to inspect the certificate and TLS connection details:
+
+```bash
+openssl s_client -connect example.com:443 -servername example.com
+```
+
+Look for the certificate subject, issuer, validity dates, and verification result. If the certificate does not match the domain or the chain is incomplete, the browser will not trust the connection.
+
+## Important Trade-Offs
+
+TLS improves security, but it also introduces operational details.
+
+| Topic | Practical Meaning |
+| --- | --- |
+| Certificate renewal | Certificates expire and must be renewed before downtime happens |
+| TLS termination | You must know whether TLS ends at Cloudflare, Nginx, load balancer, or app server |
+| Internal traffic | Backend-to-backend calls may still need TLS if the network is not fully trusted |
+| Performance | TLS has handshake cost, but modern TLS is usually not the main bottleneck |
+| Debugging | HTTPS issues can come from DNS, proxy, certificate, app config, or browser policy |
+
+In most modern web systems, the trade-off is not "use TLS or not".
+
+The real decision is:
+
+```text
+Where should TLS terminate, and how do we keep trust correct after that point?
+```
+
+## Practical Workflow
+
+Use this workflow when adding HTTPS to a system:
+
+1. Point the domain to the correct server, load balancer, or CDN.
+2. Issue a TLS certificate for the exact domain.
+3. Configure the server or proxy to listen on port `443`.
+4. Redirect HTTP traffic from port `80` to HTTPS.
+5. Ensure the application knows the original request was HTTPS.
+6. Mark session cookies as `Secure`, `HttpOnly`, and usually `SameSite`.
+7. Check that frontend assets and API calls all use HTTPS.
+8. Set up automatic certificate renewal.
+9. Monitor expiry and failed TLS handshakes.
+
+A safe production setup usually looks like this:
+
+```text
+User Browser
+  -> HTTPS
+Cloudflare / Load Balancer / Nginx
+  -> HTTP or HTTPS depending on internal trust boundary
+Application Server
+  -> Database / Services
+```
+
+If the internal network is shared, untrusted, or crosses machines you do not fully control, use TLS internally too.
+
+## The Main Principle
+
+SSL is the old name. TLS is the modern protocol. HTTPS means HTTP is running through a TLS-protected channel.
+
+The reusable rule is:
+
+```text
+TLS protects data in transit, verifies server identity, and detects tampering.
+It does not replace application security.
+```
+
+When designing a real system, always ask two questions:
+
+```text
+Where does TLS start and end?
+After TLS ends, what part of the system must still be trusted?
+```
+
+</Lang>
+
+<Lang lang="zh">
+
+TLS 和 SSL 是用来保护客户端与服务器通信的安全协议。开发中最常见的场景就是 HTTPS。简单理解：HTTP 本身是明文传输，HTTPS 则是在 HTTP 外面加了一层 TLS，用来加密数据、验证服务器身份，并防止请求在传输过程中被篡改。
+
+## Short Answer
+
+SSL 是旧名字，TLS 是现代协议。
+
+现实中很多人还是会说 “SSL certificate”，但是现代 HTTPS 实际上使用的是 TLS，不是旧版 SSL。
+
+```text
+HTTP  = 没有加密的请求和响应
+HTTPS = 被 TLS 保护的 HTTP
+SSL   = 旧协议，已经不应该继续使用
+TLS   = 现代 HTTPS 使用的安全协议
+```
+
+最重要的一句话是：
+
+```text
+TLS 不是取代 HTTP。
+TLS 是保护 HTTP。
+```
+
+浏览器还是会发送类似 `GET /login` 的 HTTP 请求，只是在真正发送请求之前，TLS 会先在浏览器和服务器之间建立一个安全通道。
+
+## TLS 解决什么问题
+
+没有 TLS 时，网络中的数据可能是可读的明文。
+
+例如一个普通 HTTP 登录请求，概念上可能长这样：
+
+```text
+POST /login
+email=hy@example.com
+password=123456
+```
+
+如果有人控制同一个 Wi-Fi、路由器、代理服务器，或者中间网络路径，他就可能看到或者修改这段流量。
+
+TLS 主要解决三个问题：
+
+| 问题 | TLS 做什么 |
+| --- | --- |
+| 被偷看 | 加密数据，让外部的人不能轻易读懂 |
+| 被冒充 | 通过证书证明服务器确实属于目标域名 |
+| 被篡改 | 检测传输中的数据有没有被修改 |
+
+所以当用户访问：
+
+```text
+https://example.com
+```
+
+浏览器不只是请求网页，也会检查连接是否安全，以及服务器身份是否和证书匹配。
+
+## SSL 和 TLS 的区别
+
+SSL 是 Secure Sockets Layer。TLS 是 Transport Layer Security。
+
+SSL 出现得更早，后来被 TLS 取代。
+
+| 名称 | 状态 | 含义 |
+| --- | --- | --- |
+| SSL | 旧协议，不安全 | 历史上的协议名 |
+| TLS | 现代标准 | 当前 HTTPS 使用的协议 |
+| SSL certificate | 常见叫法 | 实际上通常指 TLS 证书 |
+
+所以这个名字很容易让人混乱。
+
+很多服务器面板或者云平台还会写：
+
+```text
+Install SSL certificate
+```
+
+但实际连接一般已经是 TLS。
+
+正确的工程理解是：
+
+```text
+人们口头说 SSL。
+系统实际用 TLS。
+```
+
+## HTTPS 如何使用 TLS
+
+HTTPS 可以理解成两层东西配合工作：
+
+```text
+应用层：HTTP
+安全层：TLS
+传输层：TCP
+网络层：IP
+```
+
+一个简化的请求流程是：
+
+<FlowGraph
+  title="HTTPS 请求流程"
+  nodes={[
+    { label: "浏览器连接服务器" },
+    { label: "开始 TLS 握手" },
+    { label: "服务器发送证书" },
+    { label: "浏览器验证证书" },
+    { label: "双方生成共享加密密钥" },
+    { label: "HTTP 请求通过 TLS 发送" },
+    { label: "加密后的响应返回浏览器" }
+  ]}
+/>
+
+TLS 握手成功之后，HTTP 流量才会通过加密通道发送。
+
+所以浏览器不会直接明文发送：
+
+```text
+GET /account
+Cookie: session_id=abc123
+```
+
+而是先把这段 HTTP 内容加密，然后才离开用户设备。
+
+## 证书的作用是什么
+
+TLS 证书的作用是把一个公钥和一个域名绑定起来。
+
+例如证书表达的是：
+
+```text
+这个 public key 属于 example.com
+```
+
+证书通常由 Certificate Authority 颁发，也就是 CA。
+
+浏览器内置了一批可信 CA。当服务器发送证书时，浏览器会检查：
+
+| 检查项 | 目的 |
+| --- | --- |
+| 证书有没有过期 | 避免继续使用过期证书 |
+| 域名是否匹配 | 防止错误域名冒充 |
+| 是否由可信 CA 颁发 | 确认证书链可信 |
+| 证书是否被吊销 | 避免继续信任已经失效的证书 |
+
+如果这些检查失败，浏览器就会显示安全警告。
+
+## TLS 握手在做什么
+
+TLS 握手是在发送加密应用数据之前的准备阶段。
+
+它主要回答几个问题：
+
+```text
+服务器是谁？
+这个证书可信吗？
+双方使用哪个 TLS 版本和加密套件？
+双方如何生成共享加密密钥？
+```
+
+一个简化版本是：
+
+```text
+ClientHello
+  -> 浏览器发送支持的 TLS 版本和加密选项
+
+ServerHello
+  -> 服务器选择协议设置并发送证书
+
+Certificate verification
+  -> 浏览器检查域名、签发者、过期时间和信任链
+
+Key exchange
+  -> 客户端和服务器生成共享加密密钥
+
+Encrypted HTTP
+  -> 真正的请求和响应开始
+```
+
+关键点是：密码、Cookie、Token、请求体这些敏感内容，不应该在安全通道建立之前发送。
+
+## TLS 保护什么，不保护什么
+
+TLS 保护的是传输中的数据。
+
+它保护的是客户端和服务器之间这条路径：
+
+```text
+Browser <---- TLS protected connection ----> Server
+```
+
+但 TLS 不会自动保护所有东西。
+
+| 区域 | TLS 会保护吗 | 原因 |
+| --- | --- | --- |
+| 网络上传输的数据 | 会 | 连接被加密 |
+| 数据库存储的密码 | 不会 | 数据库安全是另一层问题 |
+| XSS 偷走浏览器里的 Token | 不会 | 这是前端代码执行问题 |
+| 服务器日志误存敏感信息 | 不会 | 这是日志策略问题 |
+| 用户访问假域名 | 不一定 | TLS 只能验证当前域名，用户忽略警告仍然危险 |
+
+所以 HTTPS 是必须的，但它不是完整的安全系统。
+
+你仍然需要：
+
+```text
+密码哈希
+安全 Cookie
+必要时的 CSRF 防护
+XSS 防护
+安全日志策略
+服务端权限校验
+数据库访问控制
+```
+
+TLS 保护的是传输管道。它不会自动让业务逻辑安全。
+
+## 常见开发检查点
+
+调试 HTTPS 问题时，先确认 TLS 在哪里终止。
+
+很多系统里，TLS 不是直接终止在应用服务器，而是终止在反向代理或负载均衡器：
+
+```text
+Browser
+  -> HTTPS
+Load Balancer / Nginx / Cloudflare
+  -> HTTP or HTTPS
+Application Server
+```
+
+这意味着：用户外部访问的是 HTTPS，但应用内部收到的可能是 HTTP。
+
+常见信号如下：
+
+| 现象 | 可能原因 |
+| --- | --- |
+| 浏览器提示证书无效 | 域名错误、证书过期、证书链不完整 |
+| 应用认为请求是 HTTP | 代理头没有正确转发或应用没有信任代理 |
+| Secure Cookie 没有设置成功 | 应用没有正确识别 HTTPS |
+| Mixed content warning | HTTPS 页面加载了 HTTP 脚本、图片或 API |
+| API 只在生产环境失败 | CORS、证书、代理、HTTPS redirect 问题 |
+
+调试线上域名时，可以在本地终端运行这个命令，检查证书和 TLS 连接细节：
+
+```bash
+openssl s_client -connect example.com:443 -servername example.com
+```
+
+重点看证书的 subject、issuer、有效期和验证结果。如果证书和域名不匹配，或者证书链不完整，浏览器就不会信任这个连接。
+
+## 重要取舍
+
+TLS 提高了安全性，但也带来一些运维细节。
+
+| 主题 | 实际含义 |
+| --- | --- |
+| 证书续期 | 证书会过期，需要在出问题前自动更新 |
+| TLS 终止点 | 你必须知道 TLS 是在 Cloudflare、Nginx、负载均衡器，还是应用服务器结束 |
+| 内部流量 | 如果内部网络不完全可信，服务之间也可能需要 TLS |
+| 性能 | TLS 有握手成本，但现代 TLS 通常不是主要瓶颈 |
+| 调试 | HTTPS 问题可能来自 DNS、代理、证书、应用配置或浏览器策略 |
+
+现代 Web 系统里，真正的问题通常不是 “要不要 TLS”。
+
+真正的问题是：
+
+```text
+TLS 应该在哪里终止？
+TLS 终止之后，后面的系统还能不能被信任？
+```
+
+## Practical Workflow
+
+给一个系统加 HTTPS 时，可以按这个流程做：
+
+1. 把域名指向正确的服务器、负载均衡器或 CDN。
+2. 为准确的域名申请 TLS 证书。
+3. 配置服务器或代理监听 `443` 端口。
+4. 把 `80` 端口的 HTTP 流量重定向到 HTTPS。
+5. 确保应用知道原始请求是 HTTPS。
+6. 把 session cookie 设置为 `Secure`、`HttpOnly`，通常还要设置 `SameSite`。
+7. 检查前端资源和 API 请求是否全部使用 HTTPS。
+8. 配置证书自动续期。
+9. 监控证书过期和 TLS 握手失败。
+
+一个常见生产架构是：
+
+```text
+User Browser
+  -> HTTPS
+Cloudflare / Load Balancer / Nginx
+  -> HTTP or HTTPS depending on internal trust boundary
+Application Server
+  -> Database / Services
+```
+
+如果内部网络是共享的、不可信的，或者跨越你不能完全控制的机器，内部服务之间也应该使用 TLS。
+
+## The Main Principle
+
+SSL 是旧名字，TLS 是现代协议。HTTPS 的意思是 HTTP 运行在 TLS 保护的安全通道里。
+
+可复用的规则是：
+
+```text
+TLS 保护传输中的数据，验证服务器身份，并检测篡改。
+但 TLS 不能替代应用层安全。
+```
+
+设计真实系统时，要一直问两个问题：
+
+```text
+TLS 从哪里开始，到哪里结束？
+TLS 结束之后，系统的哪一段仍然需要被信任？
+```
+
+</Lang>
