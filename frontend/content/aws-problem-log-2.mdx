@@ -1,0 +1,387 @@
+Filename: ec2-http-vs-https-browser-confusion.mdx
+
+---
+title: "EC2 HTTP Test Problem: Browser Tried HTTPS"
+category: "Problem Logs"
+createdAt: "2026-06-23"
+summary: "A problem log about why an EC2 web server can look broken when the browser tries HTTPS while only HTTP is allowed."
+readTime: "7 min read"
+tags:
+  - "AWS"
+  - "EC2"
+  - "HTTP"
+  - "Debugging"
+featured: false
+series:
+  title: "AWS Beginner"
+  slug: "aws-beginner"
+  order: 3
+---
+<Lang lang="en">
+When testing a new EC2 web server, the browser can make the problem look more confusing than it really is. The server may only allow plain HTTP on port `80`, but Chrome may try HTTPS when the URL scheme is missing, cached, autocompleted, or affected by HTTPS-first behavior. Then the page fails even though the EC2 HTTP server is working.
+## Symptom
+The EC2 instance is running.
+The web server is installed and started.
+The security group allows HTTP:
+```text
+Inbound rule:
+HTTP
+Port: 80
+Source: 0.0.0.0/0
+```
+But when visiting the EC2 public IP in Chrome, the page fails.
+Common browser errors:
+```text
+This site can't provide a secure connection
+```
+or:
+```text
+ERR_SSL_PROTOCOL_ERROR
+```
+or:
+```text
+The connection timed out
+```
+The confusing part is that the failure may not mean the EC2 server is down. It may mean the browser is trying to use HTTPS while the server only supports HTTP.
+## Context
+A beginner EC2 test often looks like this:
+```text
+EC2 instance
+  ↓
+Apache / Nginx installed
+  ↓
+Security group allows port 80
+  ↓
+Browser opens public IP
+```
+The intended test URL should be:
+```text
+http://your-ec2-public-ip
+```
+Not:
+```text
+https://your-ec2-public-ip
+```
+And not only:
+```text
+your-ec2-public-ip
+```
+When the scheme is missing, the browser may choose or suggest HTTPS. This is especially confusing because the EC2 setup only opened HTTP port `80`, not HTTPS port `443`.
+## First Assumption
+The first assumption may be:
+```text
+My EC2 web server is not working.
+```
+or:
+```text
+My security group is wrong.
+```
+or:
+```text
+Apache / Nginx failed to start.
+```
+These are possible, but the first check should be simpler:
+```text
+Am I testing with http:// or https://?
+```
+If the EC2 security group only allows HTTP, then testing with HTTPS is testing the wrong protocol.
+## Debugging Path
+| Check | Result | Meaning |
+| --- | --- | --- |
+| EC2 instance state | `Running` | The instance is started |
+| Web server status | Apache / Nginx is active | The server process is running |
+| Security group inbound | Port `80` is allowed | HTTP traffic can enter |
+| Security group inbound | Port `443` is not allowed | HTTPS traffic may fail |
+| Browser URL | Shows `https://...` | Browser is trying HTTPS |
+| Manual URL test | `http://public-ip` works | The EC2 HTTP setup is fine |
+Run this from your local terminal to test the EC2 server using plain HTTP and confirm whether port `80` works:
+```bash
+curl http://your-ec2-public-ip
+```
+Run this from your local terminal to test HTTPS separately and confirm whether the server supports port `443`:
+```bash
+curl https://your-ec2-public-ip
+```
+If HTTP works but HTTPS fails, the server is not fully broken. It means HTTPS is not configured or not allowed.
+## Root Cause
+The root cause is:
+```text
+The EC2 instance was configured for HTTP only, but the browser tried to access it through HTTPS.
+```
+HTTP and HTTPS are different protocols.
+They also use different default ports:
+| Protocol | Default Port | Needs TLS Certificate |
+| --- | --- | --- |
+| HTTP | `80` | No |
+| HTTPS | `443` | Yes |
+If your EC2 only has this inbound rule:
+```text
+HTTP 80 from 0.0.0.0/0
+```
+Then this URL is expected to work:
+```text
+http://your-ec2-public-ip
+```
+But this URL may fail:
+```text
+https://your-ec2-public-ip
+```
+Because HTTPS needs extra setup:
+```text
+Security group must allow port 443
+Web server must listen on 443
+TLS certificate must be configured
+```
+Without that, HTTPS failure is normal.
+## Fix
+The immediate fix is to type the full HTTP URL manually.
+Use this format in Chrome:
+```text
+http://your-ec2-public-ip
+```
+The important part is:
+```text
+http://
+```
+Do not rely on the browser to choose the scheme.
+If Chrome changes it back to HTTPS, clear the current URL and type the full HTTP version again:
+```text
+http://your-ec2-public-ip
+```
+For a beginner EC2 test page, this setup is enough:
+```text
+Security group:
+HTTP 80 from 0.0.0.0/0
+Browser:
+http://your-ec2-public-ip
+```
+If you want HTTPS, then you need a separate HTTPS setup.
+That usually means:
+```text
+Domain name
+TLS certificate
+Web server HTTPS config
+Security group port 443
+```
+For beginner testing, HTTP is simpler.
+## Prevention
+Use this checklist when testing an EC2 web server:
+| Step | Check |
+| --- | --- |
+| 1 | Confirm the web server is running |
+| 2 | Confirm EC2 has a public IPv4 address |
+| 3 | Confirm security group allows HTTP port `80` |
+| 4 | In the browser, type `http://` explicitly |
+| 5 | Do not test `https://` unless port `443` and TLS are configured |
+| 6 | Use `curl http://public-ip` to separate browser behavior from server behavior |
+A useful testing order is:
+```text
+Test EC2 state
+  ↓
+Test web server status
+  ↓
+Test security group port 80
+  ↓
+Test with curl http://public-ip
+  ↓
+Then test in browser with explicit http://
+```
+This avoids wasting time debugging Apache, Nginx, or EC2 when the real issue is only the browser using the wrong protocol.
+## The Main Principle
+HTTP and HTTPS are not the same test.
+The reusable rule is:
+```text
+If your EC2 only allows HTTP, test with http:// explicitly.
+```
+Do not type only the IP address and assume the browser will choose HTTP.
+For beginner EC2 testing:
+```text
+HTTP server + port 80 = http://public-ip
+HTTPS server + port 443 + TLS certificate = https://domain-name
+```
+If `http://public-ip` works but `https://public-ip` fails, the EC2 web server is probably fine. The missing part is HTTPS configuration, not basic HTTP connectivity.
+</Lang>
+<Lang lang="zh">
+测试新的 EC2 web server 时，浏览器有时会让问题看起来比实际更复杂。你的服务器可能只开放了普通 HTTP，也就是 port `80`，但是 Chrome 可能因为省略 URL scheme、缓存、自动补全，或者 HTTPS-first 行为而尝试使用 HTTPS。结果页面访问失败，但真正的问题不一定是 EC2 坏了。
+## Symptom
+EC2 instance 正常运行。
+Web server 已经安装并启动。
+Security group 也允许 HTTP：
+```text
+Inbound rule:
+HTTP
+Port: 80
+Source: 0.0.0.0/0
+```
+但是用 Chrome 访问 EC2 public IP 时，页面失败。
+常见浏览器错误：
+```text
+This site can't provide a secure connection
+```
+或者：
+```text
+ERR_SSL_PROTOCOL_ERROR
+```
+或者：
+```text
+The connection timed out
+```
+最容易混淆的点是：这个失败不一定代表 EC2 server 没跑起来。它可能只是浏览器正在尝试 HTTPS，而你的 EC2 目前只支持 HTTP。
+## Context
+初学者测试 EC2 web server 通常是这样：
+```text
+EC2 instance
+  ↓
+安装 Apache / Nginx
+  ↓
+Security group 允许 port 80
+  ↓
+Browser 打开 public IP
+```
+正确的测试 URL 应该是：
+```text
+http://your-ec2-public-ip
+```
+不是：
+```text
+https://your-ec2-public-ip
+```
+也不要只输入：
+```text
+your-ec2-public-ip
+```
+当你没有写清楚 `http://` 或 `https://` 时，浏览器可能会选择或建议 HTTPS。这个很容易造成误判，因为你的 EC2 只开放了 HTTP port `80`，没有开放 HTTPS port `443`。
+## First Assumption
+一开始可能会以为：
+```text
+我的 EC2 web server 没有成功运行。
+```
+或者：
+```text
+我的 security group 配错了。
+```
+或者：
+```text
+Apache / Nginx 没有启动。
+```
+这些都有可能，但第一个应该检查的问题更简单：
+```text
+我现在测试的是 http:// 还是 https://？
+```
+如果 security group 只允许 HTTP，那你用 HTTPS 测试就是在测试错误的协议。
+## Debugging Path
+| 检查 | 结果 | 意思 |
+| --- | --- | --- |
+| EC2 instance state | `Running` | Instance 已经启动 |
+| Web server status | Apache / Nginx 是 active | Web server process 正在运行 |
+| Security group inbound | Port `80` 允许访问 | HTTP traffic 可以进入 |
+| Security group inbound | Port `443` 没有开放 | HTTPS traffic 可能失败 |
+| Browser URL | 显示 `https://...` | Browser 正在尝试 HTTPS |
+| 手动 URL 测试 | `http://public-ip` 可以访问 | EC2 HTTP 设置是正常的 |
+在本地 terminal 运行这条命令，用普通 HTTP 测试 EC2 server，确认 port `80` 是否正常：
+```bash
+curl http://your-ec2-public-ip
+```
+在本地 terminal 运行这条命令，单独测试 HTTPS，确认 server 是否支持 port `443`：
+```bash
+curl https://your-ec2-public-ip
+```
+如果 HTTP 可以，HTTPS 不可以，那不代表 server 完全坏了。它只是说明 HTTPS 没有配置，或者没有开放。
+## Root Cause
+根因是：
+```text
+EC2 instance 只配置了 HTTP，但是浏览器尝试用 HTTPS 访问。
+```
+HTTP 和 HTTPS 是不同协议。
+它们默认使用的 port 也不同：
+| Protocol | Default Port | 是否需要 TLS Certificate |
+| --- | --- | --- |
+| HTTP | `80` | 不需要 |
+| HTTPS | `443` | 需要 |
+如果你的 EC2 只有这条 inbound rule：
+```text
+HTTP 80 from 0.0.0.0/0
+```
+那这个 URL 应该可以工作：
+```text
+http://your-ec2-public-ip
+```
+但是这个 URL 失败是正常的：
+```text
+https://your-ec2-public-ip
+```
+因为 HTTPS 需要额外配置：
+```text
+Security group 必须开放 port 443
+Web server 必须监听 443
+必须配置 TLS certificate
+```
+没有这些配置，HTTPS 失败是正常现象。
+## Fix
+最直接的修复方式是手动输入完整 HTTP URL。
+在 Chrome 里面使用这个格式：
+```text
+http://your-ec2-public-ip
+```
+关键部分是：
+```text
+http://
+```
+不要让浏览器自己决定协议。
+如果 Chrome 又自动变回 HTTPS，就清空地址栏，重新输入完整 HTTP 版本：
+```text
+http://your-ec2-public-ip
+```
+对初学者的 EC2 测试页面来说，这样已经足够：
+```text
+Security group:
+HTTP 80 from 0.0.0.0/0
+Browser:
+http://your-ec2-public-ip
+```
+如果你真的要 HTTPS，那就需要另一套 HTTPS 配置。
+通常包括：
+```text
+Domain name
+TLS certificate
+Web server HTTPS config
+Security group port 443
+```
+初学测试阶段，HTTP 比较简单。
+## Prevention
+测试 EC2 web server 时，用这份 checklist：
+| Step | Check |
+| --- | --- |
+| 1 | 确认 web server 正在运行 |
+| 2 | 确认 EC2 有 public IPv4 address |
+| 3 | 确认 security group 允许 HTTP port `80` |
+| 4 | 浏览器里明确输入 `http://` |
+| 5 | 没有配置 port `443` 和 TLS 时，不要测试 `https://` |
+| 6 | 用 `curl http://public-ip` 把 browser 行为和 server 行为分开检查 |
+比较好的测试顺序是：
+```text
+检查 EC2 state
+  ↓
+检查 web server status
+  ↓
+检查 security group port 80
+  ↓
+用 curl http://public-ip 测试
+  ↓
+再用 browser 明确输入 http:// 测试
+```
+这样可以避免把时间浪费在 Apache、Nginx 或 EC2 上，而真正的问题其实只是浏览器使用了错误协议。
+## The Main Principle
+HTTP 和 HTTPS 不是同一个测试。
+可复用规则是：
+```text
+如果你的 EC2 只允许 HTTP，就必须明确用 http:// 测试。
+```
+不要只输入 IP address，然后假设浏览器一定会使用 HTTP。
+初学 EC2 测试时，先这样记：
+```text
+HTTP server + port 80 = http://public-ip
+HTTPS server + port 443 + TLS certificate = https://domain-name
+```
+如果 `http://public-ip` 可以访问，但 `https://public-ip` 失败，那 EC2 web server 大概率没问题。缺少的是 HTTPS 配置，不是基本 HTTP 连接能力。
+</Lang>
