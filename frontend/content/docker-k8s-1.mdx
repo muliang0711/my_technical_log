@@ -1,0 +1,542 @@
+Filename: dockerfile-compose-and-kubernetes.mdx
+---
+title: "Dockerfile, Docker Compose, and Kubernetes"
+category: "Software Development"
+createdAt: "2026-06-23"
+summary: "Dockerfile builds the container image, Docker Compose runs multiple containers locally, and Kubernetes replaces Compose as the production orchestration layer."
+readTime: "8 min read"
+tags:
+  - "Docker"
+  - "Kubernetes"
+  - "DevOps"
+  - "Deployment"
+featured: false
+---
+<Lang lang="en">
+When people talk about Docker in a normal backend or full-stack project, they usually mention two important files: `Dockerfile` and `docker-compose.yml`. They look related, but they solve different problems. When Kubernetes is added later, the `Dockerfile` usually stays, but the Compose file is often replaced by Kubernetes manifests or Helm charts.
+## Short Answer
+Yes, the two common Docker files are usually:
+```text
+Dockerfile
+docker-compose.yml
+```
+But they are not the same thing.
+| File | Main Job | Usually Still Used With Kubernetes? |
+| --- | --- | --- |
+| `Dockerfile` | Describes how to build one application image | Yes |
+| `docker-compose.yml` / `compose.yaml` | Describes how to run multiple containers together | Usually replaced |
+| Kubernetes YAML | Describes how to run, scale, expose, and manage containers in a cluster | Yes, when using Kubernetes |
+The important idea is:
+```text
+Dockerfile = build the image
+Docker Compose = run containers locally
+Kubernetes = run containers in a real cluster
+```
+So Kubernetes does not replace the `Dockerfile`. It mainly replaces the Compose file's job.
+## What The Dockerfile Does
+A `Dockerfile` is a recipe for building one container image.
+For example, for a Node.js backend, it may say:
+```dockerfile
+FROM node:20-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+EXPOSE 3000
+CMD ["npm", "start"]
+```
+This file answers:
+```text
+How do I package my app into a container image?
+```
+It defines things like:
+- base image;
+- working directory;
+- dependencies;
+- copied source code;
+- build steps;
+- startup command.
+After this file exists, Docker can build an image.
+Run this from the project root where the `Dockerfile` exists to build the app image locally and confirm the image can be produced:
+```bash
+docker build -t my-app:local .
+```
+After building, the output is an image:
+```text
+my-app:local
+```
+That image can then be used by Docker Compose, Kubernetes, or any container platform.
+## What Docker Compose Does
+Docker Compose is used when one app needs multiple containers to run together.
+Example:
+```yaml
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgres://user:password@db:5432/app_db
+    depends_on:
+      - db
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: app_db
+    ports:
+      - "5432:5432"
+```
+This file answers:
+```text
+How do I start my app, database, Redis, queue, and other services together on one machine?
+```
+Compose is useful for local development because it is simple:
+```text
+one command
+→ app starts
+→ database starts
+→ network is created
+→ environment variables are injected
+→ ports are exposed
+```
+Run this from the folder containing `docker-compose.yml` or `compose.yaml` to start the local development stack and verify the services can talk to each other:
+```bash
+docker compose up
+```
+So in local development, Compose is very convenient.
+## What Kubernetes Replaces
+Kubernetes is not just another Compose file. It is a container orchestration system.
+It handles:
+- running containers across many machines;
+- restarting failed containers;
+- scaling replicas;
+- service discovery;
+- load balancing;
+- rolling deployments;
+- secrets and config;
+- health checks;
+- cluster networking.
+This is why Kubernetes replaces the runtime orchestration role of Compose.
+In Compose, you might write:
+```yaml
+services:
+  app:
+    image: my-app:latest
+    ports:
+      - "3000:3000"
+```
+In Kubernetes, that becomes several resources.
+Example `Deployment`:
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      containers:
+        - name: my-app
+          image: my-app:latest
+          ports:
+            - containerPort: 3000
+```
+Example `Service`:
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-app-service
+spec:
+  selector:
+    app: my-app
+  ports:
+    - port: 80
+      targetPort: 3000
+```
+Compose puts app runtime, networking, and local service connection into one file.
+Kubernetes separates them into clearer resources:
+| Compose Concept | Kubernetes Equivalent |
+| --- | --- |
+| `services.app` | `Deployment` |
+| `ports` | `Service` / `Ingress` |
+| `environment` | `ConfigMap` / `Secret` |
+| `depends_on` | readiness checks, retries, service discovery |
+| `restart` | Kubernetes controller behavior |
+| local network | cluster networking |
+| scaling manually | `replicas`, HPA |
+## Why Compose Is Usually Removed In Kubernetes Projects
+The Compose file is often removed from the deployment flow because Kubernetes already controls how containers run.
+If both Compose and Kubernetes are used for production orchestration, the project has two sources of truth:
+```text
+docker-compose.yml says app runs one way
+k8s YAML says app runs another way
+```
+That causes confusion.
+For example:
+| Concern | Compose | Kubernetes |
+| --- | --- | --- |
+| How many app instances? | `docker compose up --scale app=3` | `replicas: 3` |
+| How to expose app? | `ports` | `Service` and `Ingress` |
+| Where to store secrets? | environment variables or `.env` | `Secret` |
+| How to restart failed app? | restart policy | controller reconciliation |
+| How to update app? | recreate container | rolling update |
+In a real Kubernetes deployment, the source of truth should be Kubernetes manifests, Helm chart, Kustomize config, or a GitOps repo.
+The Compose file can still exist for local development, but it should not be treated as the production deployment definition.
+## The Correct Mental Model
+The clean mental model is this:
+```text
+Source code
+   ↓
+Dockerfile
+   ↓
+Docker image
+   ↓
+Container runtime
+```
+Then the question becomes:
+```text
+Who runs the image?
+```
+There are different answers:
+| Environment | Tool |
+| --- | --- |
+| One container locally | `docker run` |
+| Multiple containers locally | Docker Compose |
+| Production cluster | Kubernetes |
+| Managed serverless container platform | Cloud Run, ECS, Azure Container Apps, etc. |
+So the Dockerfile is closer to the build layer.
+Compose and Kubernetes are closer to the run layer.
+## Practical Workflow
+A common workflow looks like this:
+```text
+1. Write application code
+2. Write Dockerfile
+3. Build Docker image
+4. Use Compose for local database, Redis, queue, and app testing
+5. Push image to image registry
+6. Use Kubernetes manifests or Helm to deploy the image
+```
+Run this from the project root to build the production image before pushing it to a registry:
+```bash
+docker build -t registry.example.com/my-app:1.0.0 .
+```
+Run this after logging into your image registry to upload the image so Kubernetes nodes can pull it:
+```bash
+docker push registry.example.com/my-app:1.0.0
+```
+Run this from the folder containing Kubernetes YAML files to apply the deployment into the current Kubernetes cluster context:
+```bash
+kubectl apply -f k8s/
+```
+The final relationship is:
+```text
+Dockerfile stays.
+Docker Compose may stay for local development.
+Kubernetes replaces Compose for production orchestration.
+```
+## Common Mistake
+A beginner mistake is thinking:
+```text
+Kubernetes replaces Docker.
+```
+That is not the accurate idea.
+A better version is:
+```text
+Kubernetes manages containers that were usually built from Docker images.
+```
+Another beginner mistake is thinking:
+```text
+If I use Kubernetes, I do not need Dockerfile.
+```
+Usually wrong.
+Kubernetes still needs an image to run. The `Dockerfile` is still the normal way to produce that image.
+## The Main Principle
+Separate build from orchestration.
+```text
+Dockerfile answers:
+How is the application packaged?
+Docker Compose answers:
+How do I run this small system locally?
+Kubernetes answers:
+How do I run this system reliably in a cluster?
+```
+Once this separation is clear, the file relationship becomes simple: Kubernetes normally replaces the Compose deployment role, but it does not replace the Dockerfile.
+</Lang>
+<Lang lang="zh">
+当我们谈 Docker 的时候，最常看到的两个文件通常是 `Dockerfile` 和 `docker-compose.yml`。它们看起来都跟 Docker 有关，但职责完全不同。等项目后面加入 Kubernetes，通常不是把所有 Docker 文件都删掉，而是 `Dockerfile` 继续保留，`docker-compose.yml` 的部署职责被 Kubernetes YAML 或 Helm 取代。
+## Short Answer
+对，常见的两个文件通常是：
+```text
+Dockerfile
+docker-compose.yml
+```
+但是它们不是同一种东西。
+| 文件 | 主要职责 | 加入 Kubernetes 后还会用吗 |
+| --- | --- | --- |
+| `Dockerfile` | 描述如何 build 一个应用镜像 | 通常会继续用 |
+| `docker-compose.yml` / `compose.yaml` | 描述如何在本地一起启动多个 container | 通常被替代 |
+| Kubernetes YAML | 描述如何在 cluster 里面运行、扩展、暴露和管理 container | 使用 Kubernetes 时会用 |
+核心理解是：
+```text
+Dockerfile = build image
+Docker Compose = local run containers
+Kubernetes = production cluster run containers
+```
+所以 Kubernetes 通常不是取代 `Dockerfile`，而是取代 Docker Compose 在部署和运行层面的职责。
+## What The Dockerfile Does
+`Dockerfile` 是用来 build container image 的说明书。
+例如一个 Node.js backend 可能会这样写：
+```dockerfile
+FROM node:20-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+EXPOSE 3000
+CMD ["npm", "start"]
+```
+它回答的问题是：
+```text
+我要怎样把这个 app 打包成一个 container image？
+```
+它定义的东西包括：
+- base image；
+- 工作目录；
+- dependencies；
+- source code copy；
+- build step；
+- container 启动命令。
+有了这个文件之后，Docker 就可以 build 出 image。
+在有 `Dockerfile` 的 project root 执行这个命令，用来确认本地能不能成功 build 出应用 image：
+```bash
+docker build -t my-app:local .
+```
+build 出来的结果是一个 image：
+```text
+my-app:local
+```
+这个 image 后面可以交给 Docker Compose 跑，也可以交给 Kubernetes 跑。
+## What Docker Compose Does
+Docker Compose 是用来一次过启动多个 container 的。
+例如一个 backend 通常不只是 app 本身，还需要 database、Redis、queue 等服务。
+例子：
+```yaml
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgres://user:password@db:5432/app_db
+    depends_on:
+      - db
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: app_db
+    ports:
+      - "5432:5432"
+```
+这个文件回答的问题是：
+```text
+我要怎样在一台电脑上同时启动 app、database、Redis、queue 这些服务？
+```
+Compose 适合 local development，因为它简单：
+```text
+一个 command
+→ app 启动
+→ database 启动
+→ network 创建好
+→ environment variables 注入
+→ ports 暴露出来
+```
+在有 `docker-compose.yml` 或 `compose.yaml` 的 folder 执行这个命令，用来启动本地开发环境并检查服务之间能不能互相连接：
+```bash
+docker compose up
+```
+所以 Compose 很适合本地开发，不适合拿来理解成完整的 production cluster 部署系统。
+## What Kubernetes Replaces
+Kubernetes 不是另一个版本的 Compose file。Kubernetes 是 container orchestration system。
+它负责：
+- 在多台机器上运行 container；
+- container 挂掉后自动重启；
+- scale 多个 replicas；
+- service discovery；
+- load balancing；
+- rolling deployment；
+- secrets 和 config 管理；
+- health check；
+- cluster networking。
+所以 Kubernetes 取代的是 Compose 的 runtime orchestration 角色。
+在 Compose 里面，可能这样写：
+```yaml
+services:
+  app:
+    image: my-app:latest
+    ports:
+      - "3000:3000"
+```
+到了 Kubernetes，通常会拆成多个资源。
+例如 `Deployment`：
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      containers:
+        - name: my-app
+          image: my-app:latest
+          ports:
+            - containerPort: 3000
+```
+例如 `Service`：
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-app-service
+spec:
+  selector:
+    app: my-app
+  ports:
+    - port: 80
+      targetPort: 3000
+```
+Compose 通常把 app runtime、networking、本地服务连接写在一个文件里。
+Kubernetes 会把这些职责拆成更明确的资源：
+| Compose 概念 | Kubernetes 对应概念 |
+| --- | --- |
+| `services.app` | `Deployment` |
+| `ports` | `Service` / `Ingress` |
+| `environment` | `ConfigMap` / `Secret` |
+| `depends_on` | readiness check、retry、service discovery |
+| `restart` | Kubernetes controller behavior |
+| local network | cluster networking |
+| 手动 scale | `replicas`、HPA |
+## Why Compose Is Usually Removed In Kubernetes Projects
+当项目真的用 Kubernetes 部署时，`docker-compose.yml` 通常不会再作为 production deployment 的 source of truth。
+原因是 Kubernetes 已经负责 container 怎样运行。
+如果 production 同时依赖 Compose 和 Kubernetes，就会出现两个 source of truth：
+```text
+docker-compose.yml 说 app 应该这样跑
+k8s YAML 说 app 应该那样跑
+```
+这会让系统变乱。
+例如：
+| 问题 | Compose | Kubernetes |
+| --- | --- | --- |
+| app 要跑几个 instance | `docker compose up --scale app=3` | `replicas: 3` |
+| app 怎样暴露出去 | `ports` | `Service` 和 `Ingress` |
+| secret 放哪里 | environment variables 或 `.env` | `Secret` |
+| app 挂了怎样重启 | restart policy | controller reconciliation |
+| app 怎样更新 | recreate container | rolling update |
+在真实 Kubernetes deployment 里面，source of truth 通常应该是：
+```text
+Kubernetes manifests
+Helm chart
+Kustomize config
+GitOps repo
+```
+Compose 还是可以保留给 local development 用，但不应该再当成 production deployment 定义。
+## The Correct Mental Model
+比较清楚的理解方式是：
+```text
+Source code
+   ↓
+Dockerfile
+   ↓
+Docker image
+   ↓
+Container runtime
+```
+然后再问：
+```text
+是谁负责运行这个 image？
+```
+不同环境会有不同答案：
+| 环境 | 工具 |
+| --- | --- |
+| 本地跑一个 container | `docker run` |
+| 本地跑多个 container | Docker Compose |
+| production cluster | Kubernetes |
+| managed container platform | Cloud Run、ECS、Azure Container Apps 等 |
+所以 `Dockerfile` 比较接近 build layer。
+Docker Compose 和 Kubernetes 比较接近 run layer / orchestration layer。
+## Practical Workflow
+一个常见流程是：
+```text
+1. 写 application code
+2. 写 Dockerfile
+3. build Docker image
+4. 用 Compose 在本地启动 database、Redis、queue 和 app
+5. push image 到 image registry
+6. 用 Kubernetes manifests 或 Helm deploy 这个 image
+```
+在 project root 执行这个命令，用来 build production image，之后才可以 push 到 registry：
+```bash
+docker build -t registry.example.com/my-app:1.0.0 .
+```
+登录 image registry 之后执行这个命令，用来把 image 上传，让 Kubernetes node 后面可以 pull：
+```bash
+docker push registry.example.com/my-app:1.0.0
+```
+在放 Kubernetes YAML 的 folder 执行这个命令，用来把部署配置 apply 到当前 Kubernetes cluster：
+```bash
+kubectl apply -f k8s/
+```
+最后关系就是：
+```text
+Dockerfile 保留。
+Docker Compose 可以保留给 local development。
+Kubernetes 取代 Compose 的 production orchestration 职责。
+```
+## Common Mistake
+初学者常见误解是：
+```text
+Kubernetes replaces Docker.
+```
+这个说法不准确。
+更准确的说法是：
+```text
+Kubernetes manages containers that were usually built from Docker images.
+```
+另一个误解是：
+```text
+用了 Kubernetes，就不需要 Dockerfile。
+```
+通常也是错的。
+Kubernetes 还是需要一个 image 来运行。`Dockerfile` 仍然是最常见的 image build 方式。
+## The Main Principle
+把 build 和 orchestration 分开理解。
+```text
+Dockerfile 回答：
+应用怎样被打包？
+Docker Compose 回答：
+我怎样在本地跑起这一小套系统？
+Kubernetes 回答：
+我怎样在 cluster 里面可靠地运行这一套系统？
+```
+理解这个分层之后，文件关系就很清楚：Kubernetes 通常会取代 Compose 的部署角色，但不会取代 Dockerfile。
+</Lang>
