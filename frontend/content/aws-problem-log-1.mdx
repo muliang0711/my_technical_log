@@ -1,0 +1,343 @@
+Filename: ec2-vockey-key-pair-ssh-problem.mdx
+
+---
+title: "EC2 SSH Problem: Selected Vockey but Missing Private Key"
+category: "Problem Logs"
+createdAt: "2026-06-23"
+summary: "A problem log about why EC2 SSH fails when the selected key pair or vockey does not match the private key on the local machine."
+readTime: "7 min read"
+tags:
+  - "AWS"
+  - "EC2"
+  - "SSH"
+  - "Debugging"
+featured: false
+series:
+  title: "AWS Beginner"
+  slug: "aws-beginner"
+  order: 2
+---
+<Lang lang="en">
+When launching an EC2 instance, the key pair choice looks small, but it directly decides whether you can SSH into the server later. The problem happens easily in AWS learning environments: you select the default `vockey` during launch, but your local SSH client does not have the matching private key file.
+## Symptom
+The EC2 instance launches successfully.
+The instance status looks normal:
+```text
+Instance state: Running
+Status check: Passed
+Public IPv4 address: Available
+```
+But when trying to SSH into the instance, the connection fails.
+Common symptoms:
+```text
+Permission denied (publickey)
+```
+or:
+```text
+No such file or directory: vockey.pem
+```
+or the user is simply not sure which `.pem` file should be used.
+The confusing part is that EC2 itself is not broken. The server is running. The issue is that the SSH private key on the local machine does not match the key pair selected during EC2 launch.
+## Context
+This problem usually happens in AWS Academy, AWS Learning Lab, or beginner AWS lab environments.
+There are two common key-pair paths:
+| Path | What Happens |
+| --- | --- |
+| Select default `vockey` | You must go back to the AWS Learning Lab area and download the matching private key file |
+| Create/register your own key pair first | You select your own key pair name during EC2 launch and use its downloaded `.pem` file for SSH |
+The important detail is this:
+```text
+The key pair must be selected before the EC2 instance is launched.
+```
+After launch, you cannot simply use any random `.pem` file. SSH only works if the private key on your local machine matches the public key attached to the EC2 instance during launch.
+## First Assumption
+The first assumption may be:
+```text
+The EC2 instance has a network problem.
+```
+or:
+```text
+The security group is blocking SSH.
+```
+These are possible, but they are not always the root cause.
+If the SSH error is:
+```text
+Permission denied (publickey)
+```
+then the problem is usually not the network. It means the client reached the server, but the server rejected the login key.
+That points toward a key mismatch, wrong username, or missing private key.
+## Debugging Path
+| Check | Result | Meaning |
+| --- | --- | --- |
+| EC2 is running | Instance state shows `Running` | The server exists and is started |
+| Public IP exists | EC2 has a public IPv4 address | There is an address to connect to |
+| Security group allows SSH | Inbound rule allows port `22` from your IP | Network access is probably allowed |
+| SSH shows `Permission denied (publickey)` | Server rejects the login key | The key or username is probably wrong |
+| Launch key pair shows `vockey` | EC2 was launched with default lab key | Local machine must use the matching `vockey.pem` |
+| Local machine lacks `vockey.pem` | SSH cannot use the selected key | Need to download the private key from AWS Learning Lab |
+Run this from your local terminal to confirm you are using the intended private key file for SSH:
+```bash
+ssh -i vockey.pem ec2-user@your-ec2-public-ip
+```
+If the EC2 instance uses Ubuntu instead of Amazon Linux, run this from your local terminal because Ubuntu AMIs usually use the `ubuntu` username:
+```bash
+ssh -i vockey.pem ubuntu@your-ec2-public-ip
+```
+If the file does not exist locally, the SSH command cannot work. The selected EC2 key pair and the local private key file must match.
+## Root Cause
+The root cause is:
+```text
+The EC2 instance was launched with a key pair, but the local SSH client did not have the matching private key file.
+```
+In the AWS Learning Lab case, if you select the default `vockey`, then the matching private key is not magically created on your laptop. You must go back to the AWS Learning Lab area and download the private key file used by that lab.
+A common wrong mental model is:
+```text
+I selected vockey in AWS, so SSH should automatically work.
+```
+The correct model is:
+```text
+EC2 stores the public key.
+Your laptop must have the matching private key.
+SSH works only when both sides match.
+```
+The private key is not installed into EC2. It is stored on your local machine and used by the SSH client.
+## Fix
+There are two clean ways to fix the problem.
+### Option 1: Use the Default Vockey
+If the EC2 instance was launched with the default `vockey`, then use the matching lab private key.
+The fix flow:
+```text
+Go back to AWS Learning Lab
+  ↓
+Find or download the private key file for vockey
+  ↓
+Save it locally as vockey.pem
+  ↓
+Use that file in the SSH command
+```
+Run this from the folder where `vockey.pem` is saved to SSH into an Amazon Linux EC2 instance:
+```bash
+ssh -i vockey.pem ec2-user@your-ec2-public-ip
+```
+On Linux or macOS, run this from the key file folder if SSH complains that the private key permissions are too open:
+```bash
+chmod 400 vockey.pem
+```
+### Option 2: Register Your Own Key Pair Before Launch
+If you do not want to rely on the default lab `vockey`, create or register your own key pair before launching EC2.
+The correct flow is:
+```text
+Create or import key pair first
+  ↓
+Download and save the private key file
+  ↓
+Launch EC2
+  ↓
+Select that exact key pair name during launch
+  ↓
+Use the matching private key file to SSH
+```
+For example, if your key file is named `my-ec2-key.pem`, run this from your local terminal to SSH into an Amazon Linux EC2 instance:
+```bash
+ssh -i my-ec2-key.pem ec2-user@your-ec2-public-ip
+```
+This avoids confusion because the key pair name selected during EC2 launch is the same key file you intentionally created and stored.
+## Prevention
+Before launching EC2, use this checklist:
+| Step | Check |
+| --- | --- |
+| 1 | Decide whether to use default `vockey` or your own key pair |
+| 2 | Make sure the private key file already exists on your local machine |
+| 3 | During EC2 launch, select the matching key pair name |
+| 4 | After launch, use the correct SSH username for the selected operating system |
+| 5 | Check security group inbound rule for SSH port `22` |
+| 6 | Keep the `.pem` file safe and do not share it |
+A good naming practice is:
+```text
+Key pair name in AWS: my-ec2-key
+Local private key: my-ec2-key.pem
+```
+Avoid this situation:
+```text
+EC2 selected key pair: vockey
+Local SSH file: random-key.pem
+```
+That will not work because the private key does not match the public key attached to the EC2 instance.
+## The Main Principle
+For EC2 SSH access, the selected key pair at launch time is part of the server's access contract.
+The reusable rule is:
+```text
+Before launching EC2, register or confirm the key pair.
+During launch, select that exact key pair.
+After launch, SSH using the matching private key file.
+```
+If you selected the default `vockey`, go back to the AWS Learning Lab and download the matching private key file.
+If you want full control, create your own key pair before launch and select that key pair when creating the EC2 instance.
+The key lesson is simple:
+```text
+SSH failure is not always a server failure.
+Sometimes the server is fine, but the local private key does not match the key pair selected during launch.
+```
+</Lang>
+<Lang lang="zh">
+启动 EC2 时，key pair 的选择看起来只是一个小步骤，但它直接决定你之后能不能 SSH 进服务器。这个问题在 AWS Academy、AWS Learning Lab 这类学习环境里很容易发生：你启动 EC2 时选择了默认的 `vockey`，但是你的本地 SSH client 没有对应的 private key file。
+## Symptom
+EC2 instance 可以成功启动。
+表面上看起来一切正常：
+```text
+Instance state: Running
+Status check: Passed
+Public IPv4 address: Available
+```
+但是当你尝试 SSH 进去时，连接失败。
+常见现象：
+```text
+Permission denied (publickey)
+```
+或者：
+```text
+No such file or directory: vockey.pem
+```
+也可能是你根本不确定应该使用哪一个 `.pem` 文件。
+最容易误解的地方是：EC2 本身没有坏。服务器已经在运行。真正的问题是，你本地机器上的 SSH private key，和启动 EC2 时选择的 key pair 不匹配。
+## Context
+这个问题通常出现在 AWS Academy、AWS Learning Lab 或初学者 AWS lab 环境里。
+常见有两条 key pair 路线：
+| 路线 | 会发生什么 |
+| --- | --- |
+| 选择默认 `vockey` | 你必须回到 AWS Learning Lab 下载对应的 private key file |
+| 先创建 / 注册自己的 key pair | 启动 EC2 时选择自己的 key pair 名字，然后用对应 `.pem` 文件 SSH |
+最重要的细节是：
+```text
+Key pair 必须在 EC2 launch 之前选好。
+```
+EC2 启动之后，你不能随便拿一个 `.pem` 文件来 SSH。只有当本地 private key 和启动 EC2 时绑定的 public key 匹配，SSH 才会成功。
+## First Assumption
+一开始可能会以为：
+```text
+EC2 网络有问题。
+```
+或者：
+```text
+Security group 没有打开 SSH。
+```
+这些都有可能，但不一定是根因。
+如果 SSH error 是：
+```text
+Permission denied (publickey)
+```
+那通常不是网络完全不通。它更像是 client 已经碰到 server 了，但是 server 不接受你提供的 key。
+这时更应该怀疑 key 不匹配、username 错误，或者本地没有对应的 private key。
+## Debugging Path
+| 检查 | 结果 | 意思 |
+| --- | --- | --- |
+| EC2 是否运行 | Instance state 是 `Running` | 服务器已经启动 |
+| 是否有 Public IP | EC2 有 public IPv4 address | 有地址可以连接 |
+| Security group 是否允许 SSH | Inbound rule 允许你的 IP 访问 port `22` | 网络访问大概率没问题 |
+| SSH 显示 `Permission denied (publickey)` | Server 拒绝登录 key | key 或 username 可能错了 |
+| Launch key pair 是 `vockey` | EC2 是用默认 lab key 启动的 | 本地必须使用对应的 `vockey.pem` |
+| 本地没有 `vockey.pem` | SSH 没有正确 private key 可用 | 需要回 AWS Learning Lab 下载 private key |
+在本地 terminal 运行这条命令，可以确认你正在用指定的 private key file 连接 EC2：
+```bash
+ssh -i vockey.pem ec2-user@your-ec2-public-ip
+```
+如果 EC2 使用的是 Ubuntu，不是 Amazon Linux，那么在本地 terminal 运行这条命令，因为 Ubuntu AMI 通常使用 `ubuntu` 作为 username：
+```bash
+ssh -i vockey.pem ubuntu@your-ec2-public-ip
+```
+如果本地根本没有这个 key file，SSH command 就不可能成功。EC2 选择的 key pair 和本地 private key file 必须是同一组。
+## Root Cause
+根因是：
+```text
+EC2 启动时绑定了某个 key pair，但是本地 SSH client 没有对应的 private key file。
+```
+在 AWS Learning Lab 里，如果你启动 EC2 时选择的是默认 `vockey`，这个 private key 不会自动出现在你的电脑上。你需要回到 AWS Learning Lab 的相关区域，把对应的 private key file 下载下来。
+常见的错误理解是：
+```text
+我在 AWS 里面选了 vockey，所以 SSH 应该自动可以用。
+```
+正确理解应该是：
+```text
+EC2 上保存的是 public key。
+你的电脑上必须有 matching private key。
+两边匹配，SSH 才能通过。
+```
+Private key 不是安装进 EC2 的东西。它是放在你自己的电脑上，给 SSH client 使用的登录凭证。
+## Fix
+这个问题有两个干净的解决方式。
+### Option 1: 使用默认 Vockey
+如果 EC2 已经是用默认 `vockey` 启动的，那就使用对应的 lab private key。
+修复流程：
+```text
+回到 AWS Learning Lab
+  ↓
+找到或下载 vockey 对应的 private key file
+  ↓
+本地保存成 vockey.pem
+  ↓
+SSH 时使用这个文件
+```
+在保存 `vockey.pem` 的目录运行这条命令，可以 SSH 进入 Amazon Linux EC2：
+```bash
+ssh -i vockey.pem ec2-user@your-ec2-public-ip
+```
+如果你在 Linux 或 macOS 上，SSH 报 private key permission 太开放，可以在 key file 所在目录运行：
+```bash
+chmod 400 vockey.pem
+```
+### Option 2: Launch 前先注册自己的 Key Pair
+如果你不想依赖默认 lab `vockey`，那就先创建或注册自己的 key pair，再启动 EC2。
+正确流程是：
+```text
+先创建或导入 key pair
+  ↓
+下载并保存 private key file
+  ↓
+Launch EC2
+  ↓
+启动时选择这个 exact key pair name
+  ↓
+用 matching private key file SSH
+```
+比如你的 key file 叫 `my-ec2-key.pem`，可以在本地 terminal 运行这条命令连接 Amazon Linux EC2：
+```bash
+ssh -i my-ec2-key.pem ec2-user@your-ec2-public-ip
+```
+这样比较不容易混乱，因为你启动 EC2 时选择的 key pair name，就是你自己明确创建并保存的那个 key。
+## Prevention
+启动 EC2 前，用这份 checklist：
+| Step | Check |
+| --- | --- |
+| 1 | 决定要用默认 `vockey`，还是自己的 key pair |
+| 2 | 确认本地已经有对应的 private key file |
+| 3 | Launch EC2 时，选择 matching key pair name |
+| 4 | Launch 之后，用正确的 OS username SSH |
+| 5 | 检查 security group inbound rule 有没有开放 SSH port `22` |
+| 6 | 保管好 `.pem` 文件，不要分享给别人 |
+比较好的命名方式是：
+```text
+AWS 里面的 key pair name: my-ec2-key
+本地 private key: my-ec2-key.pem
+```
+避免这种情况：
+```text
+EC2 selected key pair: vockey
+Local SSH file: random-key.pem
+```
+这不会成功，因为 private key 和 EC2 绑定的 public key 不是同一组。
+## The Main Principle
+对 EC2 SSH 来说，launch 时选择的 key pair 是服务器访问规则的一部分。
+可复用规则是：
+```text
+Launch EC2 之前，先注册或确认 key pair。
+Launch EC2 的时候，选择那个 exact key pair。
+Launch 之后，用 matching private key file SSH。
+```
+如果你选择的是默认 `vockey`，就回到 AWS Learning Lab 下载对应的 private key file。
+如果你想自己控制，就在 launch 前先创建自己的 key pair，然后启动 EC2 时选择它。
+这次问题的核心教训是：
+```text
+SSH 失败不一定是 server 坏了。
+有时候 server 是正常的，只是本地 private key 和 launch 时选择的 key pair 不匹配。
+```
+</Lang>
