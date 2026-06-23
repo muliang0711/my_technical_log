@@ -1,0 +1,597 @@
+Filename: aws-beginner-ec2-basics.mdx
+
+---
+title: "AWS Beginner: EC2 Basics"
+category: "Software Development"
+createdAt: "2026-06-23"
+summary: "A beginner-friendly introduction to EC2, operating system choices, user data, security groups, inbound and outbound rules, and SSH key pairs."
+readTime: "8 min read"
+tags:
+  - "AWS"
+  - "Cloud"
+  - "EC2"
+  - "Linux"
+featured: false
+series:
+  title: "AWS Beginner"
+  slug: "aws-beginner"
+  order: 1
+---
+<Lang lang="en">
+EC2 is usually the first AWS service beginners meet because it feels close to a normal computer: you choose an operating system, launch a virtual machine, connect to it, install software, and run your application. The important difference is that this computer is created inside AWS, protected by cloud networking rules, and accessed using SSH or Remote Desktop instead of sitting physically in front of you.
+## Short Answer
+EC2 means **Elastic Compute Cloud**. It is AWS's virtual server service.
+You can think of it like this:
+```text
+EC2 instance = a rented computer inside AWS
+AMI = the operating system image used to create that computer
+Security group = firewall rules for the instance
+Key pair / vockey = the SSH login key
+User data = startup script that runs when the instance first launches
+```
+For a beginner, the most important launch-time choices are:
+| Choice | Meaning |
+| --- | --- |
+| AMI / operating system | Decide whether the server is Amazon Linux, Ubuntu, Red Hat, Windows, or another image |
+| Instance type | Decide CPU, memory, and network capacity |
+| Key pair / vockey | Decide which private key can SSH into the instance |
+| Security group | Decide which network traffic can enter or leave the instance |
+| User data | Optional startup script for automatic setup |
+The key idea: **EC2 is not only about starting a server. It is about starting a server with the correct OS, access key, firewall rules, and boot configuration.**
+## What EC2 Means
+EC2 gives you a virtual machine in the cloud.
+Instead of buying a physical computer, installing an operating system, and keeping it in your room or company office, AWS gives you a machine that runs inside an AWS data center.
+A simple mental model:
+```text
+Your laptop
+  ↓ SSH / RDP
+EC2 instance inside AWS
+  ↓
+Your app / database / web server / backend service
+```
+Common use cases:
+| Use Case | Example |
+| --- | --- |
+| Backend server | Run Node.js, Java Spring Boot, PHP, Go, or Python API |
+| Web server | Run Nginx or Apache |
+| Testing server | Create a temporary Linux machine for practice |
+| Database server | Run PostgreSQL or MySQL manually, although managed RDS is usually better |
+| Worker server | Run background jobs, crawlers, queue consumers, or bots |
+EC2 is flexible because you control the operating system, packages, runtime, ports, users, and installed services.
+That flexibility also means you are responsible for more things: patching, firewall rules, process management, monitoring, and security.
+## Operating System Choices
+When launching EC2, AWS asks you to choose an **AMI**, which means **Amazon Machine Image**.
+The AMI is the template used to create the server. It normally includes an operating system and some default configuration.
+Common beginner choices:
+| Operating System | Common Use | Notes |
+| --- | --- | --- |
+| Amazon Linux | General AWS learning, backend deployment, AWS tutorials | Lightweight and AWS-friendly |
+| Ubuntu | General Linux server, web backend, open-source tutorials | Very common in developer tutorials |
+| Red Hat Enterprise Linux | Enterprise Linux workloads | More common in companies with Red Hat standards |
+| Windows Server | .NET apps, Windows-based software, Remote Desktop usage | Usually accessed through RDP, not SSH |
+| Debian | Stable Linux server | Common for simple server workloads |
+### Amazon Linux
+Amazon Linux is AWS's own Linux distribution.
+It is a good beginner choice when following AWS tutorials because many AWS examples assume Amazon Linux.
+Typical user:
+```text
+ec2-user
+```
+Example SSH username:
+```text
+ec2-user@your-ec2-public-ip
+```
+### Ubuntu
+Ubuntu is popular because many online backend tutorials use it.
+Typical user:
+```text
+ubuntu
+```
+Example SSH username:
+```text
+ubuntu@your-ec2-public-ip
+```
+### Red Hat
+Red Hat Enterprise Linux is more common in enterprise environments.
+Typical user:
+```text
+ec2-user
+```
+It may be chosen when a company already uses Red Hat tooling, support, or compliance requirements.
+### Windows Server
+Windows EC2 is different from Linux EC2.
+Instead of SSH, beginners usually connect with **Remote Desktop Protocol**, also called **RDP**.
+Typical access flow:
+```text
+Download remote desktop file
+↓
+Decrypt Windows password using key pair
+↓
+Connect with RDP
+```
+Use Windows EC2 only when the workload needs Windows, such as certain .NET Framework apps, Windows services, or GUI-based software.
+## User Data
+User data is a script that runs when the EC2 instance starts for the first time.
+It is often used to install packages, update the server, create files, or start a basic service automatically.
+Example:
+```text
+Launch EC2
+  ↓
+EC2 boots
+  ↓
+User data script runs
+  ↓
+Packages are installed
+  ↓
+Application or web server starts
+```
+For example, on Amazon Linux, user data can install and start a web server.
+Put this in the EC2 user data field during instance launch to install Apache and create a simple test page:
+```bash
+#!/bin/bash
+dnf update -y
+dnf install -y httpd
+systemctl enable httpd
+systemctl start httpd
+echo "Hello from EC2" > /var/www/html/index.html
+```
+After launch, if the security group allows HTTP traffic, visiting the EC2 public IP in a browser should show:
+```text
+Hello from EC2
+```
+User data is useful because it reduces manual setup.
+However, beginners should remember this:
+```text
+User data is for bootstrapping.
+It is not a full deployment system.
+```
+For serious deployment, use better tools such as Docker, CI/CD, Ansible, Terraform, or AWS Systems Manager.
+## Security Group
+A security group is the firewall attached to the EC2 instance.
+It controls what traffic can enter and leave the instance.
+Simple mental model:
+```text
+Internet / Your laptop
+  ↓
+Security group rules
+  ↓
+EC2 instance
+```
+A security group has two directions:
+| Rule Type | Meaning |
+| --- | --- |
+| Inbound rules | Traffic allowed to enter the EC2 instance |
+| Outbound rules | Traffic allowed to leave the EC2 instance |
+Security groups are **allow rules**.
+That means:
+```text
+No rule = blocked
+Matching allow rule = allowed
+```
+You do not usually create explicit deny rules in a security group.
+## Inbound Rules
+Inbound rules control who can access your EC2 instance.
+Common inbound rules:
+| Type | Port | Source | Meaning |
+| --- | --- | --- | --- |
+| SSH | 22 | Your IP only | Allow your machine to log in to Linux EC2 |
+| HTTP | 80 | 0.0.0.0/0 | Allow everyone to access a public website |
+| HTTPS | 443 | 0.0.0.0/0 | Allow everyone to access a secure public website |
+| RDP | 3389 | Your IP only | Allow your machine to access Windows EC2 |
+For Linux EC2, the dangerous beginner mistake is opening SSH to everyone:
+```text
+SSH 22 from 0.0.0.0/0
+```
+That means any IP address on the internet can try to connect to your server.
+A safer beginner rule is:
+```text
+SSH 22 from My IP
+```
+This means only your current public IP address can attempt SSH login.
+For a basic public web server, the common rule is:
+```text
+HTTP 80 from 0.0.0.0/0
+HTTPS 443 from 0.0.0.0/0
+SSH 22 from My IP
+```
+## Outbound Rules
+Outbound rules control what the EC2 instance can access outside.
+Most default security groups allow all outbound traffic.
+That means the EC2 instance can call external services, download packages, connect to APIs, or fetch updates.
+Example outbound rule:
+| Type | Port | Destination | Meaning |
+| --- | --- | --- | --- |
+| All traffic | All | 0.0.0.0/0 | EC2 can access the internet |
+For beginners, default outbound rules are usually fine.
+You mainly customize outbound rules when working in stricter production environments where the server should only connect to known databases, APIs, or internal services.
+## Key Pair, SSH, and Vockey
+For Linux EC2, you normally connect using SSH.
+SSH needs a private key.
+In normal AWS accounts, this is called a **key pair**.
+In AWS Academy or some learning lab environments, the key may be called **vockey**.
+The important rule:
+```text
+The key pair or vockey must exist first.
+Then you must select it before launching the EC2 instance.
+```
+If you launch an EC2 instance without selecting the correct key pair, you may not be able to SSH into it.
+The private key is usually downloaded as a `.pem` file.
+Example:
+```text
+vockey.pem
+```
+The access flow is:
+```text
+Create or register vockey / key pair
+  ↓
+Launch EC2
+  ↓
+Select that key pair during launch
+  ↓
+Download or keep the .pem private key
+  ↓
+Use SSH to connect
+```
+Run this from your local terminal to connect to an Amazon Linux EC2 instance using the `vockey.pem` private key:
+```bash
+ssh -i vockey.pem ec2-user@your-ec2-public-ip
+```
+Run this from your local terminal to connect to an Ubuntu EC2 instance using the `vockey.pem` private key:
+```bash
+ssh -i vockey.pem ubuntu@your-ec2-public-ip
+```
+The username depends on the operating system.
+| OS | Common SSH User |
+| --- | --- |
+| Amazon Linux | `ec2-user` |
+| Ubuntu | `ubuntu` |
+| Red Hat | `ec2-user` |
+| Debian | `admin` or `debian` depending on image |
+If SSH fails, check these things first:
+| Problem | What To Check |
+| --- | --- |
+| Permission denied | Wrong key, wrong username, or key not selected during launch |
+| Connection timed out | Security group does not allow SSH, wrong public IP, or instance has no public network path |
+| Bad permissions on key | Private key file permission is too open |
+| Host unreachable | Instance is stopped, network route is wrong, or no public IP |
+On Linux or macOS, run this from the folder containing the key to restrict private key permissions before SSH:
+```bash
+chmod 400 vockey.pem
+```
+On Windows PowerShell, the permission issue is less common for beginners using OpenSSH, but the key file still must be protected and must not be shared.
+## Practical Launch Workflow
+A beginner EC2 launch should follow a fixed order.
+<FlowGraph
+  title="Beginner EC2 Launch Flow"
+  nodes={[
+    { "id": "1", "label": "Create or confirm vockey / key pair" },
+    { "id": "2", "label": "Choose AMI / operating system" },
+    { "id": "3", "label": "Choose instance type" },
+    { "id": "4", "label": "Select vockey / key pair before launch" },
+    { "id": "5", "label": "Create security group rules" },
+    { "id": "6", "label": "Add user data if needed" },
+    { "id": "7", "label": "Launch instance" },
+    { "id": "8", "label": "SSH or RDP into the server" }
+  ]}
+/>
+The safe beginner checklist:
+<CardGrid columns={2}>
+  <InfoCard title="Before Launch">
+    Make sure the key pair or vockey already exists. Select it during EC2 launch. If you skip this step, SSH access can become difficult or impossible.
+  </InfoCard>
+  <InfoCard title="Network Access">
+    Allow SSH only from your own IP. Allow HTTP or HTTPS from everyone only when the server is meant to be public.
+  </InfoCard>
+  <InfoCard title="Operating System">
+    Pick Amazon Linux or Ubuntu for beginner Linux practice. Pick Windows only when the software actually needs Windows.
+  </InfoCard>
+  <InfoCard title="Startup Script">
+    Use user data for simple boot setup, such as installing a web server. Do not treat it as a complete production deployment pipeline.
+  </InfoCard>
+</CardGrid>
+## The Main Principle
+EC2 is a virtual server, but launching it correctly is more than pressing the launch button.
+The reusable mental model is:
+```text
+AMI decides what the server is.
+Key pair decides who can log in.
+Security group decides what network traffic is allowed.
+User data decides what setup runs at boot.
+```
+For beginners, most EC2 problems come from three places:
+```text
+Wrong OS username
+Wrong or missing key pair / vockey
+Wrong security group inbound rule
+```
+So before debugging the application, first confirm that the server can be reached, the correct key was selected, and the required ports are open.
+</Lang>
+<Lang lang="zh">
+EC2 通常是初学 AWS 时最先接触的服务，因为它很像一台普通电脑：你选择操作系统，启动虚拟机，连接进去，安装软件，然后运行应用。不同点是，这台电脑不是放在你面前，而是运行在 AWS 的数据中心里面，并且要通过 SSH、远程桌面和云端防火墙规则来访问。
+## Short Answer
+EC2 的全名是 **Elastic Compute Cloud**。它可以理解成 AWS 提供的虚拟服务器。
+可以先这样记：
+```text
+EC2 instance = AWS 里面租来的一台电脑
+AMI = 创建这台电脑时使用的操作系统镜像
+Security group = 控制这台电脑网络访问的防火墙
+Key pair / vockey = 用来 SSH 登录的私钥
+User data = EC2 第一次启动时自动执行的脚本
+```
+初学者启动 EC2 时，最重要的是这几个选择：
+| 选择 | 意思 |
+| --- | --- |
+| AMI / 操作系统 | 决定服务器是 Amazon Linux、Ubuntu、Red Hat、Windows，还是其他系统 |
+| Instance type | 决定 CPU、内存和网络能力 |
+| Key pair / vockey | 决定哪一个私钥可以 SSH 进入服务器 |
+| Security group | 决定哪些网络流量可以进入或离开服务器 |
+| User data | 可选的启动脚本，用来自动安装和配置一些东西 |
+核心理解是：**EC2 不只是启动一台服务器，而是启动一台带有正确操作系统、访问密钥、防火墙规则和启动配置的服务器。**
+## What EC2 Means
+EC2 给你的是一台云端虚拟机。
+传统方式是你买一台实体电脑，自己安装操作系统，然后放在房间、办公室或机房里面。EC2 的方式是 AWS 直接在它的数据中心里面给你开一台机器。
+简单的数据流可以这样看：
+```text
+你的电脑
+  ↓ SSH / RDP
+AWS 里面的 EC2 instance
+  ↓
+你的 app / database / web server / backend service
+```
+常见用途：
+| 用途 | 例子 |
+| --- | --- |
+| 后端服务器 | 跑 Node.js、Java Spring Boot、PHP、Go、Python API |
+| Web server | 跑 Nginx 或 Apache |
+| 测试服务器 | 开一台临时 Linux 机器来练习 |
+| 数据库服务器 | 手动跑 PostgreSQL 或 MySQL，不过正式场景通常更建议用 RDS |
+| Worker server | 跑后台任务、crawler、queue consumer、Telegram bot |
+EC2 的好处是控制权很大。你可以控制操作系统、安装包、runtime、port、user 和 service。
+但控制权大也代表责任更多：系统更新、防火墙、进程管理、监控和安全都需要你自己处理。
+## Operating System Choices
+启动 EC2 时，AWS 会要求你选择 **AMI**，也就是 **Amazon Machine Image**。
+AMI 是创建服务器的模板，通常里面已经包含操作系统和一些默认配置。
+初学者常见选择：
+| 操作系统 | 适合场景 | 说明 |
+| --- | --- | --- |
+| Amazon Linux | AWS 学习、后端部署、AWS 官方教程 | 轻量，而且跟 AWS 环境配合很好 |
+| Ubuntu | 普通 Linux server、Web backend、开源教程 | 很多开发教程都会用 Ubuntu |
+| Red Hat Enterprise Linux | 企业 Linux workload | 公司有 Red Hat 标准、支持或合规需求时常见 |
+| Windows Server | .NET app、Windows 软件、远程桌面操作 | 通常用 RDP，不是 SSH |
+| Debian | 稳定型 Linux server | 适合简单稳定的服务器场景 |
+### Amazon Linux
+Amazon Linux 是 AWS 自己维护的 Linux distribution。
+如果你跟着 AWS 教程学习，Amazon Linux 通常是比较安全的选择，因为很多官方例子默认就是它。
+常见登录 user：
+```text
+ec2-user
+```
+SSH 时通常是：
+```text
+ec2-user@your-ec2-public-ip
+```
+### Ubuntu
+Ubuntu 很常见，因为大量后端和 Linux 教程都用它。
+常见登录 user：
+```text
+ubuntu
+```
+SSH 时通常是：
+```text
+ubuntu@your-ec2-public-ip
+```
+### Red Hat
+Red Hat Enterprise Linux 比较常出现在企业环境。
+常见登录 user：
+```text
+ec2-user
+```
+公司已经使用 Red Hat 工具链、技术支持或合规标准时，可能会选择它。
+### Windows Server
+Windows EC2 跟 Linux EC2 不太一样。
+Linux 通常用 SSH，Windows Server 通常用 **Remote Desktop Protocol**，也就是 **RDP**。
+典型访问流程：
+```text
+下载 remote desktop 文件
+↓
+用 key pair 解密 Windows password
+↓
+通过 RDP 连接进去
+```
+只有当你的软件真的需要 Windows 时，才比较适合选择 Windows EC2。比如某些 .NET Framework 应用、Windows service，或者需要 GUI 的 Windows 软件。
+## User Data
+User data 是 EC2 第一次启动时自动执行的脚本。
+它常用来更新系统、安装软件、创建文件，或者自动启动一个简单服务。
+流程可以这样看：
+```text
+启动 EC2
+  ↓
+EC2 开机
+  ↓
+执行 user data script
+  ↓
+安装 package
+  ↓
+启动 application 或 web server
+```
+比如在 Amazon Linux 上，user data 可以自动安装并启动一个 web server。
+在启动 EC2 时，把这段放进 user data field，可以安装 Apache 并创建一个简单测试页面：
+```bash
+#!/bin/bash
+dnf update -y
+dnf install -y httpd
+systemctl enable httpd
+systemctl start httpd
+echo "Hello from EC2" > /var/www/html/index.html
+```
+EC2 启动后，如果 security group 允许 HTTP 流量，用浏览器访问 EC2 public IP 应该会看到：
+```text
+Hello from EC2
+```
+User data 的价值是减少手动配置。
+但初学者要记住：
+```text
+User data 是用来做开机初始化的。
+它不是完整的生产部署系统。
+```
+正式部署通常会用 Docker、CI/CD、Ansible、Terraform 或 AWS Systems Manager 这类工具。
+## Security Group
+Security group 是挂在 EC2 上面的防火墙。
+它控制哪些流量可以进入 EC2，哪些流量可以从 EC2 出去。
+简单模型：
+```text
+Internet / 你的电脑
+  ↓
+Security group rules
+  ↓
+EC2 instance
+```
+Security group 有两个方向：
+| 规则类型 | 意思 |
+| --- | --- |
+| Inbound rules | 控制哪些流量可以进入 EC2 |
+| Outbound rules | 控制 EC2 可以访问外部哪些地方 |
+Security group 本质上是 **allow rule**。
+也就是说：
+```text
+没有规则 = 不允许
+符合 allow rule = 允许
+```
+Security group 通常不是写 deny rule，而是只写允许哪些流量通过。
+## Inbound Rules
+Inbound rules 控制谁可以访问你的 EC2。
+常见 inbound rules：
+| 类型 | Port | Source | 意思 |
+| --- | --- | --- | --- |
+| SSH | 22 | Your IP only | 只允许你的电脑登录 Linux EC2 |
+| HTTP | 80 | 0.0.0.0/0 | 允许所有人访问公开网站 |
+| HTTPS | 443 | 0.0.0.0/0 | 允许所有人访问公开 HTTPS 网站 |
+| RDP | 3389 | Your IP only | 只允许你的电脑远程连接 Windows EC2 |
+Linux EC2 初学者最危险的错误是把 SSH 开给所有人：
+```text
+SSH 22 from 0.0.0.0/0
+```
+这代表整个互联网的 IP 都可以尝试连接你的服务器。
+比较安全的初学者做法是：
+```text
+SSH 22 from My IP
+```
+也就是只有你当前的 public IP 可以尝试 SSH 登录。
+如果你要做一个公开网站，常见规则是：
+```text
+HTTP 80 from 0.0.0.0/0
+HTTPS 443 from 0.0.0.0/0
+SSH 22 from My IP
+```
+## Outbound Rules
+Outbound rules 控制 EC2 可以访问外部什么地方。
+大多数默认 security group 会允许所有 outbound traffic。
+这代表 EC2 可以下载 package、访问外部 API、连接其他服务或更新系统。
+常见 outbound rule：
+| 类型 | Port | Destination | 意思 |
+| --- | --- | --- | --- |
+| All traffic | All | 0.0.0.0/0 | EC2 可以访问互联网 |
+对初学者来说，默认 outbound rule 通常可以先保留。
+只有在比较严格的生产环境，才会特意限制 outbound，例如只允许服务器访问指定数据库、指定 API 或内部服务。
+## Key Pair, SSH, and Vockey
+Linux EC2 通常用 SSH 连接。
+SSH 需要 private key。
+在普通 AWS account 里面，这个通常叫 **key pair**。
+在 AWS Academy 或一些学习实验环境里面，这个 key 可能叫 **vockey**。
+最重要的规则：
+```text
+Key pair 或 vockey 必须先存在。
+然后你必须在 launch EC2 之前选择它。
+```
+如果你启动 EC2 时没有选择正确的 key pair，之后可能无法 SSH 进入那台 EC2。
+Private key 通常是一个 `.pem` 文件。
+例如：
+```text
+vockey.pem
+```
+访问流程：
+```text
+先创建或注册 vockey / key pair
+  ↓
+Launch EC2
+  ↓
+启动前选择那个 key pair
+  ↓
+下载或保留 .pem private key
+  ↓
+用 SSH 连接 EC2
+```
+在本地 terminal 运行这条命令，可以用 `vockey.pem` 连接 Amazon Linux EC2：
+```bash
+ssh -i vockey.pem ec2-user@your-ec2-public-ip
+```
+在本地 terminal 运行这条命令，可以用 `vockey.pem` 连接 Ubuntu EC2：
+```bash
+ssh -i vockey.pem ubuntu@your-ec2-public-ip
+```
+不同操作系统的 username 不一样。
+| OS | 常见 SSH User |
+| --- | --- |
+| Amazon Linux | `ec2-user` |
+| Ubuntu | `ubuntu` |
+| Red Hat | `ec2-user` |
+| Debian | `admin` 或 `debian`，取决于 image |
+如果 SSH 失败，优先检查这些地方：
+| 问题 | 需要检查什么 |
+| --- | --- |
+| Permission denied | key 错了、username 错了，或者 launch 时没有选择对应 key |
+| Connection timed out | security group 没开 SSH、public IP 错了，或者 EC2 没有公网路径 |
+| Bad permissions on key | private key 文件权限太开放 |
+| Host unreachable | instance 停了、网络路由不对，或者没有 public IP |
+在 Linux 或 macOS 上，在 key 所在目录运行这条命令，可以限制 private key 权限：
+```bash
+chmod 400 vockey.pem
+```
+Windows PowerShell 使用 OpenSSH 时，初学者不一定会遇到同样的权限报错，但 private key 仍然必须保管好，不能发给别人。
+## Practical Launch Workflow
+初学者启动 EC2 时，最好按固定顺序来。
+<FlowGraph
+  title="Beginner EC2 Launch Flow"
+  nodes={[
+    { "id": "1", "label": "先创建或确认 vockey / key pair" },
+    { "id": "2", "label": "选择 AMI / 操作系统" },
+    { "id": "3", "label": "选择 instance type" },
+    { "id": "4", "label": "启动前选择 vockey / key pair" },
+    { "id": "5", "label": "设置 security group rules" },
+    { "id": "6", "label": "需要时填写 user data" },
+    { "id": "7", "label": "Launch instance" },
+    { "id": "8", "label": "通过 SSH 或 RDP 连接服务器" }
+  ]}
+/>
+安全的初学者 checklist：
+<CardGrid columns={2}>
+  <InfoCard title="Before Launch">
+    先确认 key pair 或 vockey 已经存在。启动 EC2 时一定要选择它。如果跳过这一步，之后 SSH 可能会很麻烦，甚至进不去。
+  </InfoCard>
+  <InfoCard title="Network Access">
+    SSH 只开放给自己的 IP。只有当服务器真的要公开给用户访问时，才把 HTTP 或 HTTPS 开给所有人。
+  </InfoCard>
+  <InfoCard title="Operating System">
+    初学 Linux EC2 可以先选 Amazon Linux 或 Ubuntu。只有软件真的需要 Windows 时，才选择 Windows Server。
+  </InfoCard>
+  <InfoCard title="Startup Script">
+    User data 适合做简单开机初始化，例如安装 web server。不要把它当成完整的生产部署流程。
+  </InfoCard>
+</CardGrid>
+## The Main Principle
+EC2 是虚拟服务器，但正确启动 EC2 不只是按下 launch。
+可复用的理解方式是：
+```text
+AMI 决定这台服务器是什么系统。
+Key pair 决定谁可以登录。
+Security group 决定哪些网络流量可以进出。
+User data 决定开机时自动执行什么初始化。
+```
+初学者大多数 EC2 问题都来自三个地方：
+```text
+OS username 用错
+Key pair / vockey 选错或没选
+Security group inbound rule 配错
+```
+所以在怀疑应用代码之前，先确认服务器能不能连上、启动时有没有选对 key，以及需要的 port 有没有打开。
+</Lang>
