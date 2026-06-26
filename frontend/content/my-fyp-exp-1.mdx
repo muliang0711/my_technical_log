@@ -1,0 +1,491 @@
+---
+title: "Lazy Loading And Stage-by-Stage Map Screen Loading"
+category: "Software Development"
+createdAt: "2026-06-26"
+summary: "A practical note on using lazy loading and priority-based loading to prevent a heavy map screen from blocking the app."
+readTime: "8 min read"
+tags:
+  - "Frontend"
+  - "Performance"
+  - "React Native"
+  - "Architecture"
+featured: false
+---
+
+<Lang lang="en">
+
+Lazy loading means delaying non-critical work until it is actually needed. Stage-by-stage loading means splitting a heavy screen into loading phases based on priority. I learned this because my FYP map screen is doing too many expensive things at the same time: loading the map, initializing sensors, receiving sensor data, rendering Bob, calculating position, and rendering route/map UI.
+
+## Short Answer
+
+A heavy map screen should not load everything at once.
+
+It should load in priority stages:
+
+```text
+Stage 1: Show basic screen shell
+Stage 2: Load and render the map
+Stage 3: Render route and Bob
+Stage 4: Start sensors
+Stage 5: Process sensor data and update position
+Stage 6: Enable advanced/debug/extra overlays
+```
+
+The main idea is simple:
+
+```text
+First make the page visible.
+Then make the map usable.
+Then start expensive real-time systems.
+```
+
+## What Lazy Loading Means
+
+Lazy loading means the app does not immediately load every module, asset, or system when the page opens.
+
+Instead of doing this:
+
+```text
+User opens map page
+→ load map image
+→ initialize sensor
+→ receive sensor data
+→ calculate position
+→ render Bob
+→ render route
+→ render overlays
+→ render labels
+→ run camera follow
+→ update navigation state
+```
+
+We delay anything that is not required for the first usable view.
+
+For example:
+
+```text
+User opens map page
+→ show loading shell
+→ load map first
+→ render basic map
+→ then initialize sensors
+→ then render Bob
+→ then start real-time updates
+```
+
+This makes the screen feel faster because the first render has less work.
+
+## Why My Map Screen Became Heavy
+
+My map page is not a normal static page. It is closer to a small real-time engine.
+
+It may need to do all of these jobs:
+
+| Work | Why It Is Expensive |
+| --- | --- |
+| Load map image | Large image decode can block the first render |
+| Render map | The map may contain many rooms, labels, routes, overlays, and markers |
+| Initialize sensors | Sensor permission, subscription, and sampling can start expensive native work |
+| Receive sensor data | Sensor data can arrive many times per second |
+| Calculate position | Position calculation may involve step detection, heading, constraints, or particle filtering |
+| Render Bob | Bob needs position, heading, animation, and route snapping |
+| Update camera | Camera follow, zoom, and pan can cause frequent UI updates |
+
+The problem is not one single task.
+
+The problem is that many tasks start during the same screen transition.
+
+## Loading Priority
+
+The important question is:
+
+```text
+What must be ready first for the user to feel the screen is working?
+```
+
+For a map page, the priority can be arranged like this:
+
+| Priority | Work | Reason |
+| --- | --- | --- |
+| Highest | Screen shell | User must see that navigation worked |
+| High | Basic map image | User needs the main visual context |
+| High | Room labels and basic route | User needs to understand the destination |
+| Medium | Bob render | Useful, but can appear after the map |
+| Medium | Sensor initialization | Important, but should not block first paint |
+| Lower | Live sensor updates | Only useful after the map and Bob are ready |
+| Lowest | Debug overlays | Not needed for normal user experience |
+
+This is the key mindset:
+
+```text
+Not all work has the same priority.
+```
+
+## Stage-by-Stage Loading Design
+
+A better map loading flow should look like this:
+
+<FlowGraph
+  title="Priority-Based Map Loading"
+  nodes={[
+    { id: "1", label: "Open Map Screen" },
+    { id: "2", label: "Render Basic UI Shell" },
+    { id: "3", label: "Load Map Image" },
+    { id: "4", label: "Render Labels And Route" },
+    { id: "5", label: "Render Bob" },
+    { id: "6", label: "Start Sensors" },
+    { id: "7", label: "Process Sensor Data" },
+    { id: "8", label: "Enable Extra Overlays" }
+  ]}
+/>
+
+The page should not wait for sensors before showing the map.
+
+The page should not wait for debug overlays before rendering Bob.
+
+The page should not calculate live movement before the map is visually ready.
+
+## Example Loading State Model
+
+The screen can be controlled using loading stages.
+
+```typescript
+type MapLoadingStage =
+  | "screen_ready"
+  | "map_loading"
+  | "map_ready"
+  | "route_ready"
+  | "bob_ready"
+  | "sensors_starting"
+  | "tracking_ready";
+```
+
+The UI can behave differently based on the stage:
+
+```typescript
+function getMapStatusText(stage: MapLoadingStage) {
+  switch (stage) {
+    case "screen_ready":
+      return "Preparing map";
+    case "map_loading":
+      return "Loading map";
+    case "map_ready":
+      return "Map ready";
+    case "route_ready":
+      return "Route ready";
+    case "bob_ready":
+      return "Position marker ready";
+    case "sensors_starting":
+      return "Starting movement tracking";
+    case "tracking_ready":
+      return "Navigation ready";
+  }
+}
+```
+
+This makes loading easier to debug because the app knows exactly which phase it is in.
+
+## Practical Workflow
+
+For a heavy map screen, I should debug and improve it using this workflow:
+
+<CardGrid columns={2}>
+  <InfoCard title="1. Split First Render">
+    Only render the screen shell and basic map during the first mount. Avoid starting every system immediately.
+  </InfoCard>
+
+  <InfoCard title="2. Delay Sensors">
+    Start sensor subscriptions after the map is visible. Sensor data is important, but it should not block the map from appearing.
+  </InfoCard>
+
+  <InfoCard title="3. Load Visuals By Priority">
+    Load the base map first, then route, then Bob, then optional overlays.
+  </InfoCard>
+
+  <InfoCard title="4. Avoid Heavy State Updates">
+    Do not let high-frequency sensor data update React state too often. Buffer, throttle, or move calculation outside the render path.
+  </InfoCard>
+</CardGrid>
+
+A possible loading sequence:
+
+```text
+1. Navigate to MapScreen
+2. Render header, buttons, and map container
+3. Load base map image
+4. Render route and labels
+5. Render Bob using initial/default position
+6. Start sensor permission/subscription
+7. Start movement calculation
+8. Update Bob position gradually
+```
+
+## Important Trade-Offs
+
+Lazy loading improves first-load performance, but it also adds complexity.
+
+| Decision | Benefit | Risk |
+| --- | --- | --- |
+| Delay sensor start | Faster first render | Bob may not move immediately |
+| Load map first | User sees useful UI earlier | More loading states to manage |
+| Delay debug overlays | Less render work | Harder to debug unless dev mode can enable them |
+| Throttle sensor updates | Smoother UI | Less real-time precision |
+| Split work into stages | Easier to reason about | More state management |
+
+The goal is not to delay everything.
+
+The goal is to delay the work that does not need to happen immediately.
+
+## The Main Principle
+
+A heavy screen should not start every expensive system at the same time.
+
+For my FYP map screen, the correct principle is:
+
+```text
+Render the minimum useful map first.
+Then progressively activate route, Bob, sensors, movement calculation, and extra overlays.
+```
+
+Lazy loading is not only about loading files later. It is about controlling when work starts.
+
+</Lang>
+
+<Lang lang="zh">
+
+Lazy loading 的意思是：不要一打开页面就把所有东西全部加载和启动。Stage-by-stage loading 的意思是：把一个很重的页面拆成多个加载阶段，然后根据优先级一步一步启动。今天会学到这个，是因为我的 FYP 地图页面太重了：它要加载地图、初始化 sensor、接收 sensor data、渲染 Bob、计算位置、渲染路线和地图。
+
+## Short Answer
+
+一个很重的地图页面，不应该一次性加载全部东西。
+
+它应该按优先级分阶段加载：
+
+```text
+阶段 1：先显示基本页面框架
+阶段 2：加载并渲染地图
+阶段 3：渲染路线和 Bob
+阶段 4：启动 sensors
+阶段 5：处理 sensor data 并更新位置
+阶段 6：开启额外 overlay / debug layer
+```
+
+核心思想很简单：
+
+```text
+先让页面看得见。
+再让地图可以用。
+最后才启动昂贵的实时系统。
+```
+
+## What Lazy Loading Means
+
+Lazy loading 就是 app 不要在页面打开的一瞬间，马上加载所有 module、asset 和系统。
+
+不要这样做：
+
+```text
+用户打开地图页面
+→ 加载地图图片
+→ 初始化 sensor
+→ 接收 sensor data
+→ 计算位置
+→ 渲染 Bob
+→ 渲染路线
+→ 渲染 overlay
+→ 渲染 label
+→ 启动 camera follow
+→ 更新 navigation state
+```
+
+更好的做法是：把不是第一时间必须用到的东西延后。
+
+例如：
+
+```text
+用户打开地图页面
+→ 先显示 loading shell
+→ 先加载地图
+→ 先渲染基本地图
+→ 然后初始化 sensor
+→ 然后渲染 Bob
+→ 然后启动实时更新
+```
+
+这样用户会感觉页面更快，因为第一次 render 要做的事情变少了。
+
+## Why My Map Screen Became Heavy
+
+我的地图页面不是普通静态页面，它更像一个小型 real-time engine。
+
+它可能同时做这些事情：
+
+| 工作 | 为什么重 |
+| --- | --- |
+| 加载地图图片 | 大 PNG / 大图片 decode 会拖慢第一次渲染 |
+| 渲染地图 | 地图可能有很多房间、label、路线、overlay、marker |
+| 初始化 sensors | sensor permission、subscription、sampling 都会启动 native 层工作 |
+| 接收 sensor data | sensor data 可能每秒来很多次 |
+| 计算位置 | 可能涉及 step detection、heading、constraints、particle filter |
+| 渲染 Bob | Bob 需要位置、方向、动画、路线吸附 |
+| 更新 camera | camera follow、zoom、pan 会触发频繁 UI 更新 |
+
+问题不一定是某一个功能写错。
+
+真正的问题是：太多重工作在同一个 screen transition 里面同时启动。
+
+## Loading Priority
+
+我们要先问一个问题：
+
+```text
+什么东西必须最先准备好，用户才会觉得这个页面已经可以用了？
+```
+
+对地图页面来说，优先级可以这样排：
+
+| 优先级 | 工作 | 原因 |
+| --- | --- | --- |
+| 最高 | 页面基本框架 | 用户要先看到页面真的打开了 |
+| 高 | 基础地图图片 | 用户需要主要视觉上下文 |
+| 高 | 房间 label 和基本路线 | 用户要知道目的地和路径 |
+| 中 | Bob 渲染 | 很重要，但可以在地图之后出现 |
+| 中 | Sensor 初始化 | 很重要，但不应该挡住第一次地图显示 |
+| 较低 | 实时 sensor update | 地图和 Bob 准备好后才有意义 |
+| 最低 | Debug overlay | 正常用户体验不需要它 |
+
+重点是：
+
+```text
+不是所有工作都有一样的优先级。
+```
+
+## Stage-by-Stage Loading Design
+
+更好的地图加载流程应该是：
+
+<FlowGraph
+  title="基于优先级的地图加载流程"
+  nodes={[
+    { id: "1", label: "打开 Map Screen" },
+    { id: "2", label: "渲染基本 UI 框架" },
+    { id: "3", label: "加载地图图片" },
+    { id: "4", label: "渲染 Label 和 Route" },
+    { id: "5", label: "渲染 Bob" },
+    { id: "6", label: "启动 Sensors" },
+    { id: "7", label: "处理 Sensor Data" },
+    { id: "8", label: "开启额外 Overlay" }
+  ]}
+/>
+
+页面不应该等 sensor 准备好才显示地图。
+
+页面不应该等 debug overlay 准备好才渲染 Bob。
+
+页面不应该在地图还没显示出来之前，就开始做大量实时 movement calculation。
+
+## Example Loading State Model
+
+我们可以用 loading stage 控制地图页面。
+
+```typescript
+type MapLoadingStage =
+  | "screen_ready"
+  | "map_loading"
+  | "map_ready"
+  | "route_ready"
+  | "bob_ready"
+  | "sensors_starting"
+  | "tracking_ready";
+```
+
+UI 可以根据不同 stage 显示不同状态：
+
+```typescript
+function getMapStatusText(stage: MapLoadingStage) {
+  switch (stage) {
+    case "screen_ready":
+      return "Preparing map";
+    case "map_loading":
+      return "Loading map";
+    case "map_ready":
+      return "Map ready";
+    case "route_ready":
+      return "Route ready";
+    case "bob_ready":
+      return "Position marker ready";
+    case "sensors_starting":
+      return "Starting movement tracking";
+    case "tracking_ready":
+      return "Navigation ready";
+  }
+}
+```
+
+这样 debug 也会更容易，因为 app 会清楚知道自己现在卡在哪一个阶段。
+
+## Practical Workflow
+
+对一个很重的地图页面，我应该用这个流程去优化：
+
+<CardGrid columns={2}>
+  <InfoCard title="1. 拆开第一次渲染">
+    第一次 mount 只渲染页面框架和基础地图，不要马上启动全部系统。
+  </InfoCard>
+
+  <InfoCard title="2. 延后启动 Sensors">
+    地图显示出来之后，再启动 sensor subscription。Sensor 很重要，但不应该挡住地图出现。
+  </InfoCard>
+
+  <InfoCard title="3. 视觉内容按优先级加载">
+    先加载 base map，再加载 route，再加载 Bob，最后才加载 optional overlays。
+  </InfoCard>
+
+  <InfoCard title="4. 避免高频 State 更新">
+    不要让 sensor data 高频率直接更新 React state。可以 buffer、throttle，或者把计算移出 render path。
+  </InfoCard>
+</CardGrid>
+
+一个比较合理的加载顺序：
+
+```text
+1. Navigate to MapScreen
+2. Render header, buttons, and map container
+3. Load base map image
+4. Render route and labels
+5. Render Bob using initial/default position
+6. Start sensor permission/subscription
+7. Start movement calculation
+8. Update Bob position gradually
+```
+
+## Important Trade-Offs
+
+Lazy loading 可以改善第一次加载速度，但会增加一点复杂度。
+
+| 决策 | 好处 | 风险 |
+| --- | --- | --- |
+| 延后启动 sensor | 第一次渲染更快 | Bob 不会马上移动 |
+| 先加载地图 | 用户更快看到有用 UI | 需要管理更多 loading state |
+| 延后 debug overlay | 减少渲染压力 | Debug 时需要另外打开 dev mode |
+| throttle sensor update | UI 更顺 | 实时精度可能下降 |
+| 分阶段启动系统 | 更容易推理和 debug | state 管理更复杂 |
+
+重点不是把所有东西都延后。
+
+重点是：不需要第一时间执行的工作，就不要挡住第一时间渲染。
+
+## The Main Principle
+
+一个重页面不应该在打开的一瞬间启动所有昂贵系统。
+
+对我的 FYP 地图页面来说，原则是：
+
+```text
+先渲染最小可用地图。
+然后逐步启动路线、Bob、sensors、movement calculation 和额外 overlay。
+```
+
+Lazy loading 不只是“晚点加载文件”。它更重要的意义是：控制工作什么时候开始。
+
+</Lang>
